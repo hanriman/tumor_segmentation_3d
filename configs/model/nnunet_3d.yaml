@@ -1,0 +1,30 @@
+# 3D nnU-Net Baseline Configuration (MONAI DynUNet with Deep Supervision)
+name: "nnunet_3d"
+spatial_dims: 3
+in_channels: 4
+out_channels: 1
+kernel_size:
+  - [3, 3, 3]
+  - [3, 3, 3]
+  - [3, 3, 3]
+  - [3, 3, 3]
+  - [3, 3, 3]
+strides:
+  - [1, 1, 1]
+  - [2, 2, 2]
+  - [2, 2, 2]
+  - [2, 2, 2]
+  - [2, 2, 2]
+upsample_kernel_size:
+  - [2, 2, 2]
+  - [2, 2, 2]
+  - [2, 2, 2]
+  - [2, 2, 2]
+filters: [32, 64, 128, 256, 512]
+norm_name: "instance"
+act_name: "leakyrelu"
+deep_supervision: true
+deep_supr_num: 3
+res_block: true
+learning_rate: 0.0003
+weight_decay: 0.00001

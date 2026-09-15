@@ -1,0 +1,41 @@
+# Environment & Dependencies
+.venv/
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Local Data & Heavy Binaries
+data/raw/
+data/interim/
+data/processed/
+outputs/
+runs/
+wandb/
+.hydra/
+
+# Python & Jupyter Caches
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+
+# Operating System & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# LaTeX Build Artifacts
+paper/latex/*.aux
+paper/latex/*.bbl
+paper/latex/*.blg
+paper/latex/*.fdb_latexmk
+paper/latex/*.fls
+paper/latex/*.log
+paper/latex/*.out
+paper/latex/*.synctex.gz
+paper/latex/*.toc
+texput.log

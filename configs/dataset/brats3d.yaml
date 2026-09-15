@@ -1,0 +1,24 @@
+# 3D BraTS 2024 GLI Dataset Configuration
+dataset_name: "brats_gli_3d"
+spatial_shape: [128, 128, 128]
+patch_size: [16, 16, 16]
+in_channels: 4
+modalities: ["t1n", "t1c", "t2w", "t2f"]
+binary_target: "WT"  # Whole Tumor (labels > 0)
+zscore_non_zero_only: true
+
+# Spatial Augmentations
+augmentations:
+  modality_dropout_prob: 0.25
+  rand_flip_prob: 0.5
+  rand_affine_prob: 0.5
+  rand_noise_prob: 0.3
+  noise_std: 0.05
+
+# Masking Parameters
+masking:
+  num_target_cuboids: 4
+  target_cuboid_size: [3, 3, 3]    # 27 patches each
+  max_target_overlap: 0.25
+  context_num_patches: 192         # Exactly 192 tokens (37.5% of 512)
+  context_connectivity: 26         # 3D BFS connectivity

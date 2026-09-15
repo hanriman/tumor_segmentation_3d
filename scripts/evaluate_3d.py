@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""
+3D Master Volumetric Benchmark Evaluator.
+Evaluates all models on the BraTS 2024 GLI test split across:
+- Volumetric 3D Dice, IoU, cKDTree 3D HD95 (Powers, 2011; Taha & Hanbury, 2015)
+- Latent Space Collapse Metrics: Effective Rank (S^2), Centered Cosine Sim (Roy & Vetterli, 2007)
+- Inference Latency (ms / 3D volume)
+"""
+
+import argparse
+import time
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import torch
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+from brats_jepa_3d.config import CHECKPOINTS_DIR, METRICS_DIR, ensure_directories
+from brats_jepa_3d.data import BraTS3DDataset
+from brats_jepa_3d.metrics import (
+    compute_effective_rank,
+    compute_representation_collapse_metrics,
+    compute_volumetric_metrics_3d,
+)
+from brats_jepa_3d.models import (
+    BraTS3DnnUNet,
+    BraTS3DUNet,
+    IJEPA3D,
+    JEPASegmentationModel3D,
+    SigRegJEPA3D,
+    VisRegJEPA3D,
+)
+from brats_jepa_3d.utils import get_autocast_context, get_device, set_seed, setup_logger
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Master 3D Benchmark Evaluation")
+    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--amp", action="store_true", default=True)
+    parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
+    return parser.parse_args()
+
+
+def benchmark_model(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    amp: bool = True,
+    smoke_test: bool = False,
+) -> dict[str, float]:
+    model.eval()
+    dices, ious, hd95s, latencies = [], [], [], []
+
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(tqdm(loader, desc="Evaluating", leave=False)):
+            images = batch["image"].to(device)
+            masks = batch["mask"].to(device)
+
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            t0 = time.perf_counter()
+
+            with get_autocast_context(device, enabled=amp):
+                out = model(images)
+                logits = out[0] if isinstance(out, (list, tuple)) else out
+
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            t1 = time.perf_counter()
+            latencies.append((t1 - t0) * 1000.0)  # ms per volume
+
+            metrics = compute_volumetric_metrics_3d(logits, masks)
+            dices.extend(metrics["dice_per_sample"])
+            ious.extend(metrics["iou_per_sample"])
+            hd95s.extend(metrics["hd95_per_sample"])
+
+            if smoke_test and batch_idx >= 1:
+                break
+
+    return {
+        "dice_mean": float(np.mean(dices)) if dices else 0.0,
+        "dice_std": float(np.std(dices)) if dices else 0.0,
+        "iou_mean": float(np.mean(ious)) if ious else 0.0,
+        "iou_std": float(np.std(ious)) if ious else 0.0,
+        "hd95_mean": float(np.mean(hd95s)) if hd95s else 0.0,
+        "hd95_std": float(np.std(hd95s)) if hd95s else 0.0,
+        "latency_ms": float(np.mean(latencies)) if latencies else 0.0,
+    }
+
+
+def evaluate_representation(
+    encoder: torch.nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    smoke_test: bool = False,
+) -> dict[str, float]:
+    encoder.eval()
+    all_tokens = []
+
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(loader):
+            images = batch["image"].to(device)
+            tokens = encoder(images)  # [B, 512, D]
+            all_tokens.append(tokens.cpu())
+            if smoke_test and batch_idx >= 1:
+                break
+
+    if not all_tokens:
+        return {"erank": 1.0, "centered_cossim": 0.0}
+
+    cat_tokens = torch.cat(all_tokens, dim=0)  # [N_total, 512, D]
+    flat_tokens = cat_tokens.reshape(-1, cat_tokens.shape[-1])  # [N*512, D]
+
+    collapse_metrics = compute_representation_collapse_metrics(flat_tokens)
+    return {
+        "erank": collapse_metrics["effective_rank"],
+        "centered_cossim": collapse_metrics["avg_cosine_sim_centered"],
+    }
+
+
+def main():
+    args = parse_args()
+    ensure_directories()
+    set_seed(args.seed)
+    device = get_device()
+    logger = setup_logger("evaluate_3d", METRICS_DIR / "benchmark_3d.log")
+    logger.info("Initializing Master 3D Volumetric Benchmark...")
+
+    try:
+        test_dataset = BraTS3DDataset(split="test", augmentations=None)
+    except FileNotFoundError:
+        logger.warning("Processed dataset not found. Generating synthetic test dataset for verification.")
+        test_dataset = [
+            {"image": torch.randn(4, 128, 128, 128), "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(), "patient_id": f"test_{i}"}
+            for i in range(2)
+        ]
+
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+
+    models_to_evaluate = [
+        ("3D SigReg JEPA (FPN)", "sigreg_jepa", "multiscale"),
+        ("3D VisReg JEPA (FPN)", "visreg_jepa", "multiscale"),
+        ("3D I-JEPA (FPN)", "ijepa", "multiscale"),
+        ("3D Residual UNet", "unet_3d", None),
+        ("3D nnU-Net (DynUNet)", "nnunet_3d", None),
+    ]
+
+    results = []
+
+    for label, model_type, decoder_type in models_to_evaluate:
+        logger.info(f"Evaluating: {label}")
+
+        if model_type == "unet_3d":
+            model = BraTS3DUNet(in_channels=4, out_channels=1).to(device)
+            ckpt_file = CHECKPOINTS_DIR / "unet_3d_best.pt"
+            if ckpt_file.exists():
+                model.load_state_dict(torch.load(ckpt_file, map_location=device)["model_state_dict"])
+            erank, cossim = "-", "-"
+
+        elif model_type == "nnunet_3d":
+            model = BraTS3DnnUNet(in_channels=4, out_channels=1).to(device)
+            ckpt_file = CHECKPOINTS_DIR / "nnunet_3d_best.pt"
+            if ckpt_file.exists():
+                model.load_state_dict(torch.load(ckpt_file, map_location=device)["model_state_dict"])
+            erank, cossim = "-", "-"
+
+        else:
+            # JEPA Downstream Model
+            model = JEPASegmentationModel3D(
+                in_channels=4,
+                out_channels=1,
+                decoder_type=decoder_type or "multiscale",
+            ).to(device)
+            ckpt_file = CHECKPOINTS_DIR / f"{model_type}_{decoder_type}_best.pt"
+            if ckpt_file.exists():
+                model.load_state_dict(torch.load(ckpt_file, map_location=device)["model_state_dict"])
+
+            # Evaluate representation diagnostics
+            rep_stats = evaluate_representation(model.encoder, test_loader, device, smoke_test=args.smoke_test)
+            erank = f"{rep_stats['erank']:.2f}"
+            cossim = f"{rep_stats['centered_cossim']:.4f}"
+
+        seg_stats = benchmark_model(model, test_loader, device, amp=args.amp, smoke_test=args.smoke_test)
+
+        results.append({
+            "Model": label,
+            "Dice (%)": f"{seg_stats['dice_mean']*100:.2f} ± {seg_stats['dice_std']*100:.2f}",
+            "IoU (%)": f"{seg_stats['iou_mean']*100:.2f} ± {seg_stats['iou_std']*100:.2f}",
+            "HD95 (mm)": f"{seg_stats['hd95_mean']:.2f} ± {seg_stats['hd95_std']:.2f}",
+            "Latency (ms)": f"{seg_stats['latency_ms']:.2f}",
+            "EffRank (S²)": erank,
+            "Centered CosSim": cossim,
+        })
+
+    df = pd.DataFrame(results)
+    csv_path = METRICS_DIR / "benchmark_3d_summary.csv"
+    md_path = METRICS_DIR / "benchmark_3d_summary.md"
+
+    df.to_csv(csv_path, index=False)
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write("# 3D Volumetric BraTS 2024 GLI Master Benchmark Results\n\n")
+        f.write(df.to_markdown(index=False))
+        f.write("\n")
+
+    print("\n" + df.to_string(index=False) + "\n")
+    logger.info(f"Summary saved to {csv_path} and {md_path}")
+
+
+if __name__ == "__main__":
+    main()

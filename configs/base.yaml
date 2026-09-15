@@ -1,0 +1,8 @@
+# Base system, hardware, and environment configuration
+seed: 42
+device: "auto"       # "auto", "cuda", "mps", "cpu"
+amp: true            # Automatic Mixed Precision
+num_workers: 2
+pin_memory: true
+output_dir: "outputs"
+data_dir: "data/processed/brats_gli_3d"

@@ -1,0 +1,18 @@
+# 3D I-JEPA Model Configuration (Assran et al., CVPR 2023)
+name: "ijepa"
+spatial_shape: [128, 128, 128]
+patch_size: [16, 16, 16]
+in_channels: 4
+embed_dim: 384
+encoder_depth: 8
+num_heads: 6
+mlp_ratio: 4.0
+predictor_depth: 4
+predictor_embed_dim: 192
+target_aspect_ratio: [1.0, 1.0, 1.0]
+
+# EMA Momentum Teacher
+ema_start_momentum: 0.996
+ema_end_momentum: 1.0
+ema_anneal_epochs: 50
+loss_type: "smooth_l1"

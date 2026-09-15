@@ -1,0 +1,22 @@
+# 3D VisReg JEPA Model Configuration (Wu, Balestriero, & Levine, 2026)
+name: "visreg_jepa"
+spatial_shape: [128, 128, 128]
+patch_size: [16, 16, 16]
+in_channels: 4
+embed_dim: 384
+proj_dim: 128
+encoder_depth: 8
+num_heads: 6
+mlp_ratio: 4.0
+predictor_depth: 4
+predictor_embed_dim: 192
+
+# Decoupled Statistical Regularization
+center_weight: 1.0
+scale_weight: 1.0
+swd_weight: 1.0
+num_projections: 256
+target_std: 1.0
+swd_metric: "mse"         # "mse" for W_2^2, "l1" for W_1
+scale_loss_type: "squared" # Two-sided squared variance penalty
+loss_type: "smooth_l1"
