@@ -30,13 +30,13 @@ Thumbs.db
 .idea/
 
 # LaTeX Build Artifacts
-paper/latex/*.aux
-paper/latex/*.bbl
-paper/latex/*.blg
-paper/latex/*.fdb_latexmk
-paper/latex/*.fls
-paper/latex/*.log
-paper/latex/*.out
-paper/latex/*.synctex.gz
-paper/latex/*.toc
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
 texput.log
