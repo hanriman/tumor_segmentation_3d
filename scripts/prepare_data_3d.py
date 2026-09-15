@@ -196,12 +196,24 @@ def main():
     data_dir = Path(args.data_dir).resolve()
     output_dir = Path(args.output_dir).resolve()
 
-    # Fallback to local search if default path is not found directly
+    # Fallback to local and Kaggle search if default path is not found directly
     if not data_dir.exists():
         fallback_candidates = [
             Path("../thesis_2d/data/raw/BraTS-GLI/training_data1_v2").resolve(),
             Path("data/raw/BraTS-GLI/training_data1_v2").resolve(),
+            Path("/kaggle/input/brats-2024-gli/training_data1_v2"),
+            Path("/kaggle/input/brats2024-gli/training_data1_v2"),
         ]
+        if Path("/kaggle/input").exists():
+            for p in Path("/kaggle/input").glob("**/training_data1_v2"):
+                if p.is_dir():
+                    fallback_candidates.append(p)
+            for p in Path("/kaggle/input").glob("**/BraTS-GLI*"):
+                if p.is_dir() and (p / "training_data1_v2").is_dir():
+                    fallback_candidates.append(p / "training_data1_v2")
+                elif p.is_dir():
+                    fallback_candidates.append(p)
+
         for cand in fallback_candidates:
             if cand.exists():
                 data_dir = cand

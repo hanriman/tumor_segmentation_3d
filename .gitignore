@@ -4,6 +4,7 @@ env/
 venv/
 *.egg-info/
 dist/
+dist_kaggle/
 build/
 
 # Local Data & Heavy Binaries
