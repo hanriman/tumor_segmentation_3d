@@ -60,6 +60,12 @@ thesis_3d/
 ├── README.md                     # Comprehensive documentation
 ├── agents.md                     # Scientific writing & research guidelines
 │
+├── docs/
+│   └── kaggle_guide.md           # End-to-end Kaggle GPU execution guide
+│
+├── notebooks/
+│   └── kaggle_runner_3d.ipynb    # 1-Click Kaggle GPU runner notebook
+│
 ├── configs/                      # Modular YAML configuration hierarchy
 │   ├── base.yaml                 # System paths, seed, device, AMP configs
 │   ├── dataset/
@@ -115,6 +121,7 @@ thesis_3d/
 │   ├── evaluate_low_data_3d.py   # Label efficiency runner (1% to 100% 3D labels)
 │   ├── evaluate_ood_3d.py        # 3D Scanner shift runner (Rician noise, B1 bias field)
 │   ├── generate_figures_3d.py    # Multi-planar orthogonal & publication figures
+│   ├── package_for_kaggle.py     # Packages processed 3D dataset into dist_kaggle/ archive
 │   └── run_full_pipeline_3d.py   # Master automation orchestrator
 │
 ├── tests/                        # Pytest automated test suite (22/22 unit tests)
@@ -219,6 +226,14 @@ python scripts/run_full_pipeline_3d.py --smoke_test
 # Full pipeline execution
 python scripts/run_full_pipeline_3d.py
 ```
+
+### 7. Running on Kaggle GPU
+For zero-setup 1-click cloud execution:
+1. Package preprocessed data: `python scripts/package_for_kaggle.py` -> upload `dist_kaggle/brats_3d_datasets.zip` as a Kaggle dataset `brats-3d-datasets`.
+2. Import `notebooks/kaggle_runner_3d.ipynb` into a new Kaggle notebook.
+3. Select **GPU T4 x1** or **GPU T4 x2**, turn **Internet ON**, and attach the dataset.
+4. Run all notebook cells to execute pre-training, fine-tuning, benchmarks, and 1-click output download (`outputs.zip`).
+5. For complete instructions, see [docs/kaggle_guide.md](docs/kaggle_guide.md).
 
 ---
 
