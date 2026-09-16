@@ -1,8 +1,4 @@
-import math
-from typing import Any
-import numpy as np
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 
@@ -19,6 +15,7 @@ class PatchEmbed3D(nn.Module):
     Using Conv3d with kernel_size=stride=(16, 16, 16) performs non-overlapping linear projection
     of each 16^3 voxel neighborhood into the latent embedding dimension D=384.
     """
+
     def __init__(
         self,
         img_size: tuple[int, int, int] = (128, 128, 128),
@@ -76,7 +73,7 @@ def build_3d_sinusoidal_pos_embedding(
         pos = torch.arange(length, dtype=torch.float32)
         half_dim = dim // 2
         omega = torch.arange(half_dim, dtype=torch.float32) / half_dim
-        omega = 1.0 / (temperature ** omega)
+        omega = 1.0 / (temperature**omega)
         out = torch.einsum("m,d->md", pos, omega)
         emb = torch.cat([torch.sin(out), torch.cos(out)], dim=1)
         if dim % 2 == 1:
@@ -102,6 +99,7 @@ class TransformerBlock(nn.Module):
     r"""
     Pre-LayerNorm Transformer Block (Xiong et al., ICML 2020).
     """
+
     def __init__(
         self,
         embed_dim: int = 384,
@@ -153,6 +151,7 @@ class VisionTransformerEncoder3D(nn.Module):
        Supports `return_intermediate=True` to extract intermediate representations across depths
        (e.g., L_2, L_4, L_6, L_8) for downstream multi-scale FPN decoding.
     """
+
     def __init__(
         self,
         img_size: tuple[int, int, int] = (128, 128, 128),
@@ -179,15 +178,17 @@ class VisionTransformerEncoder3D(nn.Module):
         pe = build_3d_sinusoidal_pos_embedding(self.grid_size, embed_dim)
         self.pos_embed = nn.Parameter(pe)
 
-        self.blocks = nn.ModuleList([
-            TransformerBlock(
-                embed_dim=embed_dim,
-                num_heads=num_heads,
-                mlp_ratio=mlp_ratio,
-                dropout=dropout,
-            )
-            for _ in range(depth)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                TransformerBlock(
+                    embed_dim=embed_dim,
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratio,
+                    dropout=dropout,
+                )
+                for _ in range(depth)
+            ]
+        )
         self.norm = nn.LayerNorm(embed_dim)
 
     def forward(

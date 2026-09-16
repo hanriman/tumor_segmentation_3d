@@ -34,7 +34,7 @@ def compute_effective_rank(z: torch.Tensor) -> float:
     z_centered = z - z.mean(dim=0, keepdim=True)
     try:
         _, S, _ = torch.linalg.svd(z_centered, full_matrices=False)
-        eigenvalues = S ** 2
+        eigenvalues = S**2
         if eigenvalues.sum() < 1e-12:
             return 1.0  # Degenerate case: all-zero representations
         normalized = eigenvalues / eigenvalues.sum()

@@ -10,6 +10,7 @@ Evaluates all models on the BraTS 2024 GLI test split across:
 import argparse
 import time
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import torch
@@ -19,17 +20,13 @@ from tqdm import tqdm
 from brats_jepa_3d.config import CHECKPOINTS_DIR, METRICS_DIR, ensure_directories
 from brats_jepa_3d.data import BraTS3DDataset
 from brats_jepa_3d.metrics import (
-    compute_effective_rank,
     compute_representation_collapse_metrics,
     compute_volumetric_metrics_3d,
 )
 from brats_jepa_3d.models import (
     BraTS3DnnUNet,
     BraTS3DUNet,
-    IJEPA3D,
     JEPASegmentationModel3D,
-    SigRegJEPA3D,
-    VisRegJEPA3D,
 )
 from brats_jepa_3d.utils import get_autocast_context, get_device, set_seed, setup_logger
 
@@ -40,6 +37,31 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default=None,
+        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, ijepa, unet, nnunet, or all)",
+    )
+    parser.add_argument(
+        "--decoder_type",
+        type=str,
+        default="multiscale",
+        choices=["multiscale", "bottleneck"],
+        help="Decoder type for JEPA models",
+    )
+    parser.add_argument(
+        "--all_models",
+        action="store_true",
+        default=False,
+        help="Evaluate all 5 benchmark models",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Path to an explicit checkpoint file (.pt)",
+    )
     return parser.parse_args()
 
 
@@ -131,39 +153,92 @@ def main():
     try:
         test_dataset = BraTS3DDataset(split="test", augmentations=None)
     except FileNotFoundError:
-        logger.warning("Processed dataset not found. Generating synthetic test dataset for verification.")
+        logger.warning(
+            "Processed dataset not found. Generating synthetic test dataset for verification."
+        )
         test_dataset = [
-            {"image": torch.randn(4, 128, 128, 128), "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(), "patient_id": f"test_{i}"}
+            {
+                "image": torch.randn(4, 128, 128, 128),
+                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                "patient_id": f"test_{i}",
+            }
             for i in range(2)
         ]
 
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
-    models_to_evaluate = [
-        ("3D SigReg JEPA (FPN)", "sigreg_jepa", "multiscale"),
-        ("3D VisReg JEPA (FPN)", "visreg_jepa", "multiscale"),
-        ("3D I-JEPA (FPN)", "ijepa", "multiscale"),
+    all_models_list = [
+        ("3D SigReg JEPA (FPN)", "sigreg_jepa", args.decoder_type or "multiscale"),
+        ("3D VisReg JEPA (FPN)", "visreg_jepa", args.decoder_type or "multiscale"),
+        ("3D I-JEPA (FPN)", "ijepa", args.decoder_type or "multiscale"),
         ("3D Residual UNet", "unet_3d", None),
         ("3D nnU-Net (DynUNet)", "nnunet_3d", None),
     ]
+
+    # Filter if user specified a specific model_type
+    req_model = args.model_type.lower() if args.model_type else None
+    if req_model and not args.all_models and req_model not in ("all", "all_models"):
+        alias_map = {
+            "visreg": "visreg_jepa",
+            "visreg_jepa": "visreg_jepa",
+            "sigreg": "sigreg_jepa",
+            "sigreg_jepa": "sigreg_jepa",
+            "ijepa": "ijepa",
+            "unet": "unet_3d",
+            "unet_3d": "unet_3d",
+            "nnunet": "nnunet_3d",
+            "nnunet_3d": "nnunet_3d",
+        }
+        canonical = alias_map.get(req_model, req_model)
+        models_to_evaluate = [m for m in all_models_list if m[1] == canonical]
+        if not models_to_evaluate:
+            logger.warning(f"Unknown model_type '{req_model}'. Defaulting to all models.")
+            models_to_evaluate = all_models_list
+    else:
+        models_to_evaluate = all_models_list
 
     results = []
 
     for label, model_type, decoder_type in models_to_evaluate:
         logger.info(f"Evaluating: {label}")
 
+        if args.checkpoint:
+            ckpt_file = Path(args.checkpoint)
+        elif model_type == "unet_3d":
+            ckpt_file = CHECKPOINTS_DIR / "unet_3d_best.pt"
+        elif model_type == "nnunet_3d":
+            ckpt_file = CHECKPOINTS_DIR / "nnunet_3d_best.pt"
+        else:
+            ckpt_file = CHECKPOINTS_DIR / f"{model_type}_{decoder_type}_best.pt"
+            if not ckpt_file.exists():
+                candidates = sorted(CHECKPOINTS_DIR.glob(f"{model_type}*.pt"))
+                if candidates:
+                    ckpt_file = candidates[-1]
+
         if model_type == "unet_3d":
             model = BraTS3DUNet(in_channels=4, out_channels=1).to(device)
-            ckpt_file = CHECKPOINTS_DIR / "unet_3d_best.pt"
             if ckpt_file.exists():
-                model.load_state_dict(torch.load(ckpt_file, map_location=device)["model_state_dict"])
+                logger.info(f"Loading weights from {ckpt_file}")
+                model.load_state_dict(
+                    torch.load(ckpt_file, map_location=device)["model_state_dict"], strict=False
+                )
+            else:
+                logger.warning(
+                    f"Checkpoint for {label} not found at {ckpt_file}. Evaluating initialized weights."
+                )
             erank, cossim = "-", "-"
 
         elif model_type == "nnunet_3d":
             model = BraTS3DnnUNet(in_channels=4, out_channels=1).to(device)
-            ckpt_file = CHECKPOINTS_DIR / "nnunet_3d_best.pt"
             if ckpt_file.exists():
-                model.load_state_dict(torch.load(ckpt_file, map_location=device)["model_state_dict"])
+                logger.info(f"Loading weights from {ckpt_file}")
+                model.load_state_dict(
+                    torch.load(ckpt_file, map_location=device)["model_state_dict"], strict=False
+                )
+            else:
+                logger.warning(
+                    f"Checkpoint for {label} not found at {ckpt_file}. Evaluating initialized weights."
+                )
             erank, cossim = "-", "-"
 
         else:
@@ -173,39 +248,75 @@ def main():
                 out_channels=1,
                 decoder_type=decoder_type or "multiscale",
             ).to(device)
-            ckpt_file = CHECKPOINTS_DIR / f"{model_type}_{decoder_type}_best.pt"
             if ckpt_file.exists():
-                model.load_state_dict(torch.load(ckpt_file, map_location=device)["model_state_dict"])
+                logger.info(f"Loading weights from {ckpt_file}")
+                model.load_state_dict(
+                    torch.load(ckpt_file, map_location=device)["model_state_dict"], strict=False
+                )
+            else:
+                logger.warning(
+                    f"Checkpoint for {label} not found at {ckpt_file}. Evaluating initialized weights."
+                )
 
             # Evaluate representation diagnostics
-            rep_stats = evaluate_representation(model.encoder, test_loader, device, smoke_test=args.smoke_test)
+            rep_stats = evaluate_representation(
+                model.encoder, test_loader, device, smoke_test=args.smoke_test
+            )
             erank = f"{rep_stats['erank']:.2f}"
             cossim = f"{rep_stats['centered_cossim']:.4f}"
 
-        seg_stats = benchmark_model(model, test_loader, device, amp=args.amp, smoke_test=args.smoke_test)
+        seg_stats = benchmark_model(
+            model, test_loader, device, amp=args.amp, smoke_test=args.smoke_test
+        )
 
-        results.append({
-            "Model": label,
-            "Dice (%)": f"{seg_stats['dice_mean']*100:.2f} ± {seg_stats['dice_std']*100:.2f}",
-            "IoU (%)": f"{seg_stats['iou_mean']*100:.2f} ± {seg_stats['iou_std']*100:.2f}",
-            "HD95 (mm)": f"{seg_stats['hd95_mean']:.2f} ± {seg_stats['hd95_std']:.2f}",
-            "Latency (ms)": f"{seg_stats['latency_ms']:.2f}",
-            "EffRank (S²)": erank,
-            "Centered CosSim": cossim,
-        })
+        results.append(
+            {
+                "Model": label,
+                "Dice (%)": f"{seg_stats['dice_mean'] * 100:.2f} ± {seg_stats['dice_std'] * 100:.2f}",
+                "IoU (%)": f"{seg_stats['iou_mean'] * 100:.2f} ± {seg_stats['iou_std'] * 100:.2f}",
+                "HD95 (mm)": f"{seg_stats['hd95_mean']:.2f} ± {seg_stats['hd95_std']:.2f}",
+                "Latency (ms)": f"{seg_stats['latency_ms']:.2f}",
+                "EffRank (S²)": erank,
+                "Centered CosSim": cossim,
+            }
+        )
 
-    df = pd.DataFrame(results)
+    df_new = pd.DataFrame(results)
     csv_path = METRICS_DIR / "benchmark_3d_summary.csv"
+    master_csv_path = METRICS_DIR / "master_3d_benchmark.csv"
     md_path = METRICS_DIR / "benchmark_3d_summary.md"
+    master_md_path = METRICS_DIR / "master_3d_benchmark.md"
 
+    if csv_path.exists() and len(models_to_evaluate) < len(all_models_list):
+        try:
+            df_old = pd.read_csv(csv_path)
+            for _, row in df_new.iterrows():
+                mask = df_old["Model"] == row["Model"]
+                if mask.any():
+                    for col in df_new.columns:
+                        df_old.loc[mask, col] = row[col]
+                else:
+                    df_old = pd.concat([df_old, pd.DataFrame([row])], ignore_index=True)
+            df = df_old
+        except Exception:
+            df = df_new
+    else:
+        df = df_new
+
+    df = df.dropna(subset=["Model"]).reset_index(drop=True)
     df.to_csv(csv_path, index=False)
+    df.to_csv(master_csv_path, index=False)
     with open(md_path, "w", encoding="utf-8") as f:
+        f.write("# 3D Volumetric BraTS 2024 GLI Master Benchmark Results\n\n")
+        f.write(df.to_markdown(index=False))
+        f.write("\n")
+    with open(master_md_path, "w", encoding="utf-8") as f:
         f.write("# 3D Volumetric BraTS 2024 GLI Master Benchmark Results\n\n")
         f.write(df.to_markdown(index=False))
         f.write("\n")
 
     print("\n" + df.to_string(index=False) + "\n")
-    logger.info(f"Summary saved to {csv_path} and {md_path}")
+    logger.info(f"Summary saved to {csv_path} and {master_csv_path}")
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ class VolumetricDiceLoss(nn.Module):
     r"""
     Soft Volumetric 3D Dice Loss (Milletari et al., 3DV 2016; V-Net).
     """
+
     def __init__(self, smooth: float = 1e-5):
         super().__init__()
         self.smooth = smooth
@@ -27,6 +28,7 @@ class CombinedDiceBCELoss3D(nn.Module):
     r"""
     Combined Volumetric 3D Dice + BCE Loss.
     """
+
     def __init__(self, dice_weight: float = 1.0, bce_weight: float = 1.0, smooth: float = 1e-5):
         super().__init__()
         self.dice_weight = dice_weight

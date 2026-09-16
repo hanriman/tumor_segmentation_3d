@@ -1,9 +1,8 @@
-import pytest
 import torch
+
 from brats_jepa_3d.losses import (
     CombinedDiceBCELoss3D,
     DeepSupervisionLoss3D,
-    EppsPulleyGaussianityTest,
     IJEPALoss,
     SigRegLoss,
     VisRegLoss,

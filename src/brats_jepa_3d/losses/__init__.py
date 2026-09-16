@@ -5,11 +5,11 @@ from .sigreg_loss import EppsPulleyGaussianityTest, SigRegLoss
 from .visreg_loss import VisRegLoss
 
 __all__ = [
-    "DeepSupervisionLoss3D",
     "CombinedDiceBCELoss3D",
-    "VolumetricDiceLoss",
-    "IJEPALoss",
+    "DeepSupervisionLoss3D",
     "EppsPulleyGaussianityTest",
+    "IJEPALoss",
     "SigRegLoss",
     "VisRegLoss",
+    "VolumetricDiceLoss",
 ]

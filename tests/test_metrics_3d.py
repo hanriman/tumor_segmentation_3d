@@ -1,6 +1,6 @@
 import numpy as np
-import pytest
 import torch
+
 from brats_jepa_3d.metrics import (
     compute_dice_score_3d,
     compute_effective_rank,
@@ -60,7 +60,7 @@ def test_effective_rank():
     z_isotropic = torch.randn(N, D)
     erank_iso = compute_effective_rank(z_isotropic)
     # Effective rank of standard normal N(0, I) should approach D (>= 90% of D)
-    assert erank_iso >= 0.85 * D, f"Expected erank >= {0.85*D}, got {erank_iso}"
+    assert erank_iso >= 0.85 * D, f"Expected erank >= {0.85 * D}, got {erank_iso}"
 
     # 2. Rank-1 collapsed matrix (all vectors collinear)
     u = torch.randn(1, D)

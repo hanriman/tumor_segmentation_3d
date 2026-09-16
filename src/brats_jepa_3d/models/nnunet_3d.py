@@ -1,6 +1,6 @@
 import torch
-from torch import nn
 from monai.networks.nets import DynUNet
+from torch import nn
 
 
 class BraTS3DnnUNet(nn.Module):
@@ -13,6 +13,7 @@ class BraTS3DnnUNet(nn.Module):
     and residual blocks. Multi-scale heads output predictions at 128^3, 64^3, 32^3, 16^3
     to provide gradient highways that prevent vanishing gradients during volumetric training.
     """
+
     def __init__(
         self,
         in_channels: int = 4,

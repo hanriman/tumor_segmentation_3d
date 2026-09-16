@@ -7,10 +7,10 @@ from .volumetric_metrics import (
 )
 
 __all__ = [
-    "compute_effective_rank",
-    "compute_representation_collapse_metrics",
     "compute_dice_score_3d",
+    "compute_effective_rank",
     "compute_hd95_3d",
     "compute_iou_score_3d",
+    "compute_representation_collapse_metrics",
     "compute_volumetric_metrics_3d",
 ]

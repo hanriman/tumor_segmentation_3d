@@ -2,6 +2,7 @@ import json
 import logging
 import sys
 from pathlib import Path
+
 import pandas as pd
 
 
@@ -36,6 +37,7 @@ def get_logger(name: str = "brats_jepa_3d", log_file: str | Path | None = None) 
 
 class MetricTracker:
     """Accumulates epoch metrics and serializes to JSON and CSV."""
+
     def __init__(self):
         self.history: dict[str, list] = {}
 

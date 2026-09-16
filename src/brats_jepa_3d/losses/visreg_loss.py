@@ -1,5 +1,5 @@
 import math
-from typing import Any
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -49,6 +49,7 @@ class VisRegLoss(nn.Module):
       Journal of Mathematical Imaging and Vision, 51(1), 22-45.
     - Villani, C. (2009). Optimal Transport: Old and New. Springer.
     """
+
     def __init__(
         self,
         loss_type: str = "smooth_l1",
@@ -71,13 +72,15 @@ class VisRegLoss(nn.Module):
             raise ValueError(f"Unknown swd_metric: {swd_metric}. Must be 'mse' or 'l1'.")
         self.swd_metric = swd_metric
         if scale_loss_type not in ("squared", "hinge"):
-            raise ValueError(f"Unknown scale_loss_type: {scale_loss_type}. Must be 'squared' or 'hinge'.")
+            raise ValueError(
+                f"Unknown scale_loss_type: {scale_loss_type}. Must be 'squared' or 'hinge'."
+            )
         self.scale_loss_type = scale_loss_type
 
     def _center_loss(self, z: torch.Tensor) -> torch.Tensor:
         r"""Center regularization: (1/D) * ||mu_z||_2^2."""
         mu = z.mean(dim=0)
-        return torch.mean(mu ** 2)
+        return torch.mean(mu**2)
 
     def _scale_loss(self, z: torch.Tensor) -> torch.Tensor:
         r"""Scale regularization: enforces coordinate-wise target standard deviation."""
@@ -106,7 +109,9 @@ class VisRegLoss(nn.Module):
         # Analytical standard normal N(0, 1) quantiles: Phi^{-1}((i - 0.5) / N)
         # Evaluated strictly in float32 to prevent float16 erfinv tail saturation under AMP
         probs = (torch.arange(1, N + 1, device=z.device, dtype=torch.float32) - 0.5) / N
-        gaussian_quantiles = (torch.erfinv(2.0 * probs - 1.0) * math.sqrt(2.0)).to(dtype=z.dtype)  # [N]
+        gaussian_quantiles = (torch.erfinv(2.0 * probs - 1.0) * math.sqrt(2.0)).to(
+            dtype=z.dtype
+        )  # [N]
         target_quantiles = gaussian_quantiles.unsqueeze(-1).expand_as(sorted_proj)
 
         if self.swd_metric == "mse":
@@ -125,7 +130,11 @@ class VisRegLoss(nn.Module):
     ) -> dict[str, torch.Tensor]:
         j_loss = self.jepa_loss(predictions, targets)
 
-        reg_tokens = tokens if tokens is not None else (projected_tokens if projected_tokens is not None else context_tokens)
+        reg_tokens = (
+            tokens
+            if tokens is not None
+            else (projected_tokens if projected_tokens is not None else context_tokens)
+        )
         if reg_tokens is None:
             raise ValueError("VisRegLoss requires regularized token representations.")
 

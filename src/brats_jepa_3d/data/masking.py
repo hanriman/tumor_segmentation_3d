@@ -1,7 +1,7 @@
-from collections import deque
 import random
+from collections import deque
 from typing import Any
-import numpy as np
+
 import torch
 
 
@@ -28,6 +28,7 @@ class JEPAMaskingTransform3D:
            \text{ctx} \cap \left(\bigcup_{m=1}^M \text{tgt}_m\right) = \emptyset
        ensuring zero attention leakage from target into the context encoder.
     """
+
     def __init__(
         self,
         grid_size: tuple[int, int, int] = (8, 8, 8),

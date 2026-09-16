@@ -1,6 +1,6 @@
 import torch
-from torch import nn
 from monai.networks.nets import UNet
+from torch import nn
 
 
 class BraTS3DUNet(nn.Module):
@@ -13,6 +13,7 @@ class BraTS3DUNet(nn.Module):
     Encoder channels: (32, 64, 128, 256, 512) with 2 residual convolutional units per stage
     and Instance Normalization (Ulyanov et al., 2016).
     """
+
     def __init__(
         self,
         in_channels: int = 4,

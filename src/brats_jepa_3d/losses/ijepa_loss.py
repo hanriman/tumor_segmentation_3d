@@ -1,4 +1,3 @@
-from typing import Any
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -16,6 +15,7 @@ class IJEPALoss(nn.Module):
     Smooth L1 provides quadratic L2 convergence near zero while maintaining robust L1 gradient
     bounds on large target deviations, preventing outlier representations from destabilizing training.
     """
+
     def __init__(self, loss_type: str = "smooth_l1", beta: float = 1.0):
         super().__init__()
         self.loss_type = loss_type

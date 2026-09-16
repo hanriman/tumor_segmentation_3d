@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+
 from .vision_transformer_3d import TransformerBlock, build_3d_sinusoidal_pos_embedding
 
 
@@ -19,6 +20,7 @@ class JEPAPredictor3D(nn.Module):
        predicting target representations \hat{y}_{\text{tgt}} entirely within latent embedding space
        without reconstructing corrupted voxel intensities.
     """
+
     def __init__(
         self,
         embed_dim: int = 384,
@@ -45,14 +47,16 @@ class JEPAPredictor3D(nn.Module):
         self.mask_token = nn.Parameter(torch.zeros(1, 1, pred_embed_dim))
         nn.init.normal_(self.mask_token, std=0.02)
 
-        self.blocks = nn.ModuleList([
-            TransformerBlock(
-                embed_dim=pred_embed_dim,
-                num_heads=num_heads,
-                mlp_ratio=mlp_ratio,
-            )
-            for _ in range(depth)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                TransformerBlock(
+                    embed_dim=pred_embed_dim,
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratio,
+                )
+                for _ in range(depth)
+            ]
+        )
         self.norm = nn.LayerNorm(pred_embed_dim)
 
         # Projection back to encoder representation dimension

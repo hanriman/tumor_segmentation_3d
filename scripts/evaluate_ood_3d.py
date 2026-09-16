@@ -15,12 +15,11 @@ Theoretical Formulations:
 """
 
 import argparse
-from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 from brats_jepa_3d.config import CHECKPOINTS_DIR, METRICS_DIR, ensure_directories
 from brats_jepa_3d.data import BraTS3DDataset
@@ -42,7 +41,7 @@ def apply_rician_noise_3d(image: torch.Tensor, sigma: float = 0.10) -> torch.Ten
     """Simulates 3D MRI quadrature Rician noise."""
     eta1 = torch.randn_like(image) * sigma
     eta2 = torch.randn_like(image) * sigma
-    return torch.sqrt((image + eta1) ** 2 + eta2 ** 2)
+    return torch.sqrt((image + eta1) ** 2 + eta2**2)
 
 
 def apply_b1_bias_field_3d(image: torch.Tensor, strength: float = 0.3) -> torch.Tensor:
@@ -54,13 +53,17 @@ def apply_b1_bias_field_3d(image: torch.Tensor, strength: float = 0.3) -> torch.
     grid_z, grid_y, grid_x = torch.meshgrid(z, y, x, indexing="ij")
 
     # Smooth 2nd-order polynomial field
-    bias = 1.0 + strength * (0.5 * grid_z + 0.3 * grid_y - 0.4 * grid_x + 0.2 * (grid_z ** 2 + grid_y ** 2 + grid_x ** 2))
+    bias = 1.0 + strength * (
+        0.5 * grid_z + 0.3 * grid_y - 0.4 * grid_x + 0.2 * (grid_z**2 + grid_y**2 + grid_x**2)
+    )
     if image.dim() == 5:
         return image * bias.unsqueeze(0).unsqueeze(0)
     return image * bias.unsqueeze(0)
 
 
-def evaluate_perturbation(model, loader, device, perturb_fn, amp: bool = True, smoke_test: bool = False) -> float:
+def evaluate_perturbation(
+    model, loader, device, perturb_fn, amp: bool = True, smoke_test: bool = False
+) -> float:
     model.eval()
     dices = []
     with torch.no_grad():
@@ -92,30 +95,112 @@ def main():
     try:
         test_dataset = BraTS3DDataset(split="test")
     except FileNotFoundError:
-        test_dataset = [{"image": torch.randn(4, 128, 128, 128), "mask": (torch.rand(1, 128, 128, 128) > 0.95).float()} for _ in range(2)]
+        test_dataset = [
+            {
+                "image": torch.randn(4, 128, 128, 128),
+                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+            }
+            for _ in range(2)
+        ]
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
-    models = [
-        ("3D VisReg JEPA (FPN)", lambda: JEPASegmentationModel3D(decoder_type="multiscale")),
-        ("3D SigReg JEPA (FPN)", lambda: JEPASegmentationModel3D(decoder_type="multiscale")),
-        ("3D nnU-Net", lambda: BraTS3DnnUNet(deep_supervision=False)),
-        ("3D UNet", lambda: BraTS3DUNet()),
+    def get_model(name: str):
+        if name == "3D VisReg JEPA (FPN)":
+            m = JEPASegmentationModel3D(decoder_type="multiscale")
+            ckpt = CHECKPOINTS_DIR / "visreg_jepa_multiscale_best.pt"
+            if not ckpt.exists():
+                c = sorted(CHECKPOINTS_DIR.glob("visreg_jepa*.pt"))
+                ckpt = c[-1] if c else ckpt
+            if ckpt.exists():
+                logger.info(f"Loaded {name} weights from {ckpt}")
+                m.load_state_dict(
+                    torch.load(ckpt, map_location=device)["model_state_dict"], strict=False
+                )
+            else:
+                logger.warning(
+                    f"Checkpoint for {name} not found at {ckpt}. Evaluating initialized weights."
+                )
+            return m.to(device)
+
+        elif name == "3D SigReg JEPA (FPN)":
+            m = JEPASegmentationModel3D(decoder_type="multiscale")
+            ckpt = CHECKPOINTS_DIR / "sigreg_jepa_multiscale_best.pt"
+            if not ckpt.exists():
+                c = sorted(CHECKPOINTS_DIR.glob("sigreg_jepa*.pt"))
+                ckpt = c[-1] if c else ckpt
+            if ckpt.exists():
+                logger.info(f"Loaded {name} weights from {ckpt}")
+                m.load_state_dict(
+                    torch.load(ckpt, map_location=device)["model_state_dict"], strict=False
+                )
+            else:
+                logger.warning(
+                    f"Checkpoint for {name} not found at {ckpt}. Evaluating initialized weights."
+                )
+            return m.to(device)
+
+        elif name == "3D nnU-Net":
+            m = BraTS3DnnUNet(deep_supervision=False)
+            ckpt = CHECKPOINTS_DIR / "nnunet_3d_best.pt"
+            if ckpt.exists():
+                logger.info(f"Loaded {name} weights from {ckpt}")
+                m.load_state_dict(
+                    torch.load(ckpt, map_location=device)["model_state_dict"], strict=False
+                )
+            else:
+                logger.warning(
+                    f"Checkpoint for {name} not found at {ckpt}. Evaluating initialized weights."
+                )
+            return m.to(device)
+
+        elif name == "3D UNet":
+            m = BraTS3DUNet()
+            ckpt = CHECKPOINTS_DIR / "unet_3d_best.pt"
+            if ckpt.exists():
+                logger.info(f"Loaded {name} weights from {ckpt}")
+                m.load_state_dict(
+                    torch.load(ckpt, map_location=device)["model_state_dict"], strict=False
+                )
+            else:
+                logger.warning(
+                    f"Checkpoint for {name} not found at {ckpt}. Evaluating initialized weights."
+                )
+            return m.to(device)
+        else:
+            raise ValueError(f"Unknown model name: {name}")
+
+    model_names = [
+        "3D VisReg JEPA (FPN)",
+        "3D SigReg JEPA (FPN)",
+        "3D nnU-Net",
+        "3D UNet",
     ]
+    instantiated_models = [(m_name, get_model(m_name)) for m_name in model_names]
 
     perturbations = [
         ("Clean Baseline", None),
         ("Rician Noise (sigma=0.08)", lambda img: apply_rician_noise_3d(img, sigma=0.08)),
         ("B1 Bias Field Inhomogeneity", lambda img: apply_b1_bias_field_3d(img, strength=0.35)),
-        ("Missing Modalities: T1c Only", lambda img: (
-            torch.cat([torch.zeros_like(img[:, :1]), img[:, 1:2], torch.zeros_like(img[:, 2:])], dim=1)
-            if img.dim() == 5 else
-            torch.cat([torch.zeros_like(img[:1]), img[1:2], torch.zeros_like(img[2:])], dim=0)
-        )),
-        ("Missing Modalities: FLAIR Only", lambda img: (
-            torch.cat([torch.zeros_like(img[:, :3]), img[:, 3:4]], dim=1)
-            if img.dim() == 5 else
-            torch.cat([torch.zeros_like(img[:3]), img[3:4]], dim=0)
-        )),
+        (
+            "Missing Modalities: T1c Only",
+            lambda img: (
+                torch.cat(
+                    [torch.zeros_like(img[:, :1]), img[:, 1:2], torch.zeros_like(img[:, 2:])], dim=1
+                )
+                if img.dim() == 5
+                else torch.cat(
+                    [torch.zeros_like(img[:1]), img[1:2], torch.zeros_like(img[2:])], dim=0
+                )
+            ),
+        ),
+        (
+            "Missing Modalities: FLAIR Only",
+            lambda img: (
+                torch.cat([torch.zeros_like(img[:, :3]), img[:, 3:4]], dim=1)
+                if img.dim() == 5
+                else torch.cat([torch.zeros_like(img[:3]), img[3:4]], dim=0)
+            ),
+        ),
     ]
 
     records = []
@@ -123,11 +208,12 @@ def main():
     for p_name, p_fn in perturbations:
         logger.info(f"\n--- Evaluating Regime: {p_name} ---")
         row = {"Regime": p_name}
-        for m_name, model_fn in models:
-            m = model_fn().to(device)
-            dice = evaluate_perturbation(m, test_loader, device, p_fn, amp=args.amp, smoke_test=args.smoke_test)
-            logger.info(f"{m_name} -> Dice: {dice*100:.2f}%")
-            row[m_name] = f"{dice*100:.2f}%"
+        for m_name, m in instantiated_models:
+            dice = evaluate_perturbation(
+                m, test_loader, device, p_fn, amp=args.amp, smoke_test=args.smoke_test
+            )
+            logger.info(f"{m_name} -> Dice: {dice * 100:.2f}%")
+            row[m_name] = f"{dice * 100:.2f}%"
         records.append(row)
 
     df = pd.DataFrame(records)

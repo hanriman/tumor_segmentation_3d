@@ -1,4 +1,5 @@
 from typing import Any
+
 import torch
 from torch import nn
 
@@ -16,6 +17,7 @@ class VisRegJEPA3D(nn.Module):
     via three statistical regularizers: Center (zero mean), Scale (two-sided unit variance),
     and Shape (1D Sliced-Wasserstein distance to Gaussian quantiles).
     """
+
     def __init__(
         self,
         img_size: tuple[int, int, int] = (128, 128, 128),
@@ -77,7 +79,9 @@ class VisRegJEPA3D(nn.Module):
             self.context_encoder.train()
 
         # 2. Forward encoder on ONLY visible context patches WITH gradients
-        context_tokens = self.context_encoder(images, patch_indices=context_indices)  # [B, N_ctx, embed_dim]
+        context_tokens = self.context_encoder(
+            images, patch_indices=context_indices
+        )  # [B, N_ctx, embed_dim]
 
         # 3. Project context tokens through MLP for VisReg regularization
         projected_tokens = self.projector(context_tokens)  # [B, N_ctx, proj_dim]

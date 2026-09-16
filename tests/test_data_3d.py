@@ -1,5 +1,5 @@
-import pytest
 import torch
+
 from brats_jepa_3d.data import (
     JEPAMaskingTransform3D,
     RandomModalityDropout3D,
@@ -33,7 +33,9 @@ def test_jepa_masking_transform_3d():
     for m, tgt in enumerate(targets):
         tgt_set = set(tgt.tolist())
         collision = ctx_set & tgt_set
-        assert len(collision) == 0, f"Collision detected between context and target {m}: {collision}"
+        assert len(collision) == 0, (
+            f"Collision detected between context and target {m}: {collision}"
+        )
 
     # 3. Check bounds
     assert all(0 <= idx < 512 for idx in ctx.tolist())
@@ -82,7 +84,9 @@ def test_random_modality_dropout_3d():
 
 
 def test_volumetric_augmentations_3d():
-    aug = VolumetricAugmentations3D(flip_prob=1.0, noise_prob=1.0, modality_dropout_prob=0.0, is_training=True)
+    aug = VolumetricAugmentations3D(
+        flip_prob=1.0, noise_prob=1.0, modality_dropout_prob=0.0, is_training=True
+    )
     img = torch.randn(4, 32, 32, 32)
     mask = torch.zeros(1, 32, 32, 32)
     mask[:, 10:20, 10:20, 10:20] = 1.0

@@ -5,8 +5,7 @@ Trains MONAI 3D Residual UNet on multi-modal BraTS 2024 GLI volumes.
 """
 
 import argparse
-import sys
-from pathlib import Path
+
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -14,17 +13,20 @@ from tqdm import tqdm
 
 from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
-    CONFIGS_DIR,
     LOGS_DIR,
     ensure_directories,
-    load_yaml_config,
-    merge_config_with_args,
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
 from brats_jepa_3d.losses import CombinedDiceBCELoss3D
 from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
 from brats_jepa_3d.models import BraTS3DUNet
-from brats_jepa_3d.utils import MetricTracker, get_autocast_context, get_device, set_seed, setup_logger
+from brats_jepa_3d.utils import (
+    MetricTracker,
+    get_autocast_context,
+    get_device,
+    set_seed,
+    setup_logger,
+)
 
 
 def parse_args():
@@ -85,17 +87,29 @@ def main():
         train_dataset = BraTS3DDataset(split="train", augmentations=aug_tf)
         val_dataset = BraTS3DDataset(split="val", augmentations=None)
     except FileNotFoundError:
-        logger.warning("Processed dataset not found. Generating synthetic volume dataset for verification.")
+        logger.warning(
+            "Processed dataset not found. Generating synthetic volume dataset for verification."
+        )
         train_dataset = [
-            {"image": torch.randn(4, 128, 128, 128), "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(), "patient_id": f"train_{i}"}
+            {
+                "image": torch.randn(4, 128, 128, 128),
+                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                "patient_id": f"train_{i}",
+            }
             for i in range(4)
         ]
         val_dataset = [
-            {"image": torch.randn(4, 128, 128, 128), "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(), "patient_id": f"val_{i}"}
+            {
+                "image": torch.randn(4, 128, 128, 128),
+                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                "patient_id": f"val_{i}",
+            }
             for i in range(2)
         ]
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size if not args.smoke_test else 2, shuffle=True)
+    train_loader = DataLoader(
+        train_dataset, batch_size=args.batch_size if not args.smoke_test else 2, shuffle=True
+    )
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 
     model = BraTS3DUNet(
@@ -107,9 +121,14 @@ def main():
     ).to(device)
 
     criterion = CombinedDiceBCELoss3D()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+    )
     epochs = 1 if args.smoke_test else args.epochs
-    scaler = torch.amp.GradScaler(device="cuda" if device.type == "cuda" else "cpu", enabled=args.amp and device.type == "cuda")
+    scaler = torch.amp.GradScaler(
+        device="cuda" if device.type == "cuda" else "cpu",
+        enabled=args.amp and device.type == "cuda",
+    )
 
     best_val_dice = -1.0
     tracker = MetricTracker()
@@ -152,20 +171,25 @@ def main():
             f"Val Dice: {val_metrics['val_dice']:.4f} | Val HD95: {val_metrics['val_hd95']:.2f} mm"
         )
 
-        tracker.update({
-            "epoch": epoch,
-            "train_loss": avg_train_loss,
-            **val_metrics,
-        })
+        tracker.update(
+            {
+                "epoch": epoch,
+                "train_loss": avg_train_loss,
+                **val_metrics,
+            }
+        )
 
         if val_metrics["val_dice"] > best_val_dice or args.smoke_test:
             best_val_dice = val_metrics["val_dice"]
             best_ckpt_path = CHECKPOINTS_DIR / "unet_3d_best.pt"
-            torch.save({
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "val_dice": best_val_dice,
-            }, best_ckpt_path)
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "val_dice": best_val_dice,
+                },
+                best_ckpt_path,
+            )
             logger.info(f"New best model saved: {best_ckpt_path} (Val Dice: {best_val_dice:.4f})")
 
     tracker.save_json(LOGS_DIR / "unet_3d_metrics.json")

@@ -19,6 +19,7 @@ DATA_DIR = PROJECT_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed" / "brats_gli_3d"
 
+
 def get_dataset_dir(dataset_name: str = "brats_gli_3d") -> Path:
     """Dynamically resolves the path to a 3D dataset directory across Kaggle, Colab, env vars, and local storage."""
     # 1. Environment variable overrides
@@ -70,9 +71,11 @@ def get_dataset_dir(dataset_name: str = "brats_gli_3d") -> Path:
 
     return local_target
 
+
 def get_metadata_path(dataset_name: str = "brats_gli_3d") -> Path:
     """Returns the resolved metadata.csv path for a given dataset."""
     return get_dataset_dir(dataset_name) / "metadata.csv"
+
 
 # Output directory resolution
 if IN_KAGGLE:
@@ -92,6 +95,7 @@ FIGURES_DIR = OUTPUTS_DIR / "figures"
 METRICS_DIR = OUTPUTS_DIR / "metrics"
 LOGS_DIR = OUTPUTS_DIR / "logs"
 
+
 def load_yaml_config(config_path: str | Path) -> dict[str, Any]:
     """Loads a YAML configuration file."""
     path = Path(config_path)
@@ -102,14 +106,20 @@ def load_yaml_config(config_path: str | Path) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
+
 def ensure_directories(base_output_dir: Path | str | None = None):
     """Creates required project output directories if they do not exist."""
     out_dir = Path(base_output_dir).resolve() if base_output_dir else OUTPUTS_DIR
     for directory in [
-        RAW_DATA_DIR, PROCESSED_DATA_DIR,
-        out_dir / "checkpoints", out_dir / "figures", out_dir / "metrics", out_dir / "logs"
+        RAW_DATA_DIR,
+        PROCESSED_DATA_DIR,
+        out_dir / "checkpoints",
+        out_dir / "figures",
+        out_dir / "metrics",
+        out_dir / "logs",
     ]:
         directory.mkdir(parents=True, exist_ok=True)
+
 
 def merge_config_with_args(
     config: dict[str, Any],

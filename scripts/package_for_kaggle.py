@@ -11,9 +11,9 @@ Usage:
 
 import argparse
 import os
-from pathlib import Path
 import time
 import zipfile
+from pathlib import Path
 
 # Root directory of thesis_3d
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -88,12 +88,16 @@ def package_dataset(
             file_count += 1
             total_uncompressed += file_path.stat().st_size
             if idx % 100 == 0 or idx == total_files:
-                print(f"   Progress: {idx:,} / {total_files:,} files ({idx/total_files*100:.1f}%)")
+                print(
+                    f"   Progress: {idx:,} / {total_files:,} files ({idx / total_files * 100:.1f}%)"
+                )
 
     elapsed = time.perf_counter() - t0
     zip_size = output_zip.stat().st_size
     print(f"   ✓ Archived {file_count:,} files from {dataset_name}")
-    print(f"   ✓ Completed in {elapsed:.1f}s | Uncompressed: {format_size(total_uncompressed)} | Archive: {format_size(zip_size)}")
+    print(
+        f"   ✓ Completed in {elapsed:.1f}s | Uncompressed: {format_size(total_uncompressed)} | Archive: {format_size(zip_size)}"
+    )
     return file_count, total_uncompressed
 
 

@@ -11,12 +11,12 @@ All figures are saved in both PNG (300 DPI) and vector PDF formats.
 
 import argparse
 from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import torch
 
-from brats_jepa_3d.config import FIGURES_DIR, METRICS_DIR, PROCESSED_DATA_DIR, ensure_directories
+from brats_jepa_3d.config import FIGURES_DIR, METRICS_DIR, PROCESSED_DATA_DIR
 
 
 def parse_args():
@@ -57,7 +57,9 @@ def plot_orthogonal_slices(
     if np.any(mask_1ch[0, cz, :, :] > 0):
         axes[0].contour(mask_1ch[0, cz, :, :], colors="#E63946", levels=[0.5], linewidths=2.0)
     if pred_1ch is not None and np.any(pred_1ch[0, cz, :, :] > 0):
-        axes[0].contour(pred_1ch[0, cz, :, :], colors="#457B9D", levels=[0.5], linewidths=2.0, linestyles="--")
+        axes[0].contour(
+            pred_1ch[0, cz, :, :], colors="#457B9D", levels=[0.5], linewidths=2.0, linestyles="--"
+        )
     axes[0].set_title(f"Axial Slice (Z={cz})", fontsize=13, fontweight="bold")
     axes[0].axis("off")
 
@@ -66,7 +68,9 @@ def plot_orthogonal_slices(
     if np.any(mask_1ch[0, :, cy, :] > 0):
         axes[1].contour(mask_1ch[0, :, cy, :], colors="#E63946", levels=[0.5], linewidths=2.0)
     if pred_1ch is not None and np.any(pred_1ch[0, :, cy, :] > 0):
-        axes[1].contour(pred_1ch[0, :, cy, :], colors="#457B9D", levels=[0.5], linewidths=2.0, linestyles="--")
+        axes[1].contour(
+            pred_1ch[0, :, cy, :], colors="#457B9D", levels=[0.5], linewidths=2.0, linestyles="--"
+        )
     axes[1].set_title(f"Coronal Slice (Y={cy})", fontsize=13, fontweight="bold")
     axes[1].axis("off")
 
@@ -75,7 +79,9 @@ def plot_orthogonal_slices(
     if np.any(mask_1ch[0, :, :, cx] > 0):
         axes[2].contour(mask_1ch[0, :, :, cx], colors="#E63946", levels=[0.5], linewidths=2.0)
     if pred_1ch is not None and np.any(pred_1ch[0, :, :, cx] > 0):
-        axes[2].contour(pred_1ch[0, :, :, cx], colors="#457B9D", levels=[0.5], linewidths=2.0, linestyles="--")
+        axes[2].contour(
+            pred_1ch[0, :, :, cx], colors="#457B9D", levels=[0.5], linewidths=2.0, linestyles="--"
+        )
     axes[2].set_title(f"Sagittal Slice (X={cx})", fontsize=13, fontweight="bold")
     axes[2].axis("off")
 
@@ -83,10 +89,21 @@ def plot_orthogonal_slices(
         plt.Line2D([0], [0], color="#E63946", lw=2.5, label="Ground Truth (Whole Tumor)"),
     ]
     if pred_1ch is not None:
-        legend_elements.append(plt.Line2D([0], [0], color="#457B9D", lw=2.5, linestyle="--", label="Model Prediction"))
-    
-    fig.suptitle(f"Multi-Planar Orthogonal View: {patient_id}", fontsize=15, fontweight="bold", y=0.98)
-    fig.legend(handles=legend_elements, loc="upper center", bbox_to_anchor=(0.5, 0.93), ncol=2, fontsize=12, frameon=True)
+        legend_elements.append(
+            plt.Line2D([0], [0], color="#457B9D", lw=2.5, linestyle="--", label="Model Prediction")
+        )
+
+    fig.suptitle(
+        f"Multi-Planar Orthogonal View: {patient_id}", fontsize=15, fontweight="bold", y=0.98
+    )
+    fig.legend(
+        handles=legend_elements,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.93),
+        ncol=2,
+        fontsize=12,
+        frameon=True,
+    )
 
     plt.tight_layout(rect=[0, 0, 1, 0.88])
     if save_path:
@@ -199,7 +216,11 @@ def plot_ood_robustness(ood_csv: Path, out_dir: Path):
         ax.bar(x + i * width, vals, width, label=model_col, color=colors[i % len(colors)])
 
     ax.set_ylabel("3D Dice Score (%)", fontsize=12, fontweight="bold")
-    ax.set_title("Out-of-Distribution Robustness across Scanner Shifts & Artifacts", fontsize=13, fontweight="bold")
+    ax.set_title(
+        "Out-of-Distribution Robustness across Scanner Shifts & Artifacts",
+        fontsize=13,
+        fontweight="bold",
+    )
     ax.set_xticks(x + width * (len(models) - 1) / 2)
     ax.set_xticklabels(regimes, rotation=20, ha="right", fontsize=10)
     ax.legend(frameon=True, fontsize=11)
@@ -239,7 +260,9 @@ def main():
         synth_pred = np.zeros((1, 128, 128, 128), dtype=np.uint8)
         synth_pred[0, 52:77, 48:73, 50:75] = 1
         fig_path = out_dir / "orthogonal_multi_planar_figure.png"
-        plot_orthogonal_slices(synth_vol, synth_mask, synth_pred, save_path=fig_path, patient_id="Synthetic Volume")
+        plot_orthogonal_slices(
+            synth_vol, synth_mask, synth_pred, save_path=fig_path, patient_id="Synthetic Volume"
+        )
 
     # 2. Benchmark metric plots
     plot_benchmark_metrics(metrics_dir / "benchmark_3d_summary.csv", out_dir)

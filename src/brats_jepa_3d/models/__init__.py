@@ -13,14 +13,14 @@ from .visreg_jepa_3d import VisRegJEPA3D
 
 __all__ = [
     "IJEPA3D",
+    "BraTS3DUNet",
     "BraTS3DnnUNet",
     "JEPAPredictor3D",
     "JEPASegmentationModel3D",
     "MultiScaleViTSegmentationDecoder3D",
-    "ViTSegmentationDecoder3D",
-    "SigRegJEPA3D",
-    "BraTS3DUNet",
     "PatchEmbed3D",
-    "VisionTransformerEncoder3D",
+    "SigRegJEPA3D",
+    "ViTSegmentationDecoder3D",
     "VisRegJEPA3D",
+    "VisionTransformerEncoder3D",
 ]

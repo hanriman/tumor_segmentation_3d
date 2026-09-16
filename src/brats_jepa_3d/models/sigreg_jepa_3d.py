@@ -1,4 +1,5 @@
 from typing import Any
+
 import torch
 from torch import nn
 
@@ -22,6 +23,7 @@ class SigRegJEPA3D(nn.Module):
        auxiliary space where Gaussianity is enforced, leaving the backbone free to organize rich
        pathological features (Tishby et al., 2000; Chen et al., 2020; Balestriero & LeCun, 2025).
     """
+
     def __init__(
         self,
         img_size: tuple[int, int, int] = (128, 128, 128),
@@ -87,7 +89,9 @@ class SigRegJEPA3D(nn.Module):
             self.context_encoder.train()
 
         # 2. Forward encoder on ONLY visible context patches WITH gradients
-        context_tokens = self.context_encoder(images, patch_indices=context_indices)  # [B, N_ctx, embed_dim]
+        context_tokens = self.context_encoder(
+            images, patch_indices=context_indices
+        )  # [B, N_ctx, embed_dim]
 
         # 3. Project context tokens through MLP for Epps-Pulley Gaussianity regularization
         projected_tokens = self.projector(context_tokens)  # [B, N_ctx, proj_dim]

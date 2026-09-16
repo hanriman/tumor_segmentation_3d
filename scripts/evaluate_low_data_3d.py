@@ -5,7 +5,7 @@ Evaluates model performance under extreme label scarcity (1% to 100% volumetric 
 """
 
 import argparse
-from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import torch
@@ -21,7 +21,9 @@ from brats_jepa_3d.utils import get_autocast_context, get_device, set_seed, setu
 
 def parse_args():
     parser = argparse.ArgumentParser(description="3D Label Efficiency Benchmark")
-    parser.add_argument("--fractions", nargs="+", type=float, default=[0.01, 0.05, 0.10, 0.25, 0.50, 1.00])
+    parser.add_argument(
+        "--fractions", nargs="+", type=float, default=[0.01, 0.05, 0.10, 0.25, 0.50, 1.00]
+    )
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
@@ -30,10 +32,20 @@ def parse_args():
     return parser.parse_args()
 
 
-def train_and_eval(model, train_loader, test_loader, device, epochs: int, amp: bool = True, smoke_test: bool = False) -> float:
+def train_and_eval(
+    model,
+    train_loader,
+    test_loader,
+    device,
+    epochs: int,
+    amp: bool = True,
+    smoke_test: bool = False,
+) -> float:
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-4)
     criterion = CombinedDiceBCELoss3D()
-    scaler = torch.amp.GradScaler(device="cuda" if device.type == "cuda" else "cpu", enabled=amp and device.type == "cuda")
+    scaler = torch.amp.GradScaler(
+        device="cuda" if device.type == "cuda" else "cpu", enabled=amp and device.type == "cuda"
+    )
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -94,32 +106,114 @@ def main():
     try:
         test_dataset = BraTS3DDataset(split="test")
     except FileNotFoundError:
-        test_dataset = [{"image": torch.randn(4, 128, 128, 128), "mask": (torch.rand(1, 128, 128, 128) > 0.95).float()} for _ in range(2)]
+        test_dataset = [
+            {
+                "image": torch.randn(4, 128, 128, 128),
+                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+            }
+            for _ in range(2)
+        ]
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
+    def build_model(name: str):
+        if name == "3D VisReg JEPA (FPN)":
+            m = JEPASegmentationModel3D(decoder_type="multiscale")
+            ckpts = sorted(CHECKPOINTS_DIR.glob("visreg_jepa*epoch*.pt")) + sorted(
+                CHECKPOINTS_DIR.glob("visreg_jepa*.pt")
+            )
+            if ckpts:
+                ckpt_path = ckpts[-1]
+                ckpt = torch.load(ckpt_path, map_location=device)
+                enc_dict = ckpt.get("encoder_state_dict", ckpt.get("model_state_dict"))
+                clean_dict = {
+                    k.replace("context_encoder.", ""): v
+                    for k, v in enc_dict.items()
+                    if "context_encoder" in k or k in m.encoder.state_dict()
+                }
+                m.load_pretrained_encoder(clean_dict if clean_dict else enc_dict)
+                logger.info(
+                    f"Initialized {name} with pre-trained encoder weights from: {ckpt_path.name}"
+                )
+            else:
+                logger.warning(
+                    f"No pre-trained weights found for {name}. Initialized from scratch."
+                )
+            return m.to(device)
+
+        elif name == "3D SigReg JEPA (FPN)":
+            m = JEPASegmentationModel3D(decoder_type="multiscale")
+            ckpts = sorted(CHECKPOINTS_DIR.glob("sigreg_jepa*epoch*.pt")) + sorted(
+                CHECKPOINTS_DIR.glob("sigreg_jepa*.pt")
+            )
+            if ckpts:
+                ckpt_path = ckpts[-1]
+                ckpt = torch.load(ckpt_path, map_location=device)
+                enc_dict = ckpt.get("encoder_state_dict", ckpt.get("model_state_dict"))
+                clean_dict = {
+                    k.replace("context_encoder.", ""): v
+                    for k, v in enc_dict.items()
+                    if "context_encoder" in k or k in m.encoder.state_dict()
+                }
+                m.load_pretrained_encoder(clean_dict if clean_dict else enc_dict)
+                logger.info(
+                    f"Initialized {name} with pre-trained encoder weights from: {ckpt_path.name}"
+                )
+            else:
+                logger.warning(
+                    f"No pre-trained weights found for {name}. Initialized from scratch."
+                )
+            return m.to(device)
+
+        elif name == "3D nnU-Net":
+            return BraTS3DnnUNet(deep_supervision=False).to(device)
+
+        elif name == "3D UNet":
+            return BraTS3DUNet().to(device)
+
+        else:
+            raise ValueError(f"Unknown model name: {name}")
+
     models = [
-        ("3D VisReg JEPA (FPN)", lambda: JEPASegmentationModel3D(decoder_type="multiscale")),
-        ("3D SigReg JEPA (FPN)", lambda: JEPASegmentationModel3D(decoder_type="multiscale")),
-        ("3D nnU-Net", lambda: BraTS3DnnUNet(deep_supervision=False)),
-        ("3D UNet", lambda: BraTS3DUNet()),
+        ("3D VisReg JEPA (FPN)", lambda: build_model("3D VisReg JEPA (FPN)")),
+        ("3D SigReg JEPA (FPN)", lambda: build_model("3D SigReg JEPA (FPN)")),
+        ("3D nnU-Net", lambda: build_model("3D nnU-Net")),
+        ("3D UNet", lambda: build_model("3D UNet")),
     ]
 
     records = []
 
     for frac in fractions:
-        logger.info(f"\n--- Evaluating Fraction: {frac*100:.1f}% Labels ---")
+        logger.info(f"\n--- Evaluating Fraction: {frac * 100:.1f}% Labels ---")
         try:
-            train_dataset = BraTS3DDataset(split="train", fraction=frac, seed=args.seed, augmentations=aug_tf)
+            train_dataset = BraTS3DDataset(
+                split="train", fraction=frac, seed=args.seed, augmentations=aug_tf
+            )
         except FileNotFoundError:
-            train_dataset = [{"image": torch.randn(4, 128, 128, 128), "mask": (torch.rand(1, 128, 128, 128) > 0.95).float()} for _ in range(2)]
-        train_loader = DataLoader(train_dataset, batch_size=args.batch_size if not args.smoke_test else 2, shuffle=True)
+            train_dataset = [
+                {
+                    "image": torch.randn(4, 128, 128, 128),
+                    "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                }
+                for _ in range(2)
+            ]
+        train_loader = DataLoader(
+            train_dataset, batch_size=args.batch_size if not args.smoke_test else 2, shuffle=True
+        )
 
-        row = {"Fraction": f"{frac*100:.1f}%"}
+        row = {"Fraction": f"{frac * 100:.1f}%"}
         for name, model_fn in models:
             m = model_fn().to(device)
-            dice = train_and_eval(m, train_loader, test_loader, device, epochs=epochs, amp=args.amp, smoke_test=args.smoke_test)
-            logger.info(f"{name} ({frac*100:.1f}% labels) -> Test Dice: {dice*100:.2f}%")
-            row[name] = f"{dice*100:.2f}%"
+            dice = train_and_eval(
+                m,
+                train_loader,
+                test_loader,
+                device,
+                epochs=epochs,
+                amp=args.amp,
+                smoke_test=args.smoke_test,
+            )
+            logger.info(f"{name} ({frac * 100:.1f}% labels) -> Test Dice: {dice * 100:.2f}%")
+            row[name] = f"{dice * 100:.2f}%"
 
         records.append(row)
 

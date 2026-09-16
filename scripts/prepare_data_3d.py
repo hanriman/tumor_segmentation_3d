@@ -19,14 +19,14 @@ Theoretical & Methodological References:
 """
 
 import argparse
-import os
 from pathlib import Path
+
 import nibabel as nib
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
 import torch
 import torch.nn.functional as F
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 from brats_jepa_3d.config import PROCESSED_DATA_DIR, RAW_DATA_DIR
@@ -82,7 +82,9 @@ def zscore_normalize_non_zero(volume: np.ndarray) -> np.ndarray:
     return normalized
 
 
-def resample_3d_volume(volume: np.ndarray, target_shape: tuple[int, int, int], is_mask: bool = False) -> np.ndarray:
+def resample_3d_volume(
+    volume: np.ndarray, target_shape: tuple[int, int, int], is_mask: bool = False
+) -> np.ndarray:
     """
     Resamples 3D volume [D, H, W] to target_shape using trilinear (image) or nearest-neighbor (mask).
     """
@@ -91,12 +93,16 @@ def resample_3d_volume(volume: np.ndarray, target_shape: tuple[int, int, int], i
     mode = "nearest" if is_mask else "trilinear"
     align_corners = None if is_mask else False
 
-    resampled = F.interpolate(
-        t,
-        size=target_shape,
-        mode=mode,
-        align_corners=align_corners,
-    ).squeeze(0).squeeze(0)
+    resampled = (
+        F.interpolate(
+            t,
+            size=target_shape,
+            mode=mode,
+            align_corners=align_corners,
+        )
+        .squeeze(0)
+        .squeeze(0)
+    )
 
     if is_mask:
         return (resampled > 0.5).to(torch.uint8).numpy()
@@ -174,7 +180,11 @@ def process_patient(
         mask=mask_1ch,
     )
 
-    num_voxels_brain = int(np.sum((image_4ch[0] != 0) | (image_4ch[1] != 0) | (image_4ch[2] != 0) | (image_4ch[3] != 0)))
+    num_voxels_brain = int(
+        np.sum(
+            (image_4ch[0] != 0) | (image_4ch[1] != 0) | (image_4ch[2] != 0) | (image_4ch[3] != 0)
+        )
+    )
     num_voxels_tumor = int(np.sum(mask_1ch > 0))
     has_tumor = bool(num_voxels_tumor > 0)
 
@@ -227,9 +237,11 @@ def main():
     print(f"Saving canonical 128^3 .npz volumes to: {output_dir}")
 
     # Gather patient directories
-    patient_dirs = sorted([d for d in data_dir.iterdir() if d.is_dir() and d.name.startswith("BraTS")])
+    patient_dirs = sorted(
+        [d for d in data_dir.iterdir() if d.is_dir() and d.name.startswith("BraTS")]
+    )
     if args.limit and args.limit > 0:
-        patient_dirs = patient_dirs[:args.limit]
+        patient_dirs = patient_dirs[: args.limit]
         print(f"Limiting preprocessing to first {len(patient_dirs)} patients.")
     else:
         print(f"Found {len(patient_dirs)} patient volumes to process.")

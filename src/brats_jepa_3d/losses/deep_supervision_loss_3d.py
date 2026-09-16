@@ -1,7 +1,7 @@
-from typing import Any
 import torch
 import torch.nn.functional as F
 from torch import nn
+
 from .dice_bce_loss_3d import CombinedDiceBCELoss3D
 
 
@@ -16,6 +16,7 @@ class DeepSupervisionLoss3D(nn.Module):
     gradient highways to early convolutional/transformer blocks. Multi-scale heads are weighted using
     normalized exponential decay w_s = 2^{-s} / \sum 2^{-j} so that higher-resolution outputs dominate.
     """
+
     def __init__(
         self,
         weights: list[float] | None = None,
@@ -25,7 +26,7 @@ class DeepSupervisionLoss3D(nn.Module):
         super().__init__()
         if weights is None:
             # Default normalized weights for 4 multi-scale heads: 128^3, 64^3, 32^3, 16^3
-            raw = [1.0 / (2 ** i) for i in range(4)]
+            raw = [1.0 / (2**i) for i in range(4)]
             total = sum(raw)
             weights = [w / total for w in raw]
         self.weights = weights

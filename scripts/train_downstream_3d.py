@@ -5,8 +5,8 @@ Couples pre-trained 3D JEPA encoders with Bottleneck or Multi-Scale FPN Decoders
 """
 
 import argparse
-import sys
 from pathlib import Path
+
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -14,25 +14,39 @@ from tqdm import tqdm
 
 from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
-    CONFIGS_DIR,
     LOGS_DIR,
     ensure_directories,
-    load_yaml_config,
-    merge_config_with_args,
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
 from brats_jepa_3d.losses import CombinedDiceBCELoss3D, DeepSupervisionLoss3D
 from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
 from brats_jepa_3d.models import JEPASegmentationModel3D
-from brats_jepa_3d.utils import MetricTracker, get_autocast_context, get_device, set_seed, setup_logger
+from brats_jepa_3d.utils import (
+    MetricTracker,
+    get_autocast_context,
+    get_device,
+    set_seed,
+    setup_logger,
+)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Downstream 3D Volumetric Fine-Tuning")
     parser.add_argument("--model_type", type=str, default="sigreg_jepa")
-    parser.add_argument("--decoder_type", type=str, default="multiscale", choices=["multiscale", "bottleneck"])
-    parser.add_argument("--pretrained_checkpoint", type=str, default=None, help="Path to pre-trained SSL encoder checkpoint")
-    parser.add_argument("--freeze_encoder", action="store_true", help="Linear/decoder probing: freeze encoder weights")
+    parser.add_argument(
+        "--decoder_type", type=str, default="multiscale", choices=["multiscale", "bottleneck"]
+    )
+    parser.add_argument(
+        "--pretrained_checkpoint",
+        type=str,
+        default=None,
+        help="Path to pre-trained SSL encoder checkpoint",
+    )
+    parser.add_argument(
+        "--freeze_encoder",
+        action="store_true",
+        help="Linear/decoder probing: freeze encoder weights",
+    )
     parser.add_argument("--deep_supervision", action="store_true", default=False)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=2)
@@ -78,8 +92,12 @@ def main():
     ensure_directories()
     set_seed(args.seed)
     device = get_device()
-    logger = setup_logger("downstream_3d", LOGS_DIR / f"{args.model_type}_{args.decoder_type}_downstream.log")
-    logger.info(f"Starting 3D Downstream Fine-Tuning: Model={args.model_type}, Decoder={args.decoder_type}, FreezeEncoder={args.freeze_encoder}")
+    logger = setup_logger(
+        "downstream_3d", LOGS_DIR / f"{args.model_type}_{args.decoder_type}_downstream.log"
+    )
+    logger.info(
+        f"Starting 3D Downstream Fine-Tuning: Model={args.model_type}, Decoder={args.decoder_type}, FreezeEncoder={args.freeze_encoder}"
+    )
 
     aug_tf = VolumetricAugmentations3D(
         flip_prob=0.5,
@@ -92,17 +110,29 @@ def main():
         train_dataset = BraTS3DDataset(split="train", augmentations=aug_tf)
         val_dataset = BraTS3DDataset(split="val", augmentations=None)
     except FileNotFoundError:
-        logger.warning("Processed dataset not found. Generating synthetic volume dataset for verification.")
+        logger.warning(
+            "Processed dataset not found. Generating synthetic volume dataset for verification."
+        )
         train_dataset = [
-            {"image": torch.randn(4, 128, 128, 128), "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(), "patient_id": f"train_{i}"}
+            {
+                "image": torch.randn(4, 128, 128, 128),
+                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                "patient_id": f"train_{i}",
+            }
             for i in range(4)
         ]
         val_dataset = [
-            {"image": torch.randn(4, 128, 128, 128), "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(), "patient_id": f"val_{i}"}
+            {
+                "image": torch.randn(4, 128, 128, 128),
+                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                "patient_id": f"val_{i}",
+            }
             for i in range(2)
         ]
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size if not args.smoke_test else 2, shuffle=True)
+    train_loader = DataLoader(
+        train_dataset, batch_size=args.batch_size if not args.smoke_test else 2, shuffle=True
+    )
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 
     # Initialize Downstream Model
@@ -126,11 +156,17 @@ def main():
             ckpt = torch.load(ckpt_path, map_location=device)
             enc_dict = ckpt.get("encoder_state_dict", ckpt.get("model_state_dict"))
             # Filter encoder keys if necessary
-            clean_dict = {k.replace("context_encoder.", ""): v for k, v in enc_dict.items() if "context_encoder" in k or k in model.encoder.state_dict()}
+            clean_dict = {
+                k.replace("context_encoder.", ""): v
+                for k, v in enc_dict.items()
+                if "context_encoder" in k or k in model.encoder.state_dict()
+            }
             model.load_pretrained_encoder(clean_dict if clean_dict else enc_dict)
             logger.info(f"Loaded pre-trained encoder weights from: {ckpt_path}")
         else:
-            logger.warning(f"Pretrained checkpoint not found at: {ckpt_path}. Training from random initialization.")
+            logger.warning(
+                f"Pretrained checkpoint not found at: {ckpt_path}. Training from random initialization."
+            )
 
     criterion = DeepSupervisionLoss3D() if args.deep_supervision else CombinedDiceBCELoss3D()
     optimizer = torch.optim.AdamW(
@@ -139,7 +175,10 @@ def main():
         weight_decay=args.weight_decay,
     )
     epochs = 1 if args.smoke_test else args.epochs
-    scaler = torch.amp.GradScaler(device="cuda" if device.type == "cuda" else "cpu", enabled=args.amp and device.type == "cuda")
+    scaler = torch.amp.GradScaler(
+        device="cuda" if device.type == "cuda" else "cpu",
+        enabled=args.amp and device.type == "cuda",
+    )
 
     best_val_dice = -1.0
     tracker = MetricTracker()
@@ -182,20 +221,25 @@ def main():
             f"Val Dice: {val_metrics['val_dice']:.4f} | Val HD95: {val_metrics['val_hd95']:.2f} mm"
         )
 
-        tracker.update({
-            "epoch": epoch,
-            "train_loss": avg_train_loss,
-            **val_metrics,
-        })
+        tracker.update(
+            {
+                "epoch": epoch,
+                "train_loss": avg_train_loss,
+                **val_metrics,
+            }
+        )
 
         if val_metrics["val_dice"] > best_val_dice or args.smoke_test:
             best_val_dice = val_metrics["val_dice"]
             best_ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_{args.decoder_type}_best.pt"
-            torch.save({
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "val_dice": best_val_dice,
-            }, best_ckpt_path)
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "val_dice": best_val_dice,
+                },
+                best_ckpt_path,
+            )
             logger.info(f"New best model saved: {best_ckpt_path} (Val Dice: {best_val_dice:.4f})")
 
     tracker.save_json(LOGS_DIR / f"{args.model_type}_{args.decoder_type}_downstream_metrics.json")

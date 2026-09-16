@@ -7,7 +7,6 @@ Sequentially runs data prep, SSL pretraining, downstream fine-tuning, baselines,
 import argparse
 import subprocess
 import sys
-from pathlib import Path
 
 from brats_jepa_3d.config import PROJECT_ROOT
 
@@ -22,7 +21,9 @@ def run_cmd(cmd_list: list[str]):
 
 def main():
     parser = argparse.ArgumentParser(description="Run Full 3D JEPA Pipeline")
-    parser.add_argument("--smoke_test", action="store_true", help="Run 1-epoch smoke test on all stages")
+    parser.add_argument(
+        "--smoke_test", action="store_true", help="Run 1-epoch smoke test on all stages"
+    )
     parser.add_argument("--skip_data_prep", action="store_true")
     args = parser.parse_args()
 
@@ -39,7 +40,20 @@ def main():
     run_cmd([py, "scripts/train_jepa_3d.py", "--model_type", "sigreg_jepa"] + smoke_flag)
 
     # 3. Downstream Fine-tuning
-    run_cmd([py, "scripts/train_downstream_3d.py", "--model_type", "sigreg_jepa", "--decoder_type", "multiscale"] + smoke_flag)
+    sigreg_ckpts = sorted((PROJECT_ROOT / "outputs/checkpoints").glob("sigreg_jepa_3d_epoch_*.pt"))
+    pretrained_arg = ["--pretrained_checkpoint", str(sigreg_ckpts[-1])] if sigreg_ckpts else []
+    run_cmd(
+        [
+            py,
+            "scripts/train_downstream_3d.py",
+            "--model_type",
+            "sigreg_jepa",
+            "--decoder_type",
+            "multiscale",
+        ]
+        + pretrained_arg
+        + smoke_flag
+    )
 
     # 4. Supervised Baselines
     run_cmd([py, "scripts/train_unet_3d.py"] + smoke_flag)

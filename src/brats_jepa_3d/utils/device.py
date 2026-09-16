@@ -1,5 +1,6 @@
 import contextlib
-from typing import Generator
+from collections.abc import Generator
+
 import torch
 
 
@@ -23,10 +24,12 @@ def get_device(preference: str = "auto") -> torch.device:
     return torch.device("cpu")
 
 
-def get_autocast_context(device: torch.device, enabled: bool = True) -> Generator[None, None, None] | contextlib.AbstractContextManager:
+def get_autocast_context(
+    device: torch.device, enabled: bool = True
+) -> Generator[None, None, None] | contextlib.AbstractContextManager:
     r"""
     Returns an appropriate mixed-precision autocast context for the active hardware.
-    
+
     Theoretical Justification:
     --------------------------
     3D volumetric inputs ([B, 4, 128, 128, 128]) and dense 3D convolutions require substantial VRAM.
@@ -44,7 +47,7 @@ def get_autocast_context(device: torch.device, enabled: bool = True) -> Generato
         if hasattr(torch.amp, "autocast"):
             try:
                 return torch.amp.autocast(device_type="mps", dtype=torch.float16)
-            except Exception:
+            except (RuntimeError, ValueError, AttributeError):
                 return contextlib.nullcontext()
         return contextlib.nullcontext()
     elif device.type == "cpu":

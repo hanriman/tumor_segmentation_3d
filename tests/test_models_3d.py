@@ -1,22 +1,24 @@
-import pytest
 import torch
+
 from brats_jepa_3d.models import (
+    IJEPA3D,
     BraTS3DnnUNet,
     BraTS3DUNet,
-    IJEPA3D,
     JEPAPredictor3D,
     JEPASegmentationModel3D,
     MultiScaleViTSegmentationDecoder3D,
     PatchEmbed3D,
     SigRegJEPA3D,
     VisionTransformerEncoder3D,
-    ViTSegmentationDecoder3D,
     VisRegJEPA3D,
+    ViTSegmentationDecoder3D,
 )
 
 
 def test_patch_embed_3d(sample_volume_3d):
-    pe = PatchEmbed3D(img_size=(128, 128, 128), patch_size=(16, 16, 16), in_channels=4, embed_dim=384)
+    pe = PatchEmbed3D(
+        img_size=(128, 128, 128), patch_size=(16, 16, 16), in_channels=4, embed_dim=384
+    )
     tokens = pe(sample_volume_3d)
     assert tokens.shape == (2, 512, 384)
 
@@ -42,6 +44,7 @@ def test_vision_transformer_encoder_3d(sample_volume_3d):
 
     # 3. Intermediate tokens extraction
     out, intermediates = enc(sample_volume_3d, return_intermediate=True)
+    assert out.shape == (2, 512, 384)
     assert len(intermediates) == 4
     assert intermediates[0].shape == (2, 512, 384)
 
@@ -142,6 +145,10 @@ def test_segmentation_decoders_3d():
     fpn_dec = MultiScaleViTSegmentationDecoder3D(in_dim=384, out_channels=1)
     logits_fpn = fpn_dec(intermediates)
     assert logits_fpn.shape == (2, 1, 128, 128, 128)
+
+    seg_model = JEPASegmentationModel3D(encoder_depth=2, decoder_type="multiscale")
+    logits_seg = seg_model(torch.randn(2, 4, 128, 128, 128))
+    assert logits_seg.shape == (2, 1, 128, 128, 128)
 
 
 def test_supervised_baselines_3d(sample_volume_3d):

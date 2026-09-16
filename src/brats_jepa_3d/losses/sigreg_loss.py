@@ -1,5 +1,5 @@
 import math
-from typing import Any
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -18,7 +18,7 @@ class EppsPulleyGaussianityTest(nn.Module):
        by the family of its 1D marginal distributions under all 1D linear projections
        u \in S^{d-1}. Testing multivariate standard normal N(0, I_d) is equivalent to testing
        that projected scalars u^T z ~ N(0, 1) for all u.
-    
+
     2. Epps-Pulley Test (1983):
        Compares the 1D Empirical Characteristic Function (ECF):
            \hat{\phi}_N(t) = \frac{1}{N} \sum_{n=1}^N \exp(i t p_n)
@@ -45,6 +45,7 @@ class EppsPulleyGaussianityTest(nn.Module):
     - Cramér, H., & Wold, H. (1936). "Some theorems on distribution functions."
       Journal of the London Mathematical Society, 1(4), 290-294.
     """
+
     def __init__(self, t_max: float = 3.0, n_knots: int = 17, normalize_measure: bool = True):
         super().__init__()
         self.normalize_measure = normalize_measure
@@ -68,8 +69,8 @@ class EppsPulleyGaussianityTest(nn.Module):
         weights = self.weights.to(device=proj.device, dtype=proj.dtype)
 
         x_t = proj.unsqueeze(-1) * t  # [N, K, Q]
-        ecf_real = x_t.cos().mean(dim=0)   # [K, Q]
-        ecf_imag = x_t.sin().mean(dim=0)   # [K, Q]
+        ecf_real = x_t.cos().mean(dim=0)  # [K, Q]
+        ecf_imag = x_t.sin().mean(dim=0)  # [K, Q]
         err = (ecf_real - phi).square() + ecf_imag.square()  # [K, Q]
 
         # Multiply by sample count N = proj.size(0) to cancel the 1/N factor in d(ecf)/dz
@@ -81,6 +82,7 @@ class SigRegLoss(nn.Module):
     r"""
     SigReg / LeJEPA Loss: Prediction Loss + Sketched Isotropic Gaussian Regularization.
     """
+
     def __init__(
         self,
         loss_type: str = "smooth_l1",
@@ -110,7 +112,11 @@ class SigRegLoss(nn.Module):
     ) -> dict[str, torch.Tensor]:
         j_loss = self.jepa_loss(predictions, targets)
 
-        reg_tokens = tokens if tokens is not None else (projected_tokens if projected_tokens is not None else context_tokens)
+        reg_tokens = (
+            tokens
+            if tokens is not None
+            else (projected_tokens if projected_tokens is not None else context_tokens)
+        )
         if reg_tokens is None:
             raise ValueError("SigRegLoss requires regularized token representations.")
 

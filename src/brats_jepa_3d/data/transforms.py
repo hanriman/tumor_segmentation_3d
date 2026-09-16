@@ -1,6 +1,5 @@
 import random
-from typing import Any
-import numpy as np
+
 import torch
 from torch import nn
 
@@ -23,6 +22,7 @@ class RandomModalityDropout3D(nn.Module):
        If all 4 channels are sampled for dropout (\prod_c (1 - m_c) = 1), one channel is randomly
        forced active, preventing degenerate all-zero inputs from generating zero-gradient steps.
     """
+
     def __init__(self, p_drop: float = 0.25):
         super().__init__()
         self.p_drop = p_drop
@@ -61,6 +61,7 @@ class VolumetricAugmentations3D:
     r"""
     3D Spatial & Intensity Augmentation Pipeline for Multi-Modal MRI Volumes.
     """
+
     def __init__(
         self,
         flip_prob: float = 0.5,
@@ -96,7 +97,7 @@ class VolumetricAugmentations3D:
 
         # 2. Additive Gaussian Electronics Noise (Parenchyma Only)
         if random.random() < self.noise_prob:
-            parenchyma_mask = (image != 0)
+            parenchyma_mask = image != 0
             noise = torch.randn_like(image) * self.noise_std
             image = image + noise * parenchyma_mask.float()
 

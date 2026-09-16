@@ -1,11 +1,13 @@
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
-from brats_jepa_3d.config import PROCESSED_DATA_DIR, get_dataset_dir, get_metadata_path
+from brats_jepa_3d.config import get_dataset_dir, get_metadata_path
 
 
 class BraTS3DDataset(Dataset):
@@ -18,6 +20,7 @@ class BraTS3DDataset(Dataset):
     - Integrated VolumetricAugmentations3D & RandomModalityDropout3D
     - Patient-stratified split filtering (train, val, test)
     """
+
     def __init__(
         self,
         data_dir: str | Path | None = None,
@@ -75,7 +78,7 @@ class BraTS3DDataset(Dataset):
 
         with np.load(file_path, mmap_mode="r") as data:
             image = torch.from_numpy(data["image"].astype(np.float32))  # [4, 128, 128, 128]
-            mask = torch.from_numpy(data["mask"].astype(np.float32))    # [1, 128, 128, 128]
+            mask = torch.from_numpy(data["mask"].astype(np.float32))  # [1, 128, 128, 128]
 
         if self.cache_in_ram:
             self.cache[idx] = (image, mask)

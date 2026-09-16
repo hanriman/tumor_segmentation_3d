@@ -1,8 +1,9 @@
 from typing import Any
+
 import numpy as np
+import torch
 from scipy.ndimage import binary_erosion
 from scipy.spatial import cKDTree
-import torch
 
 
 def compute_dice_score_3d(

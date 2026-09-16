@@ -6,8 +6,8 @@ Supports 3D I-JEPA, 3D SigReg JEPA, and 3D VisReg JEPA.
 
 import argparse
 import math
-import sys
 from pathlib import Path
+
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -28,15 +28,28 @@ from brats_jepa_3d.data import (
 )
 from brats_jepa_3d.losses import IJEPALoss, SigRegLoss, VisRegLoss
 from brats_jepa_3d.models import IJEPA3D, SigRegJEPA3D, VisRegJEPA3D
-from brats_jepa_3d.utils import MetricTracker, get_autocast_context, get_device, set_seed, setup_logger
+from brats_jepa_3d.utils import (
+    MetricTracker,
+    get_autocast_context,
+    get_device,
+    set_seed,
+    setup_logger,
+)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Pre-train 3D JEPA models on BraTS 2024 GLI")
-    parser.add_argument("--model_type", type=str, default="sigreg_jepa", choices=["ijepa", "sigreg_jepa", "visreg_jepa"])
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default="sigreg_jepa",
+        choices=["ijepa", "sigreg_jepa", "visreg_jepa"],
+    )
     parser.add_argument("--config", type=str, default=None, help="Path to base YAML config")
     parser.add_argument("--model_config", type=str, default=None, help="Path to model YAML config")
-    parser.add_argument("--exp_config", type=str, default=None, help="Path to experiment YAML config")
+    parser.add_argument(
+        "--exp_config", type=str, default=None, help="Path to experiment YAML config"
+    )
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--learning_rate", type=float, default=5e-4)
@@ -45,17 +58,23 @@ def parse_args():
     parser.add_argument("--amp", action="store_true", default=True)
     parser.add_argument("--no_amp", action="store_false", dest="amp")
     parser.add_argument("--clip_grad_norm", type=float, default=1.0)
-    parser.add_argument("--smoke_test", action="store_true", help="Run 1 epoch with 2 batches for fast verification")
+    parser.add_argument(
+        "--smoke_test", action="store_true", help="Run 1 epoch with 2 batches for fast verification"
+    )
     return parser.parse_args()
 
 
-def get_lr_scheduler(optimizer, warmup_epochs: int, total_epochs: int, base_lr: float, min_lr: float = 1e-5):
+def get_lr_scheduler(
+    optimizer, warmup_epochs: int, total_epochs: int, base_lr: float, min_lr: float = 1e-5
+):
     """Cosine learning rate schedule with linear warmup."""
+
     def lr_lambda(epoch):
         if epoch < warmup_epochs:
             return float(epoch + 1) / float(max(1, warmup_epochs))
         progress = float(epoch - warmup_epochs) / float(max(1, total_epochs - warmup_epochs))
         return max(min_lr / base_lr, 0.5 * (1.0 + math.cos(math.pi * progress)))
+
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
@@ -79,7 +98,9 @@ def main():
     set_seed(args.seed)
     device = get_device()
     logger = setup_logger("pretrain_3d", LOGS_DIR / f"{args.model_type}_pretrain.log")
-    logger.info(f"Starting 3D JEPA Pre-training: Model={args.model_type}, Device={device}, AMP={args.amp}")
+    logger.info(
+        f"Starting 3D JEPA Pre-training: Model={args.model_type}, Device={device}, AMP={args.amp}"
+    )
 
     # Initialize 3D Data Pipeline
     masking_tf = JEPAMaskingTransform3D(
@@ -102,7 +123,9 @@ def main():
             augmentations=aug_tf,
         )
     except FileNotFoundError:
-        logger.warning("Processed dataset not found. Generating synthetic volume dataset for verification.")
+        logger.warning(
+            "Processed dataset not found. Generating synthetic volume dataset for verification."
+        )
         # Synthetic dataset fallback for testing
         dataset = [
             {
@@ -181,11 +204,21 @@ def main():
         betas=(0.9, 0.95),
     )
     epochs = 1 if args.smoke_test else args.epochs
-    scheduler = get_lr_scheduler(optimizer, warmup_epochs=max(1, epochs // 10), total_epochs=epochs, base_lr=args.learning_rate)
-    scaler = torch.amp.GradScaler(device="cuda" if device.type == "cuda" else "cpu", enabled=args.amp and device.type == "cuda")
+    scheduler = get_lr_scheduler(
+        optimizer,
+        warmup_epochs=max(1, epochs // 10),
+        total_epochs=epochs,
+        base_lr=args.learning_rate,
+    )
+    scaler = torch.amp.GradScaler(
+        device="cuda" if device.type == "cuda" else "cpu",
+        enabled=args.amp and device.type == "cuda",
+    )
 
     tracker = MetricTracker()
-    logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
+    logger.info(
+        f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}"
+    )
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -206,14 +239,7 @@ def main():
                 if args.model_type == "ijepa":
                     loss = criterion(out["predictions"], out["targets"])
                     loss_dict = {"loss": loss, "jepa_loss": loss}
-                elif args.model_type == "sigreg_jepa":
-                    loss_dict = criterion(
-                        out["predictions"],
-                        out["targets"],
-                        projected_tokens=out["projected_tokens"],
-                    )
-                    loss = loss_dict["loss"]
-                elif args.model_type == "visreg_jepa":
+                elif args.model_type == "sigreg_jepa" or args.model_type == "visreg_jepa":
                     loss_dict = criterion(
                         out["predictions"],
                         out["targets"],
@@ -240,7 +266,9 @@ def main():
 
             epoch_loss += loss.item()
             num_batches += 1
-            pbar.set_postfix({"loss": f"{loss.item():.4f}", "lr": f"{scheduler.get_last_lr()[0]:.6f}"})
+            pbar.set_postfix(
+                {"loss": f"{loss.item():.4f}", "lr": f"{scheduler.get_last_lr()[0]:.6f}"}
+            )
 
             if args.smoke_test and batch_idx >= 1:
                 break
@@ -253,13 +281,16 @@ def main():
         # Save checkpoint
         if epoch % 10 == 0 or epoch == epochs or args.smoke_test:
             ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_3d_epoch_{epoch}.pt"
-            torch.save({
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "encoder_state_dict": model.context_encoder.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "loss": avg_loss,
-            }, ckpt_path)
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "encoder_state_dict": model.context_encoder.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "loss": avg_loss,
+                },
+                ckpt_path,
+            )
             logger.info(f"Checkpoint saved: {ckpt_path}")
 
     # Save metrics history

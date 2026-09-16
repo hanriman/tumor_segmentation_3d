@@ -1,5 +1,6 @@
 import copy
 from typing import Any
+
 import torch
 from torch import nn
 
@@ -16,6 +17,7 @@ class IJEPA3D(nn.Module):
     - Target Encoder E_theta_bar: evaluates full volume [B, 512, 384] without gradients (updated via EMA)
     - 3D Predictor P_phi: predicts target representations from context + target position queries
     """
+
     def __init__(
         self,
         img_size: tuple[int, int, int] = (128, 128, 128),
@@ -63,7 +65,9 @@ class IJEPA3D(nn.Module):
     def update_target_encoder(self, momentum: float | None = None):
         """EMA momentum update of target encoder weights."""
         m = momentum if momentum is not None else self.ema_momentum
-        for param_q, param_k in zip(self.context_encoder.parameters(), self.target_encoder.parameters()):
+        for param_q, param_k in zip(
+            self.context_encoder.parameters(), self.target_encoder.parameters()
+        ):
             param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
 
     def forward(
@@ -82,7 +86,9 @@ class IJEPA3D(nn.Module):
             target_full_tokens = self.target_encoder(images)  # [B, 512, embed_dim]
 
         # 2. Context representations from context encoder (evaluated strictly on visible context)
-        context_tokens = self.context_encoder(images, patch_indices=context_indices)  # [B, N_ctx, embed_dim]
+        context_tokens = self.context_encoder(
+            images, patch_indices=context_indices
+        )  # [B, N_ctx, embed_dim]
 
         predictions = []
         targets = []

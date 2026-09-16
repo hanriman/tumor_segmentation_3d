@@ -112,10 +112,10 @@ If you prefer testing everything in a single notebook before running full multi-
 2. Append `--smoke_test` to the commands to verify the entire pipeline in **~5 minutes**.
 3. Toggle specific models on/off using the cell switches:
    ```python
-   RUN_VISREG_PRETRAIN   = True
-   RUN_VISREG_FINETUNE   = True
-   RUN_NNUNET_BASELINE   = False
-   RUN_UNET_BASELINE     = False
+   RUN_VISREG_PRETRAIN = True
+   RUN_VISREG_FINETUNE = True
+   RUN_NNUNET_BASELINE = False
+   RUN_UNET_BASELINE = False
    ```
 
 ---

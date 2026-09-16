@@ -1,5 +1,3 @@
-from typing import Any
-import numpy as np
 import torch
 from torch import nn
 
@@ -26,7 +24,10 @@ class ViTSegmentationDecoder3D(nn.Module):
        into independent groups (e.g. 16, 8, 4), computing statistics along spatial and sub-channel
        dimensions per-sample, guaranteeing robust convergence across variable batch sizes.
     """
-    def __init__(self, in_dim: int = 384, out_channels: int = 1, grid_size: tuple[int, int, int] = (8, 8, 8)):
+
+    def __init__(
+        self, in_dim: int = 384, out_channels: int = 1, grid_size: tuple[int, int, int] = (8, 8, 8)
+    ):
         super().__init__()
         self.in_dim = in_dim
         self.grid_size = grid_size
@@ -76,6 +77,7 @@ class MultiScaleViTSegmentationDecoder3D(nn.Module):
        Lateral skip connections progressively project and concatenate intermediate features into
        corresponding decoder upsampling stages, restoring fine-grained 3D boundary delineation.
     """
+
     def __init__(
         self,
         in_dim: int = 384,
@@ -211,6 +213,7 @@ class JEPASegmentationModel3D(nn.Module):
     Couples pre-trained 3D ViT Encoder with either Bottleneck or Hierarchical FPN Decoder.
     Supports full fine-tuning and frozen encoder linear/decoder probing.
     """
+
     def __init__(
         self,
         img_size: tuple[int, int, int] = (128, 128, 128),
@@ -259,7 +262,7 @@ class JEPASegmentationModel3D(nn.Module):
 
     def load_pretrained_encoder(self, encoder_state_dict: dict):
         """Loads pre-trained SSL JEPA encoder weights."""
-        self.encoder.load_state_dict(encoder_state_dict)
+        self.encoder.load_state_dict(encoder_state_dict, strict=False)
 
     def train(self, mode: bool = True):
         """Override to keep frozen encoder in eval mode (freezing LayerNorm stats and dropout)."""
