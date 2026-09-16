@@ -43,7 +43,7 @@ def parse_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default=str(PROCESSED_DATA_DIR),
+        default=str(PROCESSED_DATA_DIR / "brats_gli_3d"),
         help="Path to save processed 3D .npz volumes",
     )
     parser.add_argument(
@@ -188,10 +188,15 @@ def process_patient(
     num_voxels_tumor = int(np.sum(mask_1ch > 0))
     has_tumor = bool(num_voxels_tumor > 0)
 
+    try:
+        rel_path = str(out_file.relative_to(output_dir.parent.parent))
+    except (ValueError, Exception):
+        rel_path = f"{output_dir.name}/{out_file.name}"
+
     return {
         "patient_id": pid,
         "file_name": out_file.name,
-        "rel_path": str(out_file.relative_to(output_dir.parent.parent)),
+        "rel_path": rel_path,
         "num_voxels_brain": num_voxels_brain,
         "num_voxels_tumor": num_voxels_tumor,
         "has_tumor": has_tumor,
