@@ -11,43 +11,34 @@ This guide provides an end-to-end, step-by-step walkthrough for running the enti
 | **GPU Accelerator** | NVIDIA Tesla T4 (16 GB VRAM) or 2x T4 | Ample memory for 3D ViT patches ($8^3 = 512$ tokens) and 4-channel $128^3$ tensors |
 | **Mixed Precision (AMP)** | Tensor Cores supported via FP16 | **~3.2x training speedup** with `--amp`, reducing 3D activation memory by >50% |
 | **CPU & System RAM** | 4 vCPU cores, 30 GB System RAM | Enables fast memory-mapped caching of `.npz` volumetric arrays in `BraTS3DDataset` |
-| **Runtime Limits** | Up to 12 hours per session / 30 hours per week | Sufficient to run 50-epoch 3D SSL pre-training + downstream tasks + baselines |
+| **Runtime Limits** | Up to 12 hours per session / 30 hours per week | Ample for individual models; modular notebooks avoid session timeout |
+| **Concurrent Sessions**| **Up to 2 active GPU sessions simultaneously** | **Train 3D VisReg on GPU 1 and 3D nnU-Net on GPU 2 at the exact same time!** |
 | **Pre-installed Stack** | PyTorch 2.x, CUDA 12.x, torchvision, SciPy | Minimal setup overhead; only `monai`, `nibabel`, and `tabulate` needed |
 
 ---
 
-## 2. Pipeline Architecture on Kaggle
+## 2. Notebook Architectures: Modular vs. All-in-One
+
+To ensure **zero risk of Kaggle's 12-hour session timeout** and enable **parallel GPU execution**, the repository provides both a **4-Notebook Modular Suite** (recommended for full training) and an **All-in-One Runner** (ideal for fast smoke-testing):
 
 ```text
-[Data Options]
-  Option A (Upload Preprocessed):
-    Local: python scripts/package_for_kaggle.py -> dist_kaggle/brats_3d_datasets.zip
-    Kaggle: Upload to /kaggle/input/brats-3d-datasets/
-  Option B (Preprocess in Notebook from Raw):
-    Attach raw BraTS dataset -> python scripts/prepare_data_3d.py
-       │
-       ▼
-[Kaggle Cloud Environment]
-  GitHub Repo / Codebase
-       │
-       ▼  (!pip install -e .)
-  /kaggle/working/thesis_3d/
-       │
-       ├── SSL Pre-training (I-JEPA, SigReg, VisReg)
-       ├── Supervised Baselines (3D UNet, 3D nnU-Net DynUNet)
-       ├── Downstream Fine-Tuning (Hierarchical 3D FPN)
-       ├── Master Benchmark (Dice, IoU, cKDTree HD95, Latency, EffRank, CosSim)
-       ├── Low-Data Efficiency (1% to 100% labels)
-       ├── OOD Scanner Shifts (Rician noise, B1 field bias, missing modalities)
-       └── Figure Generation (multi-planar orthogonal views, comparison charts)
-       │
-       ▼  (1-Click Download)
-  /kaggle/working/outputs.zip (checkpoints, metrics CSV/MD, publication PDF/PNG figures)
+thesis_3d/notebooks/
+├── 01_train_visreg_3d.ipynb          [~3.0 - 3.5 hrs]  Primary Method (SSL Pre-training + FPN + Low-Data)
+├── 02_train_nnunet_3d.ipynb          [~3.0 - 3.5 hrs]  SOTA Baseline (DynUNet with Deep Supervision)
+├── 03_train_unet_3d.ipynb            [~2.0 - 2.5 hrs]  Classical Baseline (MONAI Residual UNet)
+├── 04_evaluation_and_figures_3d.ipynb [~15 - 20 mins]   Master Benchmark, OOD Shifts & Paper Figures
+└── kaggle_runner_3d.ipynb            [Interactive]     All-in-One Runner with Toggles (Dry-Run / Smoke Test)
 ```
+
+### Why Use the Modular Suite?
+1. **Zero Timeout Risk**: Each individual model finishes in 2 to 3.5 hours, well below Kaggle's 12-hour continuous execution cap.
+2. **2x Speedup via Parallel GPUs**: Run `01_train_visreg_3d` on GPU 1 and `02_train_nnunet_3d` on GPU 2 simultaneously.
+3. **Fault Isolation**: If a baseline needs re-running, you only re-run that notebook—not the preceding 10 hours.
+4. **Seamless Output Chaining**: The evaluation notebook mounts checkpoints from previous notebooks via Kaggle's native `+ Add Input` -> `Your Work` feature.
 
 ---
 
-## 3. Step-by-Step Instructions
+## 3. Step-by-Step Execution Workflow
 
 ### Step 1: Prepare the Dataset for Kaggle
 
@@ -73,98 +64,59 @@ This extracts non-zero bounding boxes and resamples volumes to canonical $128^3$
 
 ---
 
-### Step 2: Create & Configure the Kaggle Notebook
+### Step 2: Running the Modular Training Suite
 
-1. In Kaggle, click **Create** -> **New Notebook**.
-2. Go to **File** -> **Import Notebook** -> Upload [`notebooks/kaggle_runner_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/kaggle_runner_3d.ipynb).
-3. In the right-hand **Notebook Settings** panel:
-   - **Accelerator**: Select **GPU T4 x1** (or **GPU T4 x2**).
-   - **Internet**: Toggle to **On** (required for `pip install monai nibabel tabulate`).
-   - **Persistence**: "Variables and files" (optional).
-4. In the top-right corner, click **+ Add Input**:
-   - If using Option A: Search for your uploaded `brats-3d-datasets` and click **Add**.
-   - If using Option B: Search for `brats2024` or `brats-gli-2024` and click **Add**.
+#### Job 1 (GPU Session A): Run 3D VisReg JEPA
+1. In Kaggle, click **Create** -> **New Notebook** -> **File** -> **Import Notebook** -> Upload [`notebooks/01_train_visreg_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/01_train_visreg_3d.ipynb).
+2. Attach dataset via **+ Add Input** -> `brats-3d-datasets`.
+3. Set Accelerator to **GPU T4 x1** and turn **Internet ON**.
+4. Click **Run All** (or **Save Version** -> **Run all with Save** to execute in the background).
+5. Output: `visreg_outputs.zip` containing `visreg_jepa_best.pt`, downstream FPN weights, and low-data CSVs.
+
+#### Job 2 (GPU Session B): Run 3D nnU-Net Baseline (in Parallel!)
+1. Open a second Kaggle tab: **New Notebook** -> Import [`notebooks/02_train_nnunet_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/02_train_nnunet_3d.ipynb).
+2. Attach `brats-3d-datasets`, set **GPU T4 x1**, and click **Run All**.
+3. Output: `nnunet_outputs.zip` containing DynUNet checkpoints and evaluation metrics.
+
+#### Job 3: Run 3D Residual UNet Baseline
+1. Import [`notebooks/03_train_unet_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/03_train_unet_3d.ipynb).
+2. Attach `brats-3d-datasets`, set **GPU T4 x1**, and click **Run All**.
+3. Output: `unet_outputs.zip`.
 
 ---
 
-### Step 3: Run the Notebook Sections
+### Step 3: Run Master Evaluation & Generate Paper Figures
 
-The notebook is divided into modular, automated cells:
+Once Jobs 1, 2, and 3 are finished:
+1. Import [`notebooks/04_evaluation_and_figures_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/04_evaluation_and_figures_3d.ipynb).
+2. In the top-right corner, click **+ Add Input** -> **Your Work** (or **Notebooks**):
+   * Add the output of `01_train_visreg_3d`
+   * Add the output of `02_train_nnunet_3d`
+   * Add the output of `03_train_unet_3d`
+   * Add `brats-3d-datasets`
+3. Click **Run All**.
+4. In ~15 minutes, this notebook will:
+   - Compute exact test set metrics (Dice, IoU, cKDTree HD95 in mm, inference latency in ms per volume).
+   - Evaluate Out-of-Distribution (OOD) shifts (3D Rician noise $\sigma=0.08$, $B_1$ field bias).
+   - Evaluate Emergency Triage under missing pulse sequences (T1c-only, FLAIR-only).
+   - Generate multi-planar orthogonal tumor visualizations (Axial, Coronal, Sagittal).
+   - Generate all publication-grade figures matching [`paper/latex_visreg/`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/paper/latex_visreg/) in both vector PDF and high-res PNG.
+   - Package everything into **`paper_artifacts.zip`** for instant 1-click download.
 
-#### Section 1 & 2: Environment Verification & Dependencies
-- Verifies CUDA allocation and GPU memory (`!nvidia-smi`).
-- Installs `monai`, `nibabel`, and `tabulate` in ~15 seconds.
+---
 
-#### Section 3: Codebase Setup
-- Clones or installs `thesis_3d` in editable mode (`pip install -e .`).
-- Verifies that `brats_jepa_3d` imports cleanly and prints git commit hash.
+### Step 4: Using the All-in-One Runner (Fast Smoke Testing)
 
-#### Section 4: Dataset Discovery & Sanity Checks
-- Verifies that `metadata.csv` and `.npz` volumes are discovered.
-- Validates 4-channel $128^3$ tensor shapes and whole tumor mask distributions.
-
-#### Section 5: Self-Supervised JEPA Pre-training (50 Epochs, AMP)
-```bash
-# 3D SigReg JEPA (Epps-Pulley Gaussianity test on 1D rays, scale factor N)
-!python scripts/train_jepa_3d.py --model_type sigreg_jepa --epochs 50 --batch_size 4 --amp
-
-# 3D VisReg JEPA (Decoupled Center, Scale, Shape SWD)
-!python scripts/train_jepa_3d.py --model_type visreg_jepa --epochs 50 --batch_size 4 --amp
-
-# 3D I-JEPA (EMA Teacher baseline)
-!python scripts/train_jepa_3d.py --model_type ijepa --epochs 50 --batch_size 4 --amp
-```
-*Tip: For a rapid dry-run smoke test, append `--smoke_test` or use `--epochs 2`.*
-
-#### Section 6: Supervised 3D Baselines (30 Epochs, AMP)
-```bash
-# 3D Residual UNet (MONAI)
-!python scripts/train_unet_3d.py --epochs 30 --batch_size 4 --amp
-
-# 3D nnU-Net DynUNet with Deep Supervision (MONAI)
-!python scripts/train_nnunet_3d.py --epochs 30 --batch_size 2 --amp
-```
-
-#### Section 7: Downstream 3D Volumetric Fine-Tuning (30 Epochs, AMP)
-```bash
-# Fine-tune with Hierarchical 3D Multi-Scale FPN Decoder
-!python scripts/train_downstream_3d.py --model_type sigreg_jepa --decoder_type multiscale --epochs 30 --amp
-!python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type multiscale --epochs 30 --amp
-!python scripts/train_downstream_3d.py --model_type ijepa --decoder_type multiscale --epochs 30 --amp
-```
-
-#### Section 8: Master 3D Volumetric Benchmark Evaluation
-```bash
-!python scripts/evaluate_3d.py --batch_size 2 --amp
-```
-Evaluates all models on the test split:
-- **3D Dice Score (%)** & **3D IoU (%)**
-- **Exact 3D 95th Percentile Hausdorff Distance (HD95 mm)** via `cKDTree`
-- **Inference Latency (ms / 128³ volume)**
-- **Effective Rank ($S_k^2$)** & **Centered Cosine Similarity**
-
-#### Section 9: Low-Data Label Efficiency Benchmark
-```bash
-!python scripts/evaluate_low_data_3d.py --fractions 0.01 0.05 0.10 0.25 0.50 1.00 --amp
-```
-Quantifies label efficiency of SSL pre-trained encoders against supervised baselines across label availability regimes ($1\%$ to $100\%$).
-
-#### Section 10: Out-of-Distribution (OOD) Scanner Shift Benchmark
-```bash
-!python scripts/evaluate_ood_3d.py --amp
-```
-Evaluates robustness across:
-1. **3D Rician Scanner Noise** ($\sigma_{\text{noise}} = 0.08$)
-2. **3D RF Coil B1 Field Bias Inhomogeneity** (2nd-order polynomial)
-3. **Missing MRI Sequences** (T1c-only and FLAIR-only triage)
-
-#### Section 11 & 12: Publication Figures & 1-Click Output Download
-- Runs `python scripts/generate_figures_3d.py` to generate:
-  - Multi-planar orthogonal slice visualization ([Axial, Coronal, Sagittal](file:///Users/hanriman/Documents/master/thesis/thesis_3d/outputs/figures/orthogonal_multi_planar_figure.png))
-  - Benchmark metric comparison bar charts
-  - Low-data efficiency curves
-  - OOD robustness degradation bar charts
-- Zips all checkpoints, metrics, and figures into `/kaggle/working/outputs.zip` for instant 1-click download.
+If you prefer testing everything in a single notebook before running full multi-hour experiments:
+1. Import [`notebooks/kaggle_runner_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/kaggle_runner_3d.ipynb).
+2. Append `--smoke_test` to the commands to verify the entire pipeline in **~5 minutes**.
+3. Toggle specific models on/off using the cell switches:
+   ```python
+   RUN_VISREG_PRETRAIN   = True
+   RUN_VISREG_FINETUNE   = True
+   RUN_NNUNET_BASELINE   = False
+   RUN_UNET_BASELINE     = False
+   ```
 
 ---
 
@@ -172,13 +124,10 @@ Evaluates robustness across:
 
 | Task | Batch Size | Epochs | Estimated Time (T4 GPU + AMP) | Peak VRAM |
 | :--- | :---: | :---: | :---: | :---: |
-| **3D SigReg JEPA Pre-training** | $4$ | $50$ | $\approx 55\text{ min}$ | $\approx 7.2\text{ GB}$ |
-| **3D VisReg JEPA Pre-training** | $4$ | $50$ | $\approx 52\text{ min}$ | $\approx 6.8\text{ GB}$ |
-| **3D I-JEPA Pre-training (EMA)** | $4$ | $50$ | $\approx 68\text{ min}$ | $\approx 9.5\text{ GB}$ |
-| **3D Downstream Fine-Tuning** | $4$ | $30$ | $\approx 35\text{ min}$ | $\approx 7.8\text{ GB}$ |
-| **3D Residual UNet Baseline** | $4$ | $30$ | $\approx 38\text{ min}$ | $\approx 8.4\text{ GB}$ |
-| **3D nnU-Net (DynUNet)** | $2$ | $30$ | $\approx 48\text{ min}$ | $\approx 10.5\text{ GB}$ |
-| **Evaluation & Probing Suite** | $2$ | - | $\approx 10\text{ min}$ | $\approx 5.2\text{ GB}$ |
-| **Full End-to-End Run** | - | - | $\approx 5.2\text{ hours}$ | $\le 11\text{ GB}$ |
+| **01: 3D VisReg Pre-training (50 ep) + FPN (30 ep)** | $4 / 2$ | $50 + 30$ | $\approx 3.2\text{ hours}$ | $\approx 7.8\text{ GB}$ |
+| **02: 3D nnU-Net Baseline (DynUNet with Deep Supervision)** | $2$ | $30$ | $\approx 3.0\text{ hours}$ | $\approx 10.5\text{ GB}$ |
+| **03: 3D Residual UNet Baseline (MONAI)** | $2$ | $30$ | $\approx 2.0\text{ hours}$ | $\approx 8.4\text{ GB}$ |
+| **04: Master Benchmark, OOD & Publication Figures** | $2$ | - | $\approx 15 - 20\text{ mins}$ | $\approx 5.2\text{ GB}$ |
+| **Total Parallel Wall-Clock Time (Jobs 1 & 2 concurrent)** | - | - | **$\approx 3.5\text{ hours}$** | $\le 11\text{ GB}$ |
 
-All stages easily execute well within Kaggle's **12-hour continuous runtime window** and **16 GB VRAM envelope**.
+Each notebook runs safely within Kaggle's **12-hour session limit** and **16 GB VRAM envelope**.
