@@ -38,6 +38,9 @@ def parse_args():
     parser.add_argument("--config", type=str, default=None, help="Path to base YAML config")
     parser.add_argument("--model_config", type=str, default=None, help="Path to model YAML config")
     parser.add_argument(
+        "--dataset_config", type=str, default=None, help="Path to dataset YAML config"
+    )
+    parser.add_argument(
         "--exp_config", type=str, default=None, help="Path to experiment YAML config"
     )
     parser.add_argument("--epochs", type=int, default=30)
@@ -90,6 +93,10 @@ def main():
     if Path(model_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(model_cfg_path), args)
 
+    dataset_cfg_path = args.dataset_config or (CONFIGS_DIR / "dataset" / "brats3d.yaml")
+    if Path(dataset_cfg_path).exists():
+        args = merge_config_with_args(load_yaml_config(dataset_cfg_path), args)
+
     exp_cfg_path = args.exp_config or (CONFIGS_DIR / "experiment" / "finetune_30ep.yaml")
     if Path(exp_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(exp_cfg_path), args)
@@ -101,9 +108,10 @@ def main():
     logger.info(f"Starting 3D Residual UNet Training: Device={device}, AMP={args.amp}")
 
     aug_tf = VolumetricAugmentations3D(
-        flip_prob=0.5,
-        noise_prob=0.3,
-        modality_dropout_prob=0.25,
+        flip_prob=getattr(args, "rand_flip_prob", getattr(args, "flip_prob", 0.5)),
+        noise_prob=getattr(args, "rand_noise_prob", getattr(args, "noise_prob", 0.3)),
+        noise_std=getattr(args, "noise_std", 0.05),
+        modality_dropout_prob=getattr(args, "modality_dropout_prob", 0.25),
         is_training=True,
     )
 

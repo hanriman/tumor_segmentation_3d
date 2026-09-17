@@ -84,13 +84,15 @@ class VolumetricAugmentations3D:
         self,
         image: torch.Tensor,
         mask: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        brain_mask: torch.Tensor | None = None,
+    ):
         """
         image: [4, D, H, W]
         mask: [1, D, H, W] or None
+        brain_mask: [1, D, H, W] or None
         """
         if not self.is_training:
-            return image, mask
+            return (image, mask, brain_mask) if brain_mask is not None else (image, mask)
 
         # 1. 3D Random Axis Flips (Left-Right, Anterior-Posterior, Superior-Inferior)
         for axis in (1, 2, 3):  # D=1, H=2, W=3
@@ -98,20 +100,26 @@ class VolumetricAugmentations3D:
                 image = torch.flip(image, dims=[axis])
                 if mask is not None:
                     mask = torch.flip(mask, dims=[axis])
+                if brain_mask is not None:
+                    brain_mask = torch.flip(brain_mask, dims=[axis])
 
         # 2. Additive Gaussian Electronics Noise (Parenchyma Only)
         if random.random() < self.noise_prob:
-            parenchyma_mask = image != 0
+            parenchyma_mask = (brain_mask > 0) if brain_mask is not None else (image != 0)
             noise = torch.randn_like(image) * self.noise_std
             image = image + noise * parenchyma_mask.float()
 
         # 3. Random Modality Dropout
         image = self.modality_dropout(image)
 
+        if brain_mask is not None:
+            return image, mask, brain_mask
         return image, mask
 
 
-def apply_rician_noise_3d(image: torch.Tensor, sigma: float = 0.10) -> torch.Tensor:
+def apply_rician_noise_3d(
+    image: torch.Tensor, sigma: float = 0.10, brain_mask: torch.Tensor | None = None
+) -> torch.Tensor:
     r"""
     Simulates 3D MRI quadrature Rician noise while preserving tissue contrast
     on Z-score normalized volumetric MRI scans.
@@ -119,7 +127,8 @@ def apply_rician_noise_3d(image: torch.Tensor, sigma: float = 0.10) -> torch.Ten
     Mathematical Formulation (Gudbjartsson & Patz, 1995):
         M = \sqrt{(X + \eta_1)^2 + \eta_2^2}, \quad \eta_1, \eta_2 \sim \mathcal{N}(0, \sigma^2)
     """
-    brain_mask = image != 0
+    if brain_mask is None:
+        brain_mask = image != 0
     if not brain_mask.any():
         return image
 
@@ -133,13 +142,23 @@ def apply_rician_noise_3d(image: torch.Tensor, sigma: float = 0.10) -> torch.Ten
     return torch.where(brain_mask, noisy, torch.zeros_like(image))
 
 
-def apply_b1_bias_field_3d(image: torch.Tensor, strength: float = 0.3) -> torch.Tensor:
+def apply_b1_bias_field_3d(
+    image: torch.Tensor, strength: float = 0.3, brain_mask: torch.Tensor | None = None
+) -> torch.Tensor:
     r"""
     Applies smooth multiplicative 3D B1 radiofrequency transmit/receive bias field.
 
     Mathematical Formulation (Sled et al., 1998; Lebrun et al., 2021):
         X_{corrupt} = X \cdot (1 + \sum_{i+j+k \le 2} c_{ijk} z^i y^j x^k)
+
+    Parenchyma intensities are shifted to non-negative baseline prior to multiplicative
+    scaling to prevent artificial contrast inversion on Z-score normalized data.
     """
+    if brain_mask is None:
+        brain_mask = image != 0
+    if not brain_mask.any():
+        return image
+
     D, H, W = image.shape[-3], image.shape[-2], image.shape[-1]
     z = torch.linspace(-1, 1, D, device=image.device)
     y = torch.linspace(-1, 1, H, device=image.device)
@@ -150,6 +169,10 @@ def apply_b1_bias_field_3d(image: torch.Tensor, strength: float = 0.3) -> torch.
     bias = 1.0 + strength * (
         0.5 * grid_z + 0.3 * grid_y - 0.4 * grid_x + 0.2 * (grid_z**2 + grid_y**2 + grid_x**2)
     )
-    if image.dim() == 5:
-        return image * bias.unsqueeze(0).unsqueeze(0)
-    return image * bias.unsqueeze(0)
+    bias = bias.unsqueeze(0).unsqueeze(0) if image.dim() == 5 else bias.unsqueeze(0)
+
+    min_val = image[brain_mask].min()
+    shifted = image - min_val if min_val < 0 else image
+    biased_shifted = shifted * bias
+    biased = biased_shifted + min_val if min_val < 0 else biased_shifted
+    return torch.where(brain_mask, biased, torch.zeros_like(image))

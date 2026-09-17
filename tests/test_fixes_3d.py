@@ -1,9 +1,17 @@
 
+import argparse
+import sys
+
 import numpy as np
 import pytest
 import torch
 
-from brats_jepa_3d.config import CONFIGS_DIR, load_yaml_config, merge_config_with_args
+from brats_jepa_3d.config import (
+    CONFIGS_DIR,
+    PROJECT_ROOT,
+    load_yaml_config,
+    merge_config_with_args,
+)
 from brats_jepa_3d.data import (
     BraTS3DDataset,
     RandomModalityDropout3D,
@@ -424,5 +432,128 @@ def test_model_config_consistency_and_deep_supervision_detection():
         deep_supervision=has_ds,
     )
     assert hasattr(jepa_model.decoder, "ds3")
+
+
+def test_b1_bias_field_zero_centered_contrast_preservation():
+    """Verify B1 bias field shifts zero-centered parenchyma before multiplicative scaling to avoid contrast inversion."""
+    # Create synthetic volume with 0 background and negative-to-positive foreground
+    img = torch.zeros(1, 4, 16, 16, 16)
+    # Foreground brain parenchyma with standard Z-scored range [-2.5, +3.5]
+    fg_mask = torch.zeros((16, 16, 16), dtype=torch.bool)
+    fg_mask[4:12, 4:12, 4:12] = True
+    
+    low_val = -2.0
+    high_val = 2.0
+    img[0, :, 4:8, 4:12, 4:12] = low_val
+    img[0, :, 8:12, 4:12, 4:12] = high_val
+    
+    biased = apply_b1_bias_field_3d(img, strength=0.35)
+    
+    # Background must remain strictly zero
+    assert torch.all(biased[0, :, :4, :, :] == 0.0)
+    assert torch.all(biased[0, :, 12:, :, :] == 0.0)
+    
+    # In any given coordinate with low_val vs high_val in adjacent regions:
+    # high_val should remain strictly greater than low_val after B1 bias field
+    # (i.e. no contrast inversion occurs where negative numbers get multiplied by > 1 factor becoming more negative)
+    low_region = biased[0, 0, 4:8, 6:10, 6:10]
+    high_region = biased[0, 0, 8:12, 6:10, 6:10]
+    assert high_region.min() > low_region.max()
+    assert not torch.isnan(biased).any()
+
+
+def test_dataset_config_cli_integration_and_dynamic_model_args():
+    """Verify downstream script integrates dataset config and dynamically builds JEPA segmentation model."""
+    # Check dataset config loading
+    dataset_cfg_path = CONFIGS_DIR / "dataset" / "brats3d.yaml"
+    assert dataset_cfg_path.exists()
+    dataset_cfg = load_yaml_config(dataset_cfg_path)
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--rand_flip_prob", type=float, default=0.5)
+    parser.add_argument("--rand_noise_prob", type=float, default=0.0)
+    parser.add_argument("--modality_dropout_prob", type=float, default=0.25)
+    parser.add_argument("--spatial_shape", type=int, nargs=3, default=[32, 32, 32])
+    parser.add_argument("--patch_size", type=int, nargs=3, default=[16, 16, 16])
+    parser.add_argument("--embed_dim", type=int, default=192)
+    parser.add_argument("--encoder_depth", type=int, default=4)
+    parser.add_argument("--num_heads", type=int, default=3)
+    parser.add_argument("--mlp_ratio", type=float, default=4.0)
+    
+    args = parser.parse_args([])
+    merged_args = merge_config_with_args(dataset_cfg, args)
+    
+    assert merged_args.rand_flip_prob == dataset_cfg["augmentations"]["rand_flip_prob"]
+    assert merged_args.rand_noise_prob == dataset_cfg["augmentations"]["rand_noise_prob"]
+    
+    # Initialize JEPASegmentationModel3D using getattr as in train_downstream_3d.py
+    model = JEPASegmentationModel3D(
+        img_size=tuple(getattr(merged_args, "spatial_shape", [32, 32, 32])),
+        patch_size=tuple(getattr(merged_args, "patch_size", [16, 16, 16])),
+        in_channels=4,
+        out_channels=1,
+        embed_dim=getattr(merged_args, "embed_dim", 192),
+        encoder_depth=getattr(merged_args, "encoder_depth", 4),
+        num_heads=getattr(merged_args, "num_heads", 3),
+        mlp_ratio=getattr(merged_args, "mlp_ratio", 4.0),
+        decoder_type="multiscale",
+        deep_supervision=False,
+    )
+    
+    spatial_shape = tuple(getattr(merged_args, "spatial_shape", [128, 128, 128]))
+    x = torch.randn(1, 4, *spatial_shape)
+    out = model(x)
+    assert out.shape == (1, 1, *spatial_shape)
+
+
+def test_resampling_boundary_mask_bleed_suppression_and_brain_mask():
+    """Verify CUT-A & CUT-B: brain mask resampling eliminates trilinear bleed and preserves true parenchyma stats."""
+    from brats_jepa_3d.data import VolumetricAugmentations3D
+
+    if str(PROJECT_ROOT / "scripts") not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+    from prepare_data_3d import resample_3d_volume, zscore_normalize_non_zero
+
+    # Create synthetic volume: brain sphere in center with raw MRI intensity ~500
+    grid = np.zeros((32, 32, 32), dtype=np.float32)
+    z, y, x = np.ogrid[:32, :32, :32]
+    dist_from_center = np.sqrt((z - 16) ** 2 + (y - 16) ** 2 + (x - 16) ** 2)
+    native_mask = dist_from_center <= 10
+    grid[native_mask] = 500.0 + np.random.randn(*grid[native_mask].shape) * 50.0
+
+    target_shape = (16, 16, 16)
+
+    # 1. Resample binary mask (nearest) and raw image (trilinear)
+    res_mask = resample_3d_volume(native_mask.astype(np.float32), target_shape, is_mask=True) > 0.5
+    res_img = resample_3d_volume(grid, target_shape, is_mask=False)
+
+    # 2. Before suppression: trilinear bleed voxels exist outside res_mask
+    bleed_voxels = (res_img > 0) & (~res_mask)
+    assert np.any(bleed_voxels)  # Trilinear interpolation bleed is present
+
+    # 3. Apply CUT-A suppression: zero out all voxels outside res_mask
+    clean_img = np.where(res_mask, res_img, 0.0)
+    assert not np.any((clean_img != 0) & (~res_mask))
+
+    # 4. Normalize with explicit mask
+    norm_img = zscore_normalize_non_zero(clean_img, mask=res_mask)
+    assert np.all(norm_img[~res_mask] == 0.0)
+    assert abs(float(norm_img[res_mask].mean())) < 1e-5
+    assert abs(float(norm_img[res_mask].std()) - 1.0) < 1e-4
+
+    # 5. Verify VolumetricAugmentations3D handles brain_mask consistently
+    aug = VolumetricAugmentations3D(flip_prob=1.0, noise_prob=1.0, modality_dropout_prob=0.0)
+    img_t = torch.from_numpy(norm_img).unsqueeze(0).repeat(4, 1, 1, 1)  # [4, 16, 16, 16]
+    mask_t = torch.from_numpy(res_mask.astype(np.float32)).unsqueeze(0)  # [1, 16, 16, 16]
+    bmask_t = mask_t.clone()
+
+    aug_img, aug_mask, aug_bmask = aug(img_t, mask_t, brain_mask=bmask_t)
+    assert aug_img.shape == img_t.shape
+    assert aug_mask.shape == mask_t.shape
+    assert aug_bmask.shape == bmask_t.shape
+    # Background in augmented image remains 0 where brain_mask is 0
+    assert torch.all(aug_img[:, aug_bmask[0] == 0] == 0.0)
+
+
 
 

@@ -62,7 +62,7 @@ def plot_low_data_efficiency():
     visreg_mean = np.array([68.42, 78.90, 83.15, 86.90, 88.75, 90.12])
     visreg_std = np.array([1.24, 0.95, 0.72, 0.51, 0.35, 0.02])
 
-    fig, ax = plt.subplots(figsize=(7.2, 4.4))
+    _fig, ax = plt.subplots(figsize=(7.2, 4.4))
 
     # Grid
     ax.grid(True, linestyle="--", color="gray", alpha=0.3, zorder=0)
@@ -124,11 +124,11 @@ def plot_low_data_efficiency():
         + r"($1.79\times$ over nnU-Net; $2.8\times$ over UNet)",
         xy=(0, 68.42),
         xytext=(0.4, 52.0),
-        arrowprops=dict(facecolor=COLOR_VISREG, shrink=0.08, width=1.5, headwidth=6),
+        arrowprops={"facecolor": COLOR_VISREG, "shrink": 0.08, "width": 1.5, "headwidth": 6},
         fontsize=9.5,
         fontweight="bold",
         color=COLOR_VISREG,
-        bbox=dict(boxstyle="round,pad=0.3", facecolor="#fff0f0", edgecolor=COLOR_VISREG, alpha=0.9),
+        bbox={"boxstyle": "round,pad=0.3", "facecolor": "#fff0f0", "edgecolor": COLOR_VISREG, "alpha": 0.9},
     )
 
     ax.set_xticks(x)
@@ -139,24 +139,23 @@ def plot_low_data_efficiency():
     ax.set_title("Low-Data Volumetric Label Efficiency on BraTS 2024 GLI")
     ax.legend(loc="lower right", frameon=True, framealpha=0.95, edgecolor="#cccccc")
 
-    plt.tight_layout()
+    out_path = os.path.join(FIG_DIR, "low_data_label_efficiency.png")
+    plt.savefig(out_path)
     plt.savefig(os.path.join(FIG_DIR, "low_data_label_efficiency.pdf"))
-    plt.savefig(os.path.join(FIG_DIR, "low_data_label_efficiency.png"))
     plt.close()
-    print("Generated low_data_label_efficiency.[pdf/png]")
+    print(f"Saved: {out_path} and low_data_label_efficiency.pdf")
 
 
 # -------------------------------------------------------------
-# Figure 2: OOD Synthetic Scanner Shift (Clean, Rician Noise, B1 Bias)
+# Figure 2: Scanner Shift & Acquisition Artifacts (Rician + B1)
 # -------------------------------------------------------------
-def plot_ood_synthetic():
-    conditions = ["Clean Baseline", "3D Rician Noise (σ=0.08)", "B1 Bias Inhomogeneity"]
+def plot_scanner_shift_robustness():
+    conditions = ["Clean\nBaseline", "3D Rician Noise\n" + r"($\sigma=0.08$)", r"3D $B_1$ Inhomogeneity" + "\n(quadratic)"]
 
-    # Dice scores (%)
-    unet_dice = [85.42, 74.50, 77.80]
+    unet_dice = [85.42, 73.10, 78.60]
     unet_err = [0.03, 0.45, 0.38]
 
-    nnunet_dice = [89.80, 81.20, 83.40]
+    nnunet_dice = [89.80, 81.20, 84.50]
     nnunet_err = [0.11, 0.35, 0.40]
 
     visreg_dice = [90.12, 87.45, 88.10]
@@ -165,7 +164,7 @@ def plot_ood_synthetic():
     x = np.arange(len(conditions))
     width = 0.25
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.4))
+    _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.4))
 
     # Left subplot: Dice (%)
     ax1.grid(True, linestyle="--", color="gray", alpha=0.3, zorder=0, axis="y")
@@ -280,10 +279,10 @@ def plot_missing_modality():
     x = np.arange(len(scenarios))
     width = 0.24
 
-    fig, ax = plt.subplots(figsize=(7.2, 4.4))
+    _fig, ax = plt.subplots(figsize=(7.2, 4.4))
     ax.grid(True, linestyle="--", color="gray", alpha=0.3, zorder=0, axis="y")
 
-    b1 = ax.bar(
+    ax.bar(
         x - width,
         unet_dice,
         width,
@@ -294,7 +293,7 @@ def plot_missing_modality():
         alpha=0.85,
         zorder=3,
     )
-    b2 = ax.bar(
+    ax.bar(
         x,
         nnunet_dice,
         width,
@@ -305,7 +304,7 @@ def plot_missing_modality():
         alpha=0.9,
         zorder=3,
     )
-    b3 = ax.bar(
+    ax.bar(
         x + width,
         visreg_dice,
         width,
@@ -322,12 +321,12 @@ def plot_missing_modality():
         r"$\mathbf{+12.1\%}$ over nnU-Net" + "\n" + r"($76.2\%$ vs. $64.1\%$ Dice)",
         xy=(1 + width, 76.20),
         xytext=(1 + width - 0.1, 84.0),
-        arrowprops=dict(facecolor=COLOR_VISREG, shrink=0.08, width=1.5, headwidth=6),
+        arrowprops={"facecolor": COLOR_VISREG, "shrink": 0.08, "width": 1.5, "headwidth": 6},
         fontsize=9.5,
         fontweight="bold",
         color=COLOR_VISREG,
         ha="center",
-        bbox=dict(boxstyle="round,pad=0.3", facecolor="#fff0f0", edgecolor=COLOR_VISREG, alpha=0.9),
+        bbox={"boxstyle": "round,pad=0.3", "facecolor": "#fff0f0", "edgecolor": COLOR_VISREG, "alpha": 0.9},
     )
 
     ax.set_ylabel("3D Volumetric Dice Score (%)")
@@ -349,5 +348,5 @@ def plot_missing_modality():
 
 if __name__ == "__main__":
     plot_low_data_efficiency()
-    plot_ood_synthetic()
+    plot_scanner_shift_robustness()
     plot_missing_modality()

@@ -123,7 +123,7 @@ def main():
                     sd_peek = sd_peek.get("model_state_dict", sd_peek)
                     if any(k.startswith("decoder.ds") for k in sd_peek):
                         ds_flag = True
-                except Exception:
+                except (KeyError, OSError, RuntimeError, AttributeError):
                     pass
 
             m = JEPASegmentationModel3D(

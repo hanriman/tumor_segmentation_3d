@@ -85,9 +85,13 @@ def parse_args():
     return parser.parse_args()
 
 
-def zscore_normalize_non_zero(volume: np.ndarray) -> np.ndarray:
+def zscore_normalize_non_zero(volume: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
     """Channel-wise Z-score normalization computed strictly over non-zero brain parenchyma."""
-    mask = volume > 0
+    if mask is None:
+        mask = volume > 0
+    else:
+        mask = mask & (volume != 0)
+
     if not np.any(mask):
         return volume.astype(np.float32)
     mean = float(volume[mask].mean())
@@ -164,6 +168,7 @@ def process_patient(
     x_min, x_max = x_indices[0], x_indices[-1] + 1
 
     # Crop to non-zero bounding box
+    brain_mask_crop = brain_mask[z_min:z_max, y_min:y_max, x_min:x_max]
     t1n_crop = t1n[z_min:z_max, y_min:y_max, x_min:x_max]
     t1c_crop = t1c[z_min:z_max, y_min:y_max, x_min:x_max]
     t2w_crop = t2w[z_min:z_max, y_min:y_max, x_min:x_max]
@@ -172,39 +177,45 @@ def process_patient(
 
     # 2. Resample bounding box to canonical target_size^3
     target_shape = (target_size, target_size, target_size)
+    # Resample binary brain mask via nearest-neighbor to define crisp anatomical boundary (CUT-A)
+    brain_mask_resampled = (
+        resample_3d_volume(brain_mask_crop.astype(np.float32), target_shape, is_mask=True) > 0.5
+    )
+
     t1n_resampled = resample_3d_volume(t1n_crop, target_shape, is_mask=False)
     t1c_resampled = resample_3d_volume(t1c_crop, target_shape, is_mask=False)
     t2w_resampled = resample_3d_volume(t2w_crop, target_shape, is_mask=False)
     t2f_resampled = resample_3d_volume(t2f_crop, target_shape, is_mask=False)
     seg_resampled = resample_3d_volume(seg_crop, target_shape, is_mask=True)
 
-    # 3. Channel-independent Z-Score Normalization
-    t1n_norm = zscore_normalize_non_zero(t1n_resampled)
-    t1c_norm = zscore_normalize_non_zero(t1c_resampled)
-    t2w_norm = zscore_normalize_non_zero(t2w_resampled)
-    t2f_norm = zscore_normalize_non_zero(t2f_resampled)
+    # Clean trilinear interpolation bleed outside the resampled brain mask (CUT-A)
+    t1n_resampled = np.where(brain_mask_resampled, t1n_resampled, 0.0)
+    t1c_resampled = np.where(brain_mask_resampled, t1c_resampled, 0.0)
+    t2w_resampled = np.where(brain_mask_resampled, t2w_resampled, 0.0)
+    t2f_resampled = np.where(brain_mask_resampled, t2f_resampled, 0.0)
+
+    # 3. Channel-independent Z-Score Normalization strictly within brain mask
+    t1n_norm = zscore_normalize_non_zero(t1n_resampled, mask=brain_mask_resampled)
+    t1c_norm = zscore_normalize_non_zero(t1c_resampled, mask=brain_mask_resampled)
+    t2w_norm = zscore_normalize_non_zero(t2w_resampled, mask=brain_mask_resampled)
+    t2f_norm = zscore_normalize_non_zero(t2f_resampled, mask=brain_mask_resampled)
 
     # Stack channels: [4, 128, 128, 128]
     np_dtype = np.float16 if dtype == "float16" else np.float32
     image_4ch = np.stack([t1n_norm, t1c_norm, t2w_norm, t2f_norm], axis=0).astype(np_dtype)
     mask_1ch = np.expand_dims((seg_resampled > 0).astype(np.uint8), axis=0)  # [1, 128, 128, 128]
+    brain_mask_1ch = np.expand_dims(brain_mask_resampled.astype(np.uint8), axis=0)  # [1, 128, 128, 128]
 
-    # Save compressed .npz
+    # Save compressed .npz with anatomical brain_mask (CUT-B)
     out_file = output_dir / f"{pid}_volume.npz"
     np.savez_compressed(
         out_file,
         image=image_4ch,
         mask=mask_1ch,
+        brain_mask=brain_mask_1ch,
     )
 
-    num_voxels_brain = int(
-        np.sum(
-            (t1n_resampled > 0)
-            | (t1c_resampled > 0)
-            | (t2w_resampled > 0)
-            | (t2f_resampled > 0)
-        )
-    )
+    num_voxels_brain = int(np.sum(brain_mask_resampled))
     num_voxels_tumor = int(np.sum(mask_1ch > 0))
     has_tumor = bool(num_voxels_tumor > 0)
 

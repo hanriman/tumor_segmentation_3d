@@ -83,7 +83,7 @@ class BraTS3DDataset(Dataset):
     def __len__(self) -> int:
         return len(self.df)
 
-    def _load_volume(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def _load_volume(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if idx in self.cache:
             return self.cache[idx]
 
@@ -102,23 +102,32 @@ class BraTS3DDataset(Dataset):
         with np.load(file_path, mmap_mode="r") as data:
             image = torch.from_numpy(data["image"].astype(np.float32).copy())  # [4, 128, 128, 128]
             mask = torch.from_numpy(data["mask"].astype(np.float32).copy())  # [1, 128, 128, 128]
+            if "brain_mask" in data:
+                brain_mask = torch.from_numpy(data["brain_mask"].astype(np.float32).copy())
+            else:
+                brain_mask = (image != 0).any(dim=0, keepdim=True).float()
 
         if self.cache_in_ram and len(self.cache) < self.max_cache_size:
-            self.cache[idx] = (image, mask)
+            self.cache[idx] = (image, mask, brain_mask)
 
-        return image, mask
+        return image, mask, brain_mask
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
-        image, mask = self._load_volume(idx)
+        image, mask, brain_mask = self._load_volume(idx)
         pid = str(self.df.iloc[idx]["patient_id"])
 
         # Apply 3D spatial and modality dropout augmentations
         if self.augmentations is not None:
-            image, mask = self.augmentations(image, mask)
+            aug_res = self.augmentations(image, mask, brain_mask=brain_mask)
+            if len(aug_res) == 3:
+                image, mask, brain_mask = aug_res
+            else:
+                image, mask = aug_res
 
         sample: dict[str, Any] = {
             "image": image,
             "mask": mask,
+            "brain_mask": brain_mask,
             "patient_id": pid,
             "index": idx,
         }

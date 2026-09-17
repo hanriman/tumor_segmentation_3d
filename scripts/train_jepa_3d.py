@@ -252,7 +252,6 @@ def main():
     )
 
     steps_per_epoch = min(len(loader), 2) if args.smoke_test else len(loader)
-    total_steps = epochs * steps_per_epoch
     global_step = 0
 
     for epoch in range(1, epochs + 1):
