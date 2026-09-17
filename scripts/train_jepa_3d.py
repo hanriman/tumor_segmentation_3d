@@ -49,6 +49,9 @@ def parse_args():
     parser.add_argument("--config", type=str, default=None, help="Path to base YAML config")
     parser.add_argument("--model_config", type=str, default=None, help="Path to model YAML config")
     parser.add_argument(
+        "--dataset_config", type=str, default=None, help="Path to dataset YAML config"
+    )
+    parser.add_argument(
         "--exp_config", type=str, default=None, help="Path to experiment YAML config"
     )
     parser.add_argument("--epochs", type=int, default=50)
@@ -87,6 +90,10 @@ def main():
     if Path(base_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(base_cfg_path), args)
 
+    dataset_cfg_path = args.dataset_config or (CONFIGS_DIR / "dataset" / "brats3d.yaml")
+    if Path(dataset_cfg_path).exists():
+        args = merge_config_with_args(load_yaml_config(dataset_cfg_path), args)
+
     model_cfg_path = args.model_config or (CONFIGS_DIR / "model" / f"{args.model_type}_3d.yaml")
     if Path(model_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(model_cfg_path), args)
@@ -103,17 +110,26 @@ def main():
         f"Starting 3D JEPA Pre-training: Model={args.model_type}, Device={device}, AMP={args.amp}"
     )
 
-    # Initialize 3D Data Pipeline
+    # Initialize 3D Data Pipeline with config parameters
+    target_cuboid_size = getattr(args, "target_cuboid_size", (3, 3, 3))
+    if isinstance(target_cuboid_size, list):
+        target_cuboid_size = tuple(target_cuboid_size)
+    grid_size = getattr(args, "grid_size", (8, 8, 8))
+    if isinstance(grid_size, list):
+        grid_size = tuple(grid_size)
+
     masking_tf = JEPAMaskingTransform3D(
-        grid_size=(8, 8, 8),
-        num_target_cuboids=4,
-        target_cuboid_size=(3, 3, 3),
-        context_num_patches=192,
+        grid_size=grid_size,
+        num_target_cuboids=getattr(args, "num_target_cuboids", 4),
+        target_cuboid_size=target_cuboid_size,
+        max_target_overlap=getattr(args, "max_target_overlap", 0.0),
+        context_num_patches=getattr(args, "context_num_patches", 192),
+        connectivity=getattr(args, "context_connectivity", getattr(args, "connectivity", 26)),
     )
     aug_tf = VolumetricAugmentations3D(
-        flip_prob=0.5,
-        noise_prob=0.3,
-        modality_dropout_prob=0.25,
+        flip_prob=getattr(args, "rand_flip_prob", getattr(args, "flip_prob", 0.5)),
+        noise_prob=getattr(args, "rand_noise_prob", getattr(args, "noise_prob", 0.3)),
+        modality_dropout_prob=getattr(args, "modality_dropout_prob", 0.25),
         is_training=True,
     )
 
@@ -146,54 +162,68 @@ def main():
         num_workers=0,
     )
 
+    spatial_shape = tuple(getattr(args, "spatial_shape", (128, 128, 128)))
+    patch_size = tuple(getattr(args, "patch_size", (16, 16, 16)))
+    in_channels = getattr(args, "in_channels", 4)
+    embed_dim = getattr(args, "embed_dim", 384)
+    encoder_depth = getattr(args, "encoder_depth", 8)
+    predictor_depth = getattr(args, "predictor_depth", 4)
+    predictor_embed_dim = getattr(args, "predictor_embed_dim", 192)
+
     # Initialize Model & Loss
     if args.model_type == "ijepa":
         model = IJEPA3D(
-            img_size=(128, 128, 128),
-            patch_size=(16, 16, 16),
-            in_channels=4,
-            embed_dim=384,
-            encoder_depth=8,
-            predictor_depth=4,
-            predictor_embed_dim=192,
+            img_size=spatial_shape,
+            patch_size=patch_size,
+            in_channels=in_channels,
+            embed_dim=embed_dim,
+            encoder_depth=encoder_depth,
+            predictor_depth=predictor_depth,
+            predictor_embed_dim=predictor_embed_dim,
         ).to(device)
-        criterion = IJEPALoss(loss_type="smooth_l1")
+        criterion = IJEPALoss(loss_type=getattr(args, "loss_type", "smooth_l1"))
 
     elif args.model_type == "sigreg_jepa":
         model = SigRegJEPA3D(
-            img_size=(128, 128, 128),
-            patch_size=(16, 16, 16),
-            in_channels=4,
-            embed_dim=384,
-            proj_dim=128,
-            encoder_depth=8,
-            predictor_depth=4,
-            predictor_embed_dim=192,
+            img_size=spatial_shape,
+            patch_size=patch_size,
+            in_channels=in_channels,
+            embed_dim=embed_dim,
+            proj_dim=getattr(args, "proj_dim", 128),
+            encoder_depth=encoder_depth,
+            predictor_depth=predictor_depth,
+            predictor_embed_dim=predictor_embed_dim,
             sigreg_weight=getattr(args, "sigreg_weight", 1.0),
         ).to(device)
         criterion = SigRegLoss(
-            loss_type="smooth_l1",
+            loss_type=getattr(args, "loss_type", "smooth_l1"),
             sigreg_weight=getattr(args, "sigreg_weight", 1.0),
-            num_projections=256,
+            num_projections=getattr(args, "num_projections", 256),
+            t_max=getattr(args, "t_max", 3.0),
+            n_knots=getattr(args, "n_knots", 17),
+            normalize_measure=getattr(args, "normalize_measure", True),
         )
 
     elif args.model_type == "visreg_jepa":
         model = VisRegJEPA3D(
-            img_size=(128, 128, 128),
-            patch_size=(16, 16, 16),
-            in_channels=4,
-            embed_dim=384,
-            proj_dim=128,
-            encoder_depth=8,
-            predictor_depth=4,
-            predictor_embed_dim=192,
+            img_size=spatial_shape,
+            patch_size=patch_size,
+            in_channels=in_channels,
+            embed_dim=embed_dim,
+            proj_dim=getattr(args, "proj_dim", 128),
+            encoder_depth=encoder_depth,
+            predictor_depth=predictor_depth,
+            predictor_embed_dim=predictor_embed_dim,
         ).to(device)
         criterion = VisRegLoss(
-            loss_type="smooth_l1",
+            loss_type=getattr(args, "loss_type", "smooth_l1"),
             center_weight=getattr(args, "center_weight", 1.0),
             scale_weight=getattr(args, "scale_weight", 1.0),
             swd_weight=getattr(args, "swd_weight", 1.0),
-            num_projections=256,
+            num_projections=getattr(args, "num_projections", 256),
+            target_std=getattr(args, "target_std", 1.0),
+            swd_metric=getattr(args, "swd_metric", "mse"),
+            scale_loss_type=getattr(args, "scale_loss_type", "squared"),
         )
     else:
         raise ValueError(f"Unknown model_type: {args.model_type}")
@@ -221,7 +251,8 @@ def main():
         f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}"
     )
 
-    total_steps = epochs * len(loader)
+    steps_per_epoch = min(len(loader), 2) if args.smoke_test else len(loader)
+    total_steps = epochs * steps_per_epoch
     global_step = 0
 
     for epoch in range(1, epochs + 1):
@@ -264,11 +295,20 @@ def main():
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
                 optimizer.step()
 
-            # For I-JEPA: update target encoder via EMA with cosine momentum annealing (0.996 -> 1.0)
+            # Technical Decision (I-JEPA EMA Momentum Annealing):
+            # Target encoder weights are updated via an Exponential Moving Average (EMA):
+            #   \bar{\theta}_t \leftarrow m_t \bar{\theta}_{t-1} + (1 - m_t) \theta_t
+            # The momentum parameter m_t is annealed via a half-period cosine schedule:
+            #   m_t = m_end - (m_end - m_start) * 0.5 * (1 + cos(\pi * progress))
+            # starting at m_start (default 0.996) and monotonically increasing to m_end (1.0).
+            # Hyperparameters are dynamically loaded from config (configs/model/ijepa_3d.yaml).
             if args.model_type == "ijepa":
-                m_0 = 0.996
-                progress = global_step / max(1, total_steps)
-                curr_momentum = 1.0 - (1.0 - m_0) * 0.5 * (1.0 + math.cos(math.pi * progress))
+                m_start = getattr(args, "ema_start_momentum", 0.996)
+                m_end = getattr(args, "ema_end_momentum", 1.0)
+                anneal_epochs = getattr(args, "ema_anneal_epochs", epochs)
+                anneal_steps = anneal_epochs * steps_per_epoch
+                progress = min(1.0, global_step / max(1, anneal_steps))
+                curr_momentum = m_end - (m_end - m_start) * 0.5 * (1.0 + math.cos(math.pi * progress))
                 model.update_target_encoder(momentum=curr_momentum)
 
             global_step += 1

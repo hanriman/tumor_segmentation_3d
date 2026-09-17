@@ -11,7 +11,13 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from brats_jepa_3d.config import CHECKPOINTS_DIR, METRICS_DIR, ensure_directories
+from brats_jepa_3d.config import (
+    CHECKPOINTS_DIR,
+    CONFIGS_DIR,
+    METRICS_DIR,
+    ensure_directories,
+    load_yaml_config,
+)
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
 from brats_jepa_3d.losses import CombinedDiceBCELoss3D, DeepSupervisionLoss3D
 from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
@@ -144,25 +150,38 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     def build_model(name: str):
-        if name == "3D VisReg JEPA (FPN)":
-            m = JEPASegmentationModel3D(decoder_type="multiscale")
-            ckpts = sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob("visreg_jepa*epoch*.pt")))
-            if ckpts:
-                ckpt_path = ckpts[-1]
-                ckpt = torch.load(ckpt_path, map_location=device)
-                res = m.load_pretrained_encoder(ckpt)
-                logger.info(
-                    f"Initialized {name} with pre-trained encoder weights from: {ckpt_path.name} ({res['loaded_keys']} keys)"
-                )
-            else:
-                logger.warning(
-                    f"No pre-trained weights found for {name}. Initialized from scratch."
-                )
-            return m.to(device)
+        jepa_prefixes = {
+            "3D VisReg JEPA (FPN)": "visreg_jepa",
+            "3D SigReg JEPA (FPN)": "sigreg_jepa",
+            "3D I-JEPA (FPN)": "ijepa",
+        }
+        if name in jepa_prefixes:
+            prefix = jepa_prefixes[name]
+            jepa_cfg_path = CONFIGS_DIR / "model" / f"{prefix}_3d.yaml"
+            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
-        elif name == "3D SigReg JEPA (FPN)":
-            m = JEPASegmentationModel3D(decoder_type="multiscale")
-            ckpts = sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob("sigreg_jepa*epoch*.pt")))
+            ckpts = sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{prefix}*epoch*.pt")))
+            ds_flag = False
+            if ckpts:
+                try:
+                    sd_peek = torch.load(ckpts[-1], map_location="cpu")
+                    sd_peek = sd_peek.get("model_state_dict", sd_peek)
+                    if any(k.startswith("decoder.ds") for k in sd_peek):
+                        ds_flag = True
+                except Exception:
+                    pass
+
+            m = JEPASegmentationModel3D(
+                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
+                patch_size=tuple(jepa_cfg.get("patch_size", (16, 16, 16))),
+                in_channels=jepa_cfg.get("in_channels", 4),
+                embed_dim=jepa_cfg.get("embed_dim", 384),
+                encoder_depth=jepa_cfg.get("encoder_depth", 8),
+                num_heads=jepa_cfg.get("num_heads", 6),
+                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
+                decoder_type="multiscale",
+                deep_supervision=ds_flag,
+            )
             if ckpts:
                 ckpt_path = ckpts[-1]
                 ckpt = torch.load(ckpt_path, map_location=device)
@@ -177,10 +196,27 @@ def main():
             return m.to(device)
 
         elif name == "3D nnU-Net":
-            return BraTS3DnnUNet(deep_supervision=True).to(device)
+            nnunet_cfg_path = CONFIGS_DIR / "model" / "nnunet_3d.yaml"
+            nnunet_cfg = load_yaml_config(nnunet_cfg_path) if nnunet_cfg_path.exists() else {}
+            return BraTS3DnnUNet(
+                in_channels=nnunet_cfg.get("in_channels", 4),
+                out_channels=nnunet_cfg.get("out_channels", 1),
+                deep_supervision=nnunet_cfg.get("deep_supervision", True),
+                deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
+                res_block=nnunet_cfg.get("res_block", True),
+            ).to(device)
 
         elif name == "3D UNet":
-            return BraTS3DUNet().to(device)
+            unet_cfg_path = CONFIGS_DIR / "model" / "unet_3d.yaml"
+            unet_cfg = load_yaml_config(unet_cfg_path) if unet_cfg_path.exists() else {}
+            return BraTS3DUNet(
+                in_channels=unet_cfg.get("in_channels", 4),
+                out_channels=unet_cfg.get("out_channels", 1),
+                channels=tuple(unet_cfg.get("channels", (32, 64, 128, 256, 512))),
+                strides=tuple(unet_cfg.get("strides", (2, 2, 2, 2))),
+                num_res_units=unet_cfg.get("num_res_units", 2),
+                dropout=unet_cfg.get("dropout", 0.1),
+            ).to(device)
 
         else:
             raise ValueError(f"Unknown model name: {name}")
@@ -188,6 +224,7 @@ def main():
     models = [
         ("3D VisReg JEPA (FPN)", lambda: build_model("3D VisReg JEPA (FPN)")),
         ("3D SigReg JEPA (FPN)", lambda: build_model("3D SigReg JEPA (FPN)")),
+        ("3D I-JEPA (FPN)", lambda: build_model("3D I-JEPA (FPN)")),
         ("3D nnU-Net", lambda: build_model("3D nnU-Net")),
         ("3D UNet", lambda: build_model("3D UNet")),
     ]

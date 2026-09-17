@@ -45,6 +45,9 @@ Gliomas (glioblastomas and astrocytomas) are intrinsically **three-dimensional, 
 | **Exact 3D HD95 Metric** | $d_{\text{HD95}}^{3\text{D}}$ via 3D 26-connectivity morphological erosion and `cKDTree` in physical mm ($1.0\text{ mm}^3$). | **Huttenlocher et al. (1993)**; **Taha & Hanbury (2015)**; **Powers (2011)**. Guarded zero-division prevents artificial epsilon score inflation. |
 | **Effective Rank ($S_k^2$)** | $\text{erank}(Z) = \exp\left(-\sum p_k \ln p_k\right)$, $p_k = S_k^2 / \sum S_j^2$. | **Roy & Vetterli (2007)**. Strictly uses covariance eigenvalues $S_k^2$, preventing linear $S_k$ from masking dimensional collapse. |
 | **Centered Cosine Sim** | $\bar{S}_{\text{centered}} = \frac{1}{N(N-1)} \sum_{i \neq j} \frac{(z_i - \bar{z})^\top (z_j - \bar{z})}{\|z_i - \bar{z}\|_2 \|z_j - \bar{z}\|_2}$. | **Wang & Isola (2020)**. Decouples centroid translation from angular dispersion, diagnosing directional collapse. |
+| **Combined Loss Alignment** | Cross-Entropy masks background (`ignore_index=0`) when Dice excludes background (`include_background=False`). | **Milletari et al. (2016)**. Guarantees consistent foreground-only supervision, eliminating multi-task gradient conflict. |
+| **Quartile-Stratified Splits** | Low-data tiers ($1\%$ to $50\%$) stratified by tumor volume quartile. | **Isensee et al. (2021)**. Preserves macro- and micro-lesion representation balance across low-data fractions. |
+| **Metric Validation Guard** | Strict single-channel validation ($C=1$) + `from_logits` toggle in `compute_volumetric_metrics_3d`. | **Taha & Hanbury (2015)**. Prevents silent metric computation on background channel 0 and avoids double-sigmoid distortion. |
 | **3D Rician Scanner Noise** | $M = \sqrt{(X + \eta_1)^2 + \eta_2^2}$, $\eta_1, \eta_2 \sim \mathcal{N}(0, \sigma_{\text{noise}}^2)$. | **Gudbjartsson & Patz (1995)**. Accurately simulates MRI magnitude reconstruction from quadrature RF coil channels. |
 | **3D B1 RF Field Bias** | $X_{\text{corrupt}} = X \cdot \left(1 + \sum_{i+j+k \le 2} c_{ijk} x^i y^j z^k\right)$. | **Sled et al. (1998)**; **Lebrun et al. (2021)**. Multiplicative smooth 2nd-order polynomial simulating RF coil field inhomogeneity. |
 
@@ -129,13 +132,13 @@ thesis_3d/
 │   ├── package_for_kaggle.py     # Packages processed 3D dataset into dist_kaggle/ archive
 │   └── run_full_pipeline_3d.py   # Master automation orchestrator
 │
-├── tests/                        # Pytest automated test suite (35/35 unit tests)
+├── tests/                        # Pytest automated test suite (47/47 unit tests)
 │   ├── conftest.py               # Synthetic 3D volume fixtures
 │   ├── test_data_3d.py           # Dataset, 3D masking collision & BFS verification
 │   ├── test_models_3d.py         # Forward/backward graphs & parameter isolation
 │   ├── test_losses_3d.py         # Epps-Pulley, Sliced-Wasserstein, multi-class Dice+CE
 │   ├── test_metrics_3d.py        # 3D Dice, cKDTree 3D HD95, Effective Rank S^2, collapse suite
-│   └── test_fixes_3d.py          # Architectural regressions, prefix stripping, Rician physics
+│   └── test_fixes_3d.py          # Regression tests: dynamic deep supervision, cosine EMA momentum, VisReg SWD, Rician/B1 transforms, model config consistency
 │
 └── outputs/                      # Checkpoints (.pt), metrics (.csv, .md), figures (.png, .pdf)
     ├── checkpoints/
@@ -159,7 +162,7 @@ uv pip install -e ".[dev]"
 ### Step 2: Run Unit Tests
 ```bash
 pytest tests/ -v
-# Verified: 35 passed in ~18s
+# Verified: 47 passed in ~15s
 ```
 
 ---
@@ -206,7 +209,7 @@ python scripts/train_downstream_3d.py --model_type sigreg_jepa --decoder_type bo
 ### 4. Supervised 3D Baselines
 ```bash
 # 3D Residual UNet (MONAI)
-python scripts/train_unet_3d.py --epochs 30 --batch_size 4 --amp
+python scripts/train_unet_3d.py --epochs 30 --batch_size 2 --amp
 
 # 3D nnU-Net DynUNet with Deep Supervision (MONAI)
 python scripts/train_nnunet_3d.py --epochs 30 --batch_size 2 --amp
@@ -230,11 +233,14 @@ python scripts/generate_figures_3d.py
 ### 6. Automated Pipeline Orchestrator
 To run all stages sequentially:
 ```bash
-# Fast smoke test across all modules
+# Fast smoke test across all modules (default: visreg_jepa)
 python scripts/run_full_pipeline_3d.py --smoke_test
 
-# Full pipeline execution
-python scripts/run_full_pipeline_3d.py
+# Full pipeline execution for primary model
+python scripts/run_full_pipeline_3d.py --model_type visreg_jepa
+
+# Full pipeline across all SSL models (visreg_jepa, sigreg_jepa, ijepa)
+python scripts/run_full_pipeline_3d.py --model_type all
 ```
 
 ### 7. Running on Kaggle GPU

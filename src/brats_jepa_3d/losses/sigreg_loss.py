@@ -48,6 +48,8 @@ class EppsPulleyGaussianityTest(nn.Module):
 
     def __init__(self, t_max: float = 3.0, n_knots: int = 17, normalize_measure: bool = True):
         super().__init__()
+        self.t_max = t_max
+        self.n_knots = n_knots
         self.normalize_measure = normalize_measure
         t = torch.linspace(0.0, t_max, n_knots, dtype=torch.float32)
         dt = t_max / (n_knots - 1)
@@ -125,7 +127,7 @@ class SigRegLoss(nn.Module):
 
         # Flatten tokens across batch and patch dimensions: [N, D]
         z = reg_tokens.reshape(-1, reg_tokens.shape[-1])
-        _N, D = z.shape
+        D = z.shape[-1]
 
         # Sample M random projection directions on unit hypersphere in float32
         # to ensure isotropic distribution without half-precision artifacts

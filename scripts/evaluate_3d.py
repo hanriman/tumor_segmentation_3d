@@ -17,7 +17,13 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from brats_jepa_3d.config import CHECKPOINTS_DIR, METRICS_DIR, ensure_directories
+from brats_jepa_3d.config import (
+    CHECKPOINTS_DIR,
+    CONFIGS_DIR,
+    METRICS_DIR,
+    ensure_directories,
+    load_yaml_config,
+)
 from brats_jepa_3d.data import BraTS3DDataset
 from brats_jepa_3d.metrics import (
     compute_representation_collapse_metrics,
@@ -209,28 +215,43 @@ def main():
     for label, model_type, decoder_type in models_to_evaluate:
         logger.info(f"Evaluating: {label}")
 
-        if args.checkpoint:
+        if args.checkpoint and len(models_to_evaluate) == 1:
             ckpt_file = Path(args.checkpoint)
-        elif model_type == "unet_3d":
-            ckpt_file = CHECKPOINTS_DIR / "unet_3d_best.pt"
-        elif model_type == "nnunet_3d":
-            ckpt_file = CHECKPOINTS_DIR / "nnunet_3d_best.pt"
         else:
-            downstream_ckpts = sorted(CHECKPOINTS_DIR.glob(f"{model_type}_{decoder_type}_best.pt")) or sorted(
-                CHECKPOINTS_DIR.glob(f"{model_type}*best.pt")
-            )
-            pretrain_ckpts = sort_checkpoints_by_epoch(
-                list(CHECKPOINTS_DIR.glob(f"{model_type}*epoch*.pt"))
-            )
-            if downstream_ckpts:
-                ckpt_file = downstream_ckpts[-1]
-            elif pretrain_ckpts:
-                ckpt_file = pretrain_ckpts[-1]
+            if args.checkpoint and len(models_to_evaluate) > 1:
+                logger.warning(
+                    f"--checkpoint was specified ({args.checkpoint}), but multiple models are being evaluated. "
+                    f"Using default checkpoint path for {label}."
+                )
+            if model_type == "unet_3d":
+                ckpt_file = CHECKPOINTS_DIR / "unet_3d_best.pt"
+            elif model_type == "nnunet_3d":
+                ckpt_file = CHECKPOINTS_DIR / "nnunet_3d_best.pt"
             else:
-                ckpt_file = CHECKPOINTS_DIR / f"{model_type}_{decoder_type}_best.pt"
+                downstream_ckpts = sorted(CHECKPOINTS_DIR.glob(f"{model_type}_{decoder_type}_best.pt")) or sorted(
+                    CHECKPOINTS_DIR.glob(f"{model_type}*best.pt")
+                )
+                pretrain_ckpts = sort_checkpoints_by_epoch(
+                    list(CHECKPOINTS_DIR.glob(f"{model_type}*epoch*.pt"))
+                )
+                if downstream_ckpts:
+                    ckpt_file = downstream_ckpts[-1]
+                elif pretrain_ckpts:
+                    ckpt_file = pretrain_ckpts[-1]
+                else:
+                    ckpt_file = CHECKPOINTS_DIR / f"{model_type}_{decoder_type}_best.pt"
 
         if model_type == "unet_3d":
-            model = BraTS3DUNet(in_channels=4, out_channels=1).to(device)
+            unet_cfg_path = CONFIGS_DIR / "model" / "unet_3d.yaml"
+            unet_cfg = load_yaml_config(unet_cfg_path) if unet_cfg_path.exists() else {}
+            model = BraTS3DUNet(
+                in_channels=unet_cfg.get("in_channels", 4),
+                out_channels=unet_cfg.get("out_channels", 1),
+                channels=tuple(unet_cfg.get("channels", (32, 64, 128, 256, 512))),
+                strides=tuple(unet_cfg.get("strides", (2, 2, 2, 2))),
+                num_res_units=unet_cfg.get("num_res_units", 2),
+                dropout=unet_cfg.get("dropout", 0.1),
+            ).to(device)
             if ckpt_file.exists():
                 sd = torch.load(ckpt_file, map_location=device)
                 sd = sd.get("model_state_dict", sd)
@@ -244,7 +265,15 @@ def main():
             erank, cossim = "-", "-"
 
         elif model_type == "nnunet_3d":
-            model = BraTS3DnnUNet(in_channels=4, out_channels=1, deep_supervision=True).to(device)
+            nnunet_cfg_path = CONFIGS_DIR / "model" / "nnunet_3d.yaml"
+            nnunet_cfg = load_yaml_config(nnunet_cfg_path) if nnunet_cfg_path.exists() else {}
+            model = BraTS3DnnUNet(
+                in_channels=nnunet_cfg.get("in_channels", 4),
+                out_channels=nnunet_cfg.get("out_channels", 1),
+                deep_supervision=nnunet_cfg.get("deep_supervision", True),
+                deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
+                res_block=nnunet_cfg.get("res_block", True),
+            ).to(device)
             if ckpt_file.exists():
                 sd = torch.load(ckpt_file, map_location=device)
                 sd = sd.get("model_state_dict", sd)
@@ -259,10 +288,31 @@ def main():
 
         else:
             # JEPA Downstream Model
+            jepa_cfg_path = CONFIGS_DIR / "model" / f"{model_type}_3d.yaml"
+            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
+
+            # Detect whether checkpoint has deep supervision heads
+            ds_flag = getattr(args, "deep_supervision", False)
+            if ckpt_file and ckpt_file.exists():
+                try:
+                    sd_peek = torch.load(ckpt_file, map_location="cpu")
+                    sd_peek = sd_peek.get("model_state_dict", sd_peek)
+                    if any(k.startswith("decoder.ds") for k in sd_peek):
+                        ds_flag = True
+                except Exception:
+                    pass
+
             model = JEPASegmentationModel3D(
-                in_channels=4,
+                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
+                patch_size=tuple(jepa_cfg.get("patch_size", (16, 16, 16))),
+                in_channels=jepa_cfg.get("in_channels", 4),
+                embed_dim=jepa_cfg.get("embed_dim", 384),
+                encoder_depth=jepa_cfg.get("encoder_depth", 8),
+                num_heads=jepa_cfg.get("num_heads", 6),
+                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
                 out_channels=1,
                 decoder_type=decoder_type or "multiscale",
+                deep_supervision=ds_flag,
             ).to(device)
             if ckpt_file and ckpt_file.exists():
                 sd = torch.load(ckpt_file, map_location=device)
@@ -292,7 +342,9 @@ def main():
             rep_stats = evaluate_representation(
                 model.encoder, test_loader, device, smoke_test=args.smoke_test
             )
-            erank = f"{rep_stats['erank']:.2f}"
+            erank_val = rep_stats["erank"]
+            embed_dim = getattr(model.encoder, "embed_dim", 384)
+            erank = f"{erank_val:.2f} ({erank_val / embed_dim * 100:.1f}%)"
             cossim = f"{rep_stats['centered_cossim']:.4f}"
 
         seg_stats = benchmark_model(

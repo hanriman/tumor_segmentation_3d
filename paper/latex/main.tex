@@ -80,7 +80,7 @@ The foundational Image-JEPA (I-JEPA)~\citep{assran2023ijepa} prevents representa
 Combined with stop-gradient operators on target representations, the slow evolution of the teacher prevents instantaneous representational collapse~\citep{grill2020bootstrap}. However, in 3D volumetric medical imaging, the dual-encoder EMA framework introduces acute drawbacks:
 \begin{enumerate}
     \item \textbf{GPU Memory Footprint}: Storing an identical copy of the 3D vision backbone doubles parameter memory during pre-training, severely restricting 3D subvolume batch sizes on memory-constrained GPUs.
-    \item \textbf{Heuristic Scheduling}: Training stability depends heavily on empirical cosine scheduling of momentum $m$; improper schedules can induce destabilization or asymptotic collapse.
+    \item \textbf{Heuristic Scheduling}: Training stability depends heavily on empirical cosine scheduling of teacher momentum $m_t = m_{\text{end}} - (m_{\text{end}} - m_{\text{start}}) \cdot \frac{1}{2}(1 + \cos(\pi t / T_{\text{anneal}}))$ ($m \in [0.996, 1.0]$); improper schedules can induce representation destabilization or asymptotic collapse.
     \item \textbf{Implicit Mechanism}: Rather than optimizing an explicit objective that penalizes low representation rank or collapsed feature geometry, non-collapse under EMA updating is an emergent optimization phenomenon.
 \end{enumerate}
 
@@ -128,10 +128,10 @@ To avoid inter-slice contrast distortion and preserve true 3D spatial gradient c
 where $\mu_{c, p}$ and $\sigma_{c, p}$ are the empirical mean and standard deviation of channel $c$ within the intracranial brain mask $\Omega_{\text{fg}}$ of patient volume $p$, and $\epsilon = 10^{-8}$. Extracranial background voxels remain identically zero.
 
 \paragraph{Random Modality Dropout (RMD)}
-In clinical neuro-oncology, complete four-sequence protocols are frequently compromised by patient motion, acquisition time limits, or contraindications to gadolinium contrast. To instill intrinsic robustness to missing sequences, volumes undergo Random Modality Dropout during training: each sequence channel is independently zeroed out with probability $p_{\text{drop}} = 0.25$. A deterministic fallback ensures that if all four channels are dropped, one channel is randomly preserved, preventing completely empty inputs~\citep{havaei2017brain}.
+In clinical neuro-oncology, complete four-sequence protocols are frequently compromised by patient motion, acquisition time limits, or contraindications to gadolinium contrast. To instill intrinsic robustness to missing sequences, volumes undergo Random Modality Dropout during training: each sequence channel is independently zeroed out with probability $p_{\text{drop}} = 0.25$. A deterministic PyTorch PRNG fallback ensures that if all four channels are dropped, one channel is randomly preserved, preventing completely empty inputs while preserving seed reproducibility across distributed ranks~\citep{havaei2017brain}.
 
 \paragraph{Patient-Level Stratified Partitioning}
-To guarantee zero data contamination, dataset partitioning is enforced strictly at the \textbf{patient volume level}: $\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{val}} = \emptyset$ and $\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{test}} = \emptyset$. Patients are stratified into tumor volume quartiles before split assignment ($70\%$ train, $15\%$ val, $15\%$ test), ensuring that tumor size distributions are strictly invariant across splits.
+To guarantee zero data contamination, dataset partitioning is enforced strictly at the \textbf{patient volume level}: $\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{val}} = \emptyset$ and $\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{test}} = \emptyset$. Patients are stratified into tumor volume quartiles before split assignment ($70\%$ train, $15\%$ val, $15\%$ test), ensuring that tumor size distributions are strictly invariant across splits; fractional low-data subsets ($1\%$ to $50\%$) inherit this quartile stratification to prevent lesion scale sampling bias.
 
 \subsection{3D VisReg JEPA Formulation}
 \label{sec:visreg_formulation}
@@ -203,7 +203,7 @@ are reshaped into $8 \times 8 \times 8$ spatial grids and projected via $1 \time
 To establish an equitable benchmark, we compare against two fully supervised volumetric convolutional baselines trained under identical 3D data splits and preprocessing:
 \begin{itemize}
     \item \textbf{3D Residual UNet (MONAI ResUNet)}: A 5-stage symmetric 3D encoder-decoder spanning spatial resolutions $128^3 \to 64^3 \to 32^3 \to 16^3 \to 8^3$ with channel capacities $(32, 64, 128, 256, 512)$, Instance Normalization, LeakyReLU ($0.01$), and horizontal concatenation skip connections~\citep{ronneberger2015u,cciccek20163d}.
-    \item \textbf{3D nnU-Net Baseline (DynUNet with Deep Supervision)}: Implements the self-configuring DynUNet architecture~\citep{isensee2021nnunet} with residual blocks and intermediate supervision heads attached to decoder stages at $64^3$, $32^3$, and $16^3$. Normalized exponential decay weights $(0.533, 0.267, 0.133, 0.067)$ ensure gradient scale invariance. In evaluation mode, auxiliary heads are deactivated, yielding deterministic full-resolution output without latency overhead.
+    \item \textbf{3D nnU-Net Baseline (DynUNet with Deep Supervision)}: Implements the self-configuring DynUNet architecture~\citep{isensee2021nnunet} with residual blocks and intermediate supervision heads attached to decoder stages at $64^3$, $32^3$, and $16^3$. Normalized exponential decay weights $w_s = 2^{-s} / \sum_{j=0}^{S-1} 2^{-j}$ (yielding $[0.533, 0.267, 0.133, 0.067]$ for $S=4$ multi-scale outputs) guarantee dynamic loss scale invariance and prevent gradient vanishing to early encoder blocks~\citep{lee2015deeply}. In evaluation mode, auxiliary heads are deactivated, yielding deterministic full-resolution output without latency overhead.
 \end{itemize}
 
 \subsection{Downstream Loss Objective and Evaluation Protocol}
@@ -216,7 +216,7 @@ Models are trained by optimizing a combined Soft Dice and Binary Cross-Entropy (
     &\quad - \frac{1}{N_{\text{vox}}} \sum_{i=1}^{N_{\text{vox}}} \left[ \mathbf{Y}_i \ln \sigma(\hat{\mathbf{Y}}_i) + (1 - \mathbf{Y}_i) \ln(1 - \sigma(\hat{\mathbf{Y}}_i)) \right]
 \end{split}
 \end{equation}
-Soft Dice directly optimizes 3D volumetric overlap, while BCE provides smooth voxel-level gradients.
+Soft Dice directly optimizes 3D volumetric overlap, while BCE provides smooth voxel-level gradients. In multi-class configurations where background is excluded ($\text{include\_background}=\text{False}$), background voxels are identically masked out in cross-entropy ($\text{ignore\_index}=0$) to eliminate multi-task optimization conflicts between foreground-only Dice and background penalties.
 
 \paragraph{Evaluation Metrics}
 We report four primary volumetric metrics:
@@ -232,7 +232,7 @@ We report four primary volumetric metrics:
 \label{sec:experimental_setup}
 
 \paragraph{Dataset and Cohort Partitions}
-Experiments are conducted on the official BraTS 2024 Adult Glioma cohort (\texttt{BraTS GLI})~\citep{brats2024}, consisting of multi-parametric 3D MRI scans resampled to isotropic $1.0\,\text{mm}^3$ resolution ($128 \times 128 \times 128$). Volumes are partitioned at the patient volume level into $1,266$ training volumes ($70\%$), $181$ validation volumes ($10\%$), and $362$ held-out test volumes ($20\%$).
+Experiments are conducted on the official BraTS 2024 Adult Glioma cohort (\texttt{BraTS GLI})~\citep{brats2024}, consisting of multi-parametric 3D MRI scans resampled to isotropic $1.0\,\text{mm}^3$ resolution ($128 \times 128 \times 128$). Volumes are partitioned at the patient volume level into $1,266$ training volumes ($70\%$), $271$ validation volumes ($15\%$), and $271$ held-out test volumes ($15\%$), matching the $70/15/15$ patient-level stratification.
 
 \paragraph{Training Regimes}
 \begin{itemize}
@@ -259,11 +259,11 @@ We evaluate three distinct distribution shift regimes:
 \subsection{Full-Data Benchmark: Can 3D JEPA Match Supervised Volumetric CNNs?}
 \label{sec:results_full_data}
 
-Table~\ref{tab:benchmark_results} presents the full-data evaluation on the held-out BraTS 2024 test split ($N=362$ volumes).
+Table~\ref{tab:benchmark_results} presents the full-data evaluation on the held-out BraTS 2024 test split ($N=271$ volumes).
 
 \begin{table}[ht]
 \centering
-\caption{Full-data empirical benchmark comparison of throughput, forward latency, and downstream volumetric segmentation metrics on 3D multi-modal BraTS Glioma MRI under Random Modality Dropout ($p_{\text{drop}} = 0.25$). Evaluated on the held-out test split ($N=362$ volumes) following full GPU training with AMP. Effective Spectral Rank ($\text{erank}$) is evaluated on the $128$-dimensional pre-training projector representation ($D_{\text{proj}} = 128$). Best per column is in \textbf{bold}.}
+\caption{Full-data empirical benchmark comparison of throughput, forward latency, and downstream volumetric segmentation metrics on 3D multi-modal BraTS Glioma MRI under Random Modality Dropout ($p_{\text{drop}} = 0.25$). Evaluated on the held-out test split ($N=271$ volumes) following full GPU training with AMP. Effective Spectral Rank ($\text{erank}$) is evaluated on the $128$-dimensional pre-training projector representation ($D_{\text{proj}} = 128$). Best per column is in \textbf{bold}.}
 \label{tab:benchmark_results}
 \vspace{0.5em}
 \resizebox{\textwidth}{!}{%
@@ -293,7 +293,7 @@ Table~\ref{tab:low_data_results} and Figure~\ref{fig:low_data_efficiency} docume
 
 \begin{table}[ht]
 \centering
-\caption{Low-Data Volumetric Label Efficiency Benchmark across 6 annotation fractions ($1\%$ to $100\%$). Values report 3D Volumetric Dice Score (\%) evaluated on the held-out test split ($N=362$ volumes). Best per column is in \textbf{bold}.}
+\caption{Low-Data Volumetric Label Efficiency Benchmark across 6 annotation fractions ($1\%$ to $100\%$). Values report 3D Volumetric Dice Score (\%) evaluated on the held-out test split ($N=271$ volumes). Best per column is in \textbf{bold}.}
 \label{tab:low_data_results}
 \vspace{0.5em}
 \resizebox{\textwidth}{!}{%
@@ -324,11 +324,11 @@ This substantial performance gap originates from an optimization failure mode in
 \subsection{Robustness to Synthetic 3D Scanner Shifts}
 \label{sec:results_ood_synthetic}
 
-Table~\ref{tab:ood_synthetic_results} and Figure~\ref{fig:ood_synthetic} report performance under synthetic scanner domain shifts on the held-out test split ($N=362$ volumes).
+Table~\ref{tab:ood_synthetic_results} and Figure~\ref{fig:ood_synthetic} report performance under synthetic scanner domain shifts on the held-out test split ($N=271$ volumes).
 
 \begin{table}[ht]
 \centering
-\caption{Synthetic Scanner Shift Out-of-Distribution (OOD) evaluation across held-out test volumes ($N=362$). Values report 3D Volumetric Dice Score (\%) and 95th Percentile Hausdorff Distance (HD95, mm). Best per perturbation is in \textbf{bold}.}
+\caption{Synthetic Scanner Shift Out-of-Distribution (OOD) evaluation across held-out test volumes ($N=271$). Values report 3D Volumetric Dice Score (\%) and 95th Percentile Hausdorff Distance (HD95, mm). Best per perturbation is in \textbf{bold}.}
 \label{tab:ood_synthetic_results}
 \vspace{0.5em}
 \resizebox{0.88\textwidth}{!}{%
@@ -368,7 +368,7 @@ Table~\ref{tab:missing_modality_results} and Figure~\ref{fig:missing_modality_oo
 
 \begin{table}[ht]
 \centering
-\caption{Emergency Triage Under Missing Pulse Sequences on BraTS 2024 GLI test split ($N=362$ volumes). Values report 3D Volumetric Dice Score (\%). Best per strategy is in \textbf{bold}.}
+\caption{Emergency Triage Under Missing Pulse Sequences on BraTS 2024 GLI test split ($N=271$ volumes). Values report 3D Volumetric Dice Score (\%). Best per strategy is in \textbf{bold}.}
 \label{tab:missing_modality_results}
 \vspace{0.5em}
 \resizebox{0.88\textwidth}{!}{%

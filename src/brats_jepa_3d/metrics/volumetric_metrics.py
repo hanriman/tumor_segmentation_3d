@@ -132,14 +132,51 @@ def compute_volumetric_metrics_3d(
     threshold: float = 0.5,
     smooth: float = 0.0,
     voxel_spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    from_logits: bool = True,
 ) -> dict[str, Any]:
     r"""
     Comprehensive Macro-Averaged 3D Volumetric Segmentation Benchmark Suite.
+
+    Technical Design & Verification Guarantees:
+    -------------------------------------------
+    1. Single-Channel Whole Tumor Validation:
+       Strictly enforces binary single-channel predictions (`C=1`). In multi-class tensors
+       (`C > 1`), background channel 0 accounts for >98.5% of total intracranial voxels.
+       Evaluating multi-class tensors without explicit channel extraction would silently
+       macro-average over the dominant background, yielding artificially inflated Dice scores.
+       An informative ValueError is raised if `pred.shape[1] > 1`.
+    2. Probability vs. Logit Decoupling (`from_logits`):
+       When `from_logits=True` (default for raw model outputs), `torch.sigmoid` maps unconstrained
+       logits to [0, 1] probabilities before thresholding. When `from_logits=False` (e.g. for
+       pre-softmax probabilities or ensembled masks), direct thresholding is applied, preventing
+       double-sigmoid distortion where sigmoid(0.9) = 0.71.
+    3. Anisotropic Voxel Spacing:
+       HD95 query points are scaled to physical millimeters using `voxel_spacing` (default 1.0mm^3).
+    4. Guarded Zero-Division Protocol:
+       Follows Powers (2011) and Taha & Hanbury (2015): if both prediction and target are empty,
+       Dice=1.0; if one is empty while the other is non-empty, Dice=0.0 and HD95=bounding box diagonal.
     """
+    # Normalize singleton channel dimension between 4D [B, D, H, W] and 5D [B, 1, D, H, W]
+    if pred.dim() == 4 and target.dim() == 5 and target.shape[1] == 1:
+        pred = pred.unsqueeze(1)
+    elif pred.dim() == 5 and pred.shape[1] == 1 and target.dim() == 4:
+        target = target.unsqueeze(1)
+
+    # Technical Guard: Multi-class tensors must be binarized/sub-indexed prior to metric computation
+    if pred.dim() == 5 and pred.shape[1] > 1:
+        raise ValueError(
+            f"compute_volumetric_metrics_3d expects binary Whole Tumor channel (C=1). "
+            f"Got pred with shape {pred.shape}. For multi-class evaluation, extract or binarize target channel."
+        )
+
     if pred.shape != target.shape:
         raise ValueError(f"Shape mismatch: pred {pred.shape} vs target {target.shape}")
 
-    pred_bin = (torch.sigmoid(pred) > threshold).float()
+    # Technical Decision: Apply sigmoid only when from_logits=True
+    if from_logits:
+        pred_bin = (torch.sigmoid(pred) > threshold).float()
+    else:
+        pred_bin = (pred > threshold).float()
     target_bin = (target > 0).float()
 
     dice_vals = []

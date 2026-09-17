@@ -16,13 +16,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from brats_jepa_3d.config import FIGURES_DIR, METRICS_DIR, PROCESSED_DATA_DIR
+from brats_jepa_3d.config import FIGURES_DIR, METRICS_DIR, PROCESSED_DATA_DIR, get_dataset_dir
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate 3D Figures and Publication Plots")
     parser.add_argument("--output_dir", type=str, default=str(FIGURES_DIR))
     parser.add_argument("--metrics_dir", type=str, default=str(METRICS_DIR))
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default=None,
+        help="Path to processed 3D dataset directory",
+    )
     return parser.parse_args()
 
 
@@ -127,7 +133,9 @@ def plot_benchmark_metrics(metrics_csv: Path, out_dir: Path):
     hd95s = [float(str(v).split("±")[0].strip()) for v in df["HD95 (mm)"]]
     latencies = [float(v) for v in df["Latency (ms)"]]
 
-    _fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    has_erank = "EffRank (S²)" in df.columns
+    n_panels = 4 if has_erank else 3
+    _fig, axes = plt.subplots(1, n_panels, figsize=(5.5 * n_panels, 5))
     colors = ["#2A9D8F", "#E76F51", "#F4A261", "#457B9D", "#1D3557"]
 
     # 1. 3D Dice Score
@@ -147,6 +155,23 @@ def plot_benchmark_metrics(metrics_csv: Path, out_dir: Path):
     axes[2].set_xlabel("Latency (ms / 128³ volume)", fontsize=12, fontweight="bold")
     axes[2].set_title("Inference Latency", fontsize=13, fontweight="bold")
     axes[2].grid(axis="x", linestyle="--", alpha=0.7)
+
+    # 4. Latent Effective Rank (if available)
+    if has_erank:
+        eranks = []
+        for v in df["EffRank (S²)"]:
+            v_str = str(v).split()[0].strip()
+            try:
+                eranks.append(float(v_str))
+            except (ValueError, TypeError):
+                eranks.append(0.0)
+        axes[3].barh(models, eranks, color=colors[: len(models)])
+        axes[3].set_xlabel("Effective Rank ($S^2$)", fontsize=12, fontweight="bold")
+        axes[3].set_title("Latent Representation Capacity", fontsize=13, fontweight="bold")
+        axes[3].grid(axis="x", linestyle="--", alpha=0.7)
+        for i, val in enumerate(eranks):
+            if val <= 0.0:
+                axes[3].text(0.5, i, "N/A (CNN Baseline)", va="center", fontsize=9, color="gray", fontstyle="italic")
 
     plt.tight_layout()
     save_path = out_dir / "benchmark_3d_comparison.png"
@@ -241,8 +266,17 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Multi-planar orthogonal slice generation
-    processed_dir = PROCESSED_DATA_DIR
-    patient_files = list(processed_dir.glob("*.npz")) if processed_dir.exists() else []
+    if args.data_dir:
+        processed_dir = Path(args.data_dir).resolve()
+    else:
+        try:
+            processed_dir = get_dataset_dir("brats_gli_3d")
+        except (FileNotFoundError, OSError):
+            processed_dir = PROCESSED_DATA_DIR
+
+    patient_files = []
+    if processed_dir.exists():
+        patient_files = list(processed_dir.glob("*.npz")) or list(processed_dir.glob("**/*.npz"))
 
     if patient_files:
         sample_file = patient_files[0]

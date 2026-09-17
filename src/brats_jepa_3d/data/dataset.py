@@ -52,9 +52,30 @@ class BraTS3DDataset(Dataset):
             df = df[df["split"] == split].reset_index(drop=True)
 
         # Fraction subsampling for Low-Data Label Efficiency Benchmark
+        # Technical Decision: In low-data regimes (1% to 50% labels), unstratified random sampling
+        # risks sampling bias (e.g. over-representing micro-lesions or empty volumes). Stratifying
+        # on tumor_quartile guarantees that every labeled fraction preserves the cohort's lesion size distribution.
         if fraction < 1.0 and len(df) > 0:
             n_samples = max(1, int(np.ceil(len(df) * fraction)))
-            df = df.sample(n=min(len(df), n_samples), random_state=seed).reset_index(drop=True)
+            if (
+                "tumor_quartile" in df.columns
+                and df["tumor_quartile"].nunique() > 1
+                and n_samples >= df["tumor_quartile"].nunique()
+            ):
+                try:
+                    from sklearn.model_selection import train_test_split
+
+                    sampled_df, _ = train_test_split(
+                        df,
+                        train_size=n_samples,
+                        random_state=seed,
+                        stratify=df["tumor_quartile"],
+                    )
+                    df = sampled_df.reset_index(drop=True)
+                except (ValueError, KeyError, TypeError, ImportError):
+                    df = df.sample(n=min(len(df), n_samples), random_state=seed).reset_index(drop=True)
+            else:
+                df = df.sample(n=min(len(df), n_samples), random_state=seed).reset_index(drop=True)
 
         self.df = df
         self.cache: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}

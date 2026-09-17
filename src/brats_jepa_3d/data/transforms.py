@@ -21,6 +21,10 @@ class RandomModalityDropout3D(nn.Module):
     3. Guaranteed Non-Empty Fallback:
        If all 4 channels are sampled for dropout (\prod_c (1 - m_c) = 1), one channel is randomly
        forced active, preventing degenerate all-zero inputs from generating zero-gradient steps.
+    4. Strict PyTorch PRNG Determinism:
+       Uses `torch.bernoulli` and `torch.randint` on `image.device` rather than Python's non-seeded
+       `random` module, guaranteeing exact bitwise reproducibility under `torch.manual_seed` across
+       DataLoader multiprocessing workers and distributed ranks.
     """
 
     def __init__(self, p_drop: float = 0.25):
@@ -45,8 +49,8 @@ class RandomModalityDropout3D(nn.Module):
             # Sample Bernoulli mask for channels
             mask = torch.bernoulli(torch.full((C,), 1.0 - self.p_drop, device=image.device))
             if mask.sum() == 0:
-                # Guaranteed active channel fallback
-                active_idx = random.randint(0, C - 1)
+                # Guaranteed active channel fallback using PyTorch PRNG for seed consistency
+                active_idx = torch.randint(0, C, (1,), device=image.device).item()
                 mask[active_idx] = 1.0
 
             mask = mask.view(C, 1, 1, 1)

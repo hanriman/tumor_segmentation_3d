@@ -8,7 +8,7 @@ import argparse
 import subprocess
 import sys
 
-from brats_jepa_3d.config import PROJECT_ROOT
+from brats_jepa_3d.config import CHECKPOINTS_DIR, PROJECT_ROOT
 from brats_jepa_3d.utils import sort_checkpoints_by_epoch
 
 
@@ -22,6 +22,13 @@ def run_cmd(cmd_list: list[str]):
 
 def main():
     parser = argparse.ArgumentParser(description="Run Full 3D JEPA Pipeline")
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default="visreg_jepa",
+        choices=["visreg_jepa", "sigreg_jepa", "ijepa", "all"],
+        help="SSL JEPA model architecture to train and evaluate (default: visreg_jepa)",
+    )
     parser.add_argument(
         "--smoke_test", action="store_true", help="Run 1-epoch smoke test on all stages"
     )
@@ -37,26 +44,33 @@ def main():
 
     smoke_flag = ["--smoke_test"] if args.smoke_test else []
 
-    # 2. SSL Pre-training (SigReg JEPA)
-    run_cmd([py, "scripts/train_jepa_3d.py", "--model_type", "sigreg_jepa"] + smoke_flag)
+    # Models to train and fine-tune
+    models_to_run = (
+        ["visreg_jepa", "sigreg_jepa", "ijepa"]
+        if args.model_type == "all"
+        else [args.model_type]
+    )
 
-    # 3. Downstream Fine-tuning
-    sigreg_ckpts = sort_checkpoints_by_epoch(
-        list((PROJECT_ROOT / "outputs/checkpoints").glob("sigreg_jepa_3d_epoch_*.pt"))
-    )
-    pretrained_arg = ["--pretrained_checkpoint", str(sigreg_ckpts[-1])] if sigreg_ckpts else []
-    run_cmd(
-        [
-            py,
-            "scripts/train_downstream_3d.py",
-            "--model_type",
-            "sigreg_jepa",
-            "--decoder_type",
-            "multiscale",
-        ]
-        + pretrained_arg
-        + smoke_flag
-    )
+    # 2. SSL Pre-training & 3. Downstream Fine-tuning
+    for m_type in models_to_run:
+        run_cmd([py, "scripts/train_jepa_3d.py", "--model_type", m_type] + smoke_flag)
+
+        ckpts = sort_checkpoints_by_epoch(
+            list(CHECKPOINTS_DIR.glob(f"{m_type}*epoch*.pt"))
+        )
+        pretrained_arg = ["--pretrained_checkpoint", str(ckpts[-1])] if ckpts else []
+        run_cmd(
+            [
+                py,
+                "scripts/train_downstream_3d.py",
+                "--model_type",
+                m_type,
+                "--decoder_type",
+                "multiscale",
+            ]
+            + pretrained_arg
+            + smoke_flag
+        )
 
     # 4. Supervised Baselines
     run_cmd([py, "scripts/train_unet_3d.py"] + smoke_flag)

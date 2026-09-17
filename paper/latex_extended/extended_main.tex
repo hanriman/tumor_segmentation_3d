@@ -61,7 +61,7 @@ Self-Supervised Learning (SSL) circumvents the annotation bottleneck by pre-trai
 \begin{itemize}
     \item \textbf{Vs. Masked Autoencoders (MAE)}: Generative autoencoding paradigms \citep{he2022masked,feichtenhofer2022masked} train encoders to reconstruct raw voxel intensities ($\mathcal{L}_{\text{MSE}}(X, \hat{X})$). In clinical MRI, voxel intensities are heavily corrupted by scanner acquisition noise (governed by the Rician distribution; \citet{gudbjartsson1995rician}) and radiofrequency (RF) coil B1 field inhomogeneities \citep{sled1998nonparametric}. Voxel reconstruction forces the vision backbone to allocate representational capacity to high-frequency non-semantic noise artifacts. In contrast, Joint-Embedding Predictive Architectures (JEPA) \citep{assran2023ijepa} operate strictly in latent embedding space ($\hat{y}_{\text{tgt}} \approx y_{\text{tgt}}$), naturally filtering out pixel-level noise artifacts \citep{balestriero2025lejepa}.
     \item \textbf{Vs. Contrastive Learning (SimCLR, MoCo)}: Contrastive frameworks enforce feature similarity between augmented views of the same subject while penalizing cross-subject pairs as negatives. In neuroimaging, all human subjects share macroscopic anatomy (bilateral cerebral hemispheres, lateral ventricles, cerebellum). Treating different patients as negative pairs imposes destructive false-negative gradient penalties on identical healthy anatomical structures. JEPA requires zero negative pairs.
-    \item \textbf{Vs. Empirical Momentum Heuristics (I-JEPA, BYOL, DINO)}: Standard 3D I-JEPA \citep{assran2023ijepa} prevents representation collapse via an Exponential Moving Average (EMA) teacher network ($\bar{\theta} \leftarrow m \bar{\theta} + (1-m) \theta$). However, EMA is an empirical heuristic without theoretical convergence guarantees, introduces sensitive momentum hyperparameters ($m \in [0.996, 1.0]$), and incurs an expensive $\sim 40\%$ parameter memory overhead.
+    \item \textbf{Vs. Empirical Momentum Heuristics (I-JEPA, BYOL, DINO)}: Standard 3D I-JEPA \citep{assran2023ijepa} prevents representation collapse via an Exponential Moving Average (EMA) teacher network ($\bar{\theta}_t \leftarrow m_t \bar{\theta}_{t-1} + (1-m_t) \theta_t$). However, EMA is an empirical heuristic without theoretical convergence guarantees, introduces sensitive cosine momentum annealing schedules $m_t = m_{\text{end}} - (m_{\text{end}} - m_{\text{start}}) \cdot \frac{1}{2}\left(1 + \cos\frac{\pi t}{T_{\text{anneal}}}\right)$ ($m \in [0.996, 1.0]$), and incurs an expensive $\sim 40\%$ parameter memory overhead during pre-training.
 \end{itemize}
 
 \paragraph{Analytical Sketched Regularization: SigReg and VisReg in 3D}
@@ -151,7 +151,7 @@ In clinical neuro-oncology, complete 4-sequence acquisitions are frequently comp
 \begin{equation}
     m_c \sim \text{Bernoulli}(1 - p_{\text{drop}}), \quad p_{\text{drop}} = 0.25, \quad \mathbf{X}' = \mathbf{X} \odot \mathbf{m}
 \end{equation}
-If all channels are dropped ($\sum_{c=0}^3 m_c = 0$), one random channel $c^* \sim \mathcal{U}\{0, 3\}$ is activated: $m_{c^*} = 1$. This guarantees that no model ever receives a degenerate all-zero volume.
+If all channels are dropped ($\sum_{c=0}^3 m_c = 0$), one random channel $c^* \sim \mathcal{U}\{0, 3\}$ is activated via PyTorch PRNG: $m_{c^*} = 1$. This guarantees that no model ever receives a degenerate all-zero volume while maintaining strict bitwise reproducibility under random seeds.
 
 \subsection{3D Vision Transformer Backbone (\texttt{VisionTransformerEncoder3D})}
 
@@ -321,11 +321,13 @@ Group Normalization computes statistics per sample across spatial dimensions, el
 
 \begin{enumerate}
     \item \textbf{3D Residual UNet}: MONAI \texttt{UNet} with 5 resolution stages ($32, 64, 128, 256, 512$ channels), 2 residual units per stage, and Instance Normalization \citep{ronneberger2015u,milletari2016vnet}.
-    \item \textbf{3D nnU-Net (DynUNet with Deep Supervision)}: MONAI \texttt{DynUNet} with 3 deep supervision heads at scales $128^3, 64^3, 32^3, 16^3$ \citep{isensee2021nnunet,lee2015deeply}. The multi-scale loss applies normalized exponential decay weights:
+    \item \textbf{3D nnU-Net (DynUNet with Deep Supervision)}: MONAI \texttt{DynUNet} with deep supervision heads across $S$ multi-scale spatial stages (e.g., $128^3, 64^3, 32^3, 16^3$) \citep{isensee2021nnunet,lee2015deeply}. To dynamically adapt to variable head counts without manual weight retuning, the multi-scale loss applies normalized exponential decay weights:
     \begin{equation}
-        w_s = \frac{2^{-s}}{\sum_{j=0}^3 2^{-j}} \implies [w_0, w_1, w_2, w_3] \approx [0.533, 0.267, 0.133, 0.067]
+        w_s = \frac{2^{-s}}{\sum_{j=0}^{S-1} 2^{-j}}, \qquad s \in \{0, \dots, S-1\}
     \end{equation}
+    For $S=4$, this yields $[w_0, w_1, w_2, w_3] \approx [0.533, 0.267, 0.133, 0.067]$, rigorously prioritizing fine-grained native-resolution predictions while providing auxiliary gradient flow to deeper bottleneck representations.
 \end{enumerate}
+In combined segmentation objectives (Dice + Cross-Entropy), when background is excluded ($\text{include\_background}=\text{False}$), Cross-Entropy identically masks out class 0 ($\text{ignore\_index}=0$), guaranteeing mutually consistent foreground-only supervision without multi-task gradient conflict.
 
 \subsection{Volumetric Evaluation Metrics and Latent Representation Diagnostics}
 
@@ -369,7 +371,7 @@ Diagnoses directional angular collapse independent of centroid translation \cite
 \section{Training and Optimization Protocols}
 
 \subsection{Dataset Partitioning and Deterministic Seeding}
-The BraTS 2024 GLI cohort is partitioned at the patient volume level into $70\%$ Train, $15\%$ Validation, and $15\%$ Test. Experiments are deterministically seeded (Seed 42) across PyTorch, NumPy, Python PRNG, and CUDA CuDNN backends.
+The BraTS 2024 GLI cohort is partitioned at the patient volume level into $70\%$ Train, $15\%$ Validation, and $15\%$ Test. Patients are stratified into tumor volume quartiles prior to split assignment; in the low-data label efficiency tiers ($1\%$ to $50\%$), subsampling preserves this quartile stratification to ensure representative lesion distributions across all tiers. Experiments are deterministically seeded (Seed 42) across PyTorch, NumPy, Python PRNG, and CUDA CuDNN backends.
 
 \subsection{Optimization Schedules and Mixed Precision}
 Pre-training runs for 50 epochs using AdamW ($\beta_1 = 0.9, \beta_2 = 0.999$, weight decay $0.05$) with a cosine decay learning rate schedule following a 5-epoch linear warmup from $10^{-6}$ to peak $10^{-4}$. Mini-batch size is set to $B=4$ with gradient accumulation ($N_{\text{accum}}=2$) and Automatic Mixed Precision (\texttt{torch.amp}). Downstream fine-tuning runs for 30 epochs with initial learning rate $2 \times 10^{-4}$ decayed via cosine annealing.

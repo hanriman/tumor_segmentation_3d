@@ -5,6 +5,7 @@ Trains MONAI 3D Residual UNet on multi-modal BraTS 2024 GLI volumes.
 """
 
 import argparse
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -13,8 +14,11 @@ from tqdm import tqdm
 
 from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
+    CONFIGS_DIR,
     LOGS_DIR,
     ensure_directories,
+    load_yaml_config,
+    merge_config_with_args,
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
 from brats_jepa_3d.losses import CombinedDiceBCELoss3D
@@ -31,6 +35,11 @@ from brats_jepa_3d.utils import (
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train 3D Residual UNet Baseline")
+    parser.add_argument("--config", type=str, default=None, help="Path to base YAML config")
+    parser.add_argument("--model_config", type=str, default=None, help="Path to model YAML config")
+    parser.add_argument(
+        "--exp_config", type=str, default=None, help="Path to experiment YAML config"
+    )
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
@@ -71,6 +80,20 @@ def evaluate(model, loader, device, amp: bool = True, smoke_test: bool = False) 
 
 def main():
     args = parse_args()
+
+    # Load configs if available
+    base_cfg_path = args.config or (CONFIGS_DIR / "base.yaml")
+    if Path(base_cfg_path).exists():
+        args = merge_config_with_args(load_yaml_config(base_cfg_path), args)
+
+    model_cfg_path = args.model_config or (CONFIGS_DIR / "model" / "unet_3d.yaml")
+    if Path(model_cfg_path).exists():
+        args = merge_config_with_args(load_yaml_config(model_cfg_path), args)
+
+    exp_cfg_path = args.exp_config or (CONFIGS_DIR / "experiment" / "finetune_30ep.yaml")
+    if Path(exp_cfg_path).exists():
+        args = merge_config_with_args(load_yaml_config(exp_cfg_path), args)
+
     ensure_directories()
     set_seed(args.seed)
     device = get_device()
@@ -114,11 +137,12 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 
     model = BraTS3DUNet(
-        in_channels=4,
-        out_channels=1,
-        channels=(32, 64, 128, 256, 512),
-        strides=(2, 2, 2, 2),
-        num_res_units=2,
+        in_channels=getattr(args, "in_channels", 4),
+        out_channels=getattr(args, "out_channels", 1),
+        channels=tuple(getattr(args, "channels", (32, 64, 128, 256, 512))),
+        strides=tuple(getattr(args, "strides", (2, 2, 2, 2))),
+        num_res_units=getattr(args, "num_res_units", 2),
+        dropout=getattr(args, "dropout", 0.1),
     ).to(device)
 
     criterion = CombinedDiceBCELoss3D()

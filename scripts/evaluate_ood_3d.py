@@ -21,15 +21,31 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from brats_jepa_3d.config import CHECKPOINTS_DIR, METRICS_DIR, ensure_directories
+from brats_jepa_3d.config import (
+    CHECKPOINTS_DIR,
+    CONFIGS_DIR,
+    METRICS_DIR,
+    ensure_directories,
+    load_yaml_config,
+)
 from brats_jepa_3d.data import (
     BraTS3DDataset,
     apply_b1_bias_field_3d,
     apply_rician_noise_3d,
 )
 from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
-from brats_jepa_3d.models import BraTS3DnnUNet, BraTS3DUNet, JEPASegmentationModel3D
-from brats_jepa_3d.utils import get_autocast_context, get_device, set_seed, setup_logger
+from brats_jepa_3d.models import (
+    BraTS3DnnUNet,
+    BraTS3DUNet,
+    JEPASegmentationModel3D,
+)
+from brats_jepa_3d.utils import (
+    get_autocast_context,
+    get_device,
+    set_seed,
+    setup_logger,
+    sort_checkpoints_by_epoch,
+)
 
 
 def parse_args():
@@ -86,42 +102,89 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
     def get_model(name: str):
-        if name == "3D VisReg JEPA (FPN)":
-            m = JEPASegmentationModel3D(decoder_type="multiscale")
-            ms_candidates = sorted(CHECKPOINTS_DIR.glob("visreg_jepa*multiscale*best.pt"))
-            candidates = ms_candidates if ms_candidates else sorted(CHECKPOINTS_DIR.glob("visreg_jepa*best.pt"))
-            ckpt = candidates[-1] if candidates else None
-            if ckpt and ckpt.exists():
-                sd = torch.load(ckpt, map_location=device)
-                sd = sd.get("model_state_dict", sd)
-                missing, _unexpected = m.load_state_dict(sd, strict=False)
-                matched = [k for k in m.state_dict() if k not in missing]
-                logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
-            else:
-                logger.warning(
-                    f"Fine-tuned checkpoint for {name} not found. Evaluating randomly initialized weights."
-                )
-            return m.to(device)
+        jepa_prefixes = {
+            "3D VisReg JEPA (FPN)": "visreg_jepa",
+            "3D SigReg JEPA (FPN)": "sigreg_jepa",
+            "3D I-JEPA (FPN)": "ijepa",
+        }
+        if name in jepa_prefixes:
+            prefix = jepa_prefixes[name]
+            jepa_cfg_path = CONFIGS_DIR / "model" / f"{prefix}_3d.yaml"
+            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
-        elif name == "3D SigReg JEPA (FPN)":
-            m = JEPASegmentationModel3D(decoder_type="multiscale")
-            ms_candidates = sorted(CHECKPOINTS_DIR.glob("sigreg_jepa*multiscale*best.pt"))
-            candidates = ms_candidates if ms_candidates else sorted(CHECKPOINTS_DIR.glob("sigreg_jepa*best.pt"))
+            ms_candidates = sorted(CHECKPOINTS_DIR.glob(f"{prefix}*multiscale*best.pt"))
+            candidates = ms_candidates if ms_candidates else sorted(CHECKPOINTS_DIR.glob(f"{prefix}*best.pt"))
             ckpt = candidates[-1] if candidates else None
+
+            ds_flag = False
+            if ckpt and ckpt.exists():
+                try:
+                    sd_peek = torch.load(ckpt, map_location="cpu")
+                    sd_peek = sd_peek.get("model_state_dict", sd_peek)
+                    if any(k.startswith("decoder.ds") for k in sd_peek):
+                        ds_flag = True
+                except Exception:
+                    pass
+
+            m = JEPASegmentationModel3D(
+                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
+                patch_size=tuple(jepa_cfg.get("patch_size", (16, 16, 16))),
+                in_channels=jepa_cfg.get("in_channels", 4),
+                embed_dim=jepa_cfg.get("embed_dim", 384),
+                encoder_depth=jepa_cfg.get("encoder_depth", 8),
+                num_heads=jepa_cfg.get("num_heads", 6),
+                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
+                decoder_type="multiscale",
+                deep_supervision=ds_flag,
+            )
             if ckpt and ckpt.exists():
                 sd = torch.load(ckpt, map_location=device)
                 sd = sd.get("model_state_dict", sd)
-                missing, _unexpected = m.load_state_dict(sd, strict=False)
-                matched = [k for k in m.state_dict() if k not in missing]
-                logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
+                has_downstream = any(k.startswith("encoder.") for k in sd) or any(k.startswith("decoder.") for k in sd)
+                has_pretrain = any(k.startswith("context_encoder.") for k in sd)
+                if has_downstream:
+                    missing, _unexpected = m.load_state_dict(sd, strict=False)
+                    matched = [k for k in m.state_dict() if k not in missing]
+                    logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
+                elif has_pretrain:
+                    res = m.load_pretrained_encoder(sd)
+                    logger.warning(
+                        f"Loaded pre-trained encoder weights for {name} from {ckpt.name} ({res['loaded_keys']} keys), "
+                        f"but decoder is randomly initialized."
+                    )
+                else:
+                    missing, _unexpected = m.load_state_dict(sd, strict=False)
+                    matched = [k for k in m.state_dict() if k not in missing]
+                    logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             else:
-                logger.warning(
-                    f"Fine-tuned checkpoint for {name} not found. Evaluating randomly initialized weights."
+                pretrain_ckpts = sort_checkpoints_by_epoch(
+                    list(CHECKPOINTS_DIR.glob(f"{prefix}*epoch*.pt"))
                 )
+                if pretrain_ckpts:
+                    ckpt = pretrain_ckpts[-1]
+                    sd = torch.load(ckpt, map_location=device)
+                    sd = sd.get("model_state_dict", sd)
+                    res = m.load_pretrained_encoder(sd)
+                    logger.warning(
+                        f"Loaded pre-trained encoder weights for {name} from {ckpt.name} ({res['loaded_keys']} keys), "
+                        f"but decoder is randomly initialized."
+                    )
+                else:
+                    logger.warning(
+                        f"Checkpoint for {name} not found. Evaluating initialized weights."
+                    )
             return m.to(device)
 
         elif name == "3D nnU-Net":
-            m = BraTS3DnnUNet(deep_supervision=True)
+            nnunet_cfg_path = CONFIGS_DIR / "model" / "nnunet_3d.yaml"
+            nnunet_cfg = load_yaml_config(nnunet_cfg_path) if nnunet_cfg_path.exists() else {}
+            m = BraTS3DnnUNet(
+                in_channels=nnunet_cfg.get("in_channels", 4),
+                out_channels=nnunet_cfg.get("out_channels", 1),
+                deep_supervision=nnunet_cfg.get("deep_supervision", True),
+                deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
+                res_block=nnunet_cfg.get("res_block", True),
+            )
             ckpt = CHECKPOINTS_DIR / "nnunet_3d_best.pt"
             if ckpt.exists():
                 sd = torch.load(ckpt, map_location=device)
@@ -136,7 +199,16 @@ def main():
             return m.to(device)
 
         elif name == "3D UNet":
-            m = BraTS3DUNet()
+            unet_cfg_path = CONFIGS_DIR / "model" / "unet_3d.yaml"
+            unet_cfg = load_yaml_config(unet_cfg_path) if unet_cfg_path.exists() else {}
+            m = BraTS3DUNet(
+                in_channels=unet_cfg.get("in_channels", 4),
+                out_channels=unet_cfg.get("out_channels", 1),
+                channels=tuple(unet_cfg.get("channels", (32, 64, 128, 256, 512))),
+                strides=tuple(unet_cfg.get("strides", (2, 2, 2, 2))),
+                num_res_units=unet_cfg.get("num_res_units", 2),
+                dropout=unet_cfg.get("dropout", 0.1),
+            )
             ckpt = CHECKPOINTS_DIR / "unet_3d_best.pt"
             if ckpt.exists():
                 sd = torch.load(ckpt, map_location=device)
@@ -155,6 +227,7 @@ def main():
     model_names = [
         "3D VisReg JEPA (FPN)",
         "3D SigReg JEPA (FPN)",
+        "3D I-JEPA (FPN)",
         "3D nnU-Net",
         "3D UNet",
     ]
@@ -166,23 +239,15 @@ def main():
         ("B1 Bias Field Inhomogeneity", lambda img: apply_b1_bias_field_3d(img, strength=0.35)),
         (
             "Missing Modalities: T1c Only",
-            lambda img: (
-                torch.cat(
-                    [torch.zeros_like(img[:, :1]), img[:, 1:2], torch.zeros_like(img[:, 2:])], dim=1
-                )
-                if img.dim() == 5
-                else torch.cat(
-                    [torch.zeros_like(img[:1]), img[1:2], torch.zeros_like(img[2:])], dim=0
-                )
-            ),
+            lambda img: img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(1, 4, 1, 1, 1)
+            if img.dim() == 5
+            else img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(4, 1, 1, 1),
         ),
         (
             "Missing Modalities: FLAIR Only",
-            lambda img: (
-                torch.cat([torch.zeros_like(img[:, :3]), img[:, 3:4]], dim=1)
-                if img.dim() == 5
-                else torch.cat([torch.zeros_like(img[:3]), img[3:4]], dim=0)
-            ),
+            lambda img: img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(1, 4, 1, 1, 1)
+            if img.dim() == 5
+            else img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(4, 1, 1, 1),
         ),
     ]
 
