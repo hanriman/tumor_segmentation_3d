@@ -156,8 +156,10 @@ def main():
         train_dataset = BraTS3DDataset(split="train", augmentations=aug_tf)
         val_dataset = BraTS3DDataset(split="val", augmentations=None)
     except FileNotFoundError:
+        if not args.smoke_test:
+            raise
         logger.warning(
-            "Processed dataset not found. Generating synthetic volume dataset for verification."
+            "Processed dataset not found. Generating synthetic volume dataset for smoke test verification."
         )
         train_dataset = [
             {
@@ -239,7 +241,14 @@ def main():
             f"Loaded pre-trained encoder weights from {ckpt_path} ({res['loaded_keys']} keys matched)"
         )
     else:
-        logger.info("No pre-trained checkpoint specified or found. Training encoder from random initialization.")
+        if args.freeze_encoder:
+            raise FileNotFoundError(
+                f"Cannot freeze encoder without a pre-trained checkpoint! "
+                f"No pre-trained checkpoint found for '{args.model_type}' (specified: '{args.pretrained_checkpoint}')."
+            )
+        logger.warning(
+            "No pre-trained checkpoint specified or found. Training encoder from random initialization."
+        )
 
     criterion = DeepSupervisionLoss3D() if args.deep_supervision else CombinedDiceBCELoss3D()
     trainable_params = [p for p in model.parameters() if p.requires_grad]
@@ -338,7 +347,12 @@ def main():
             logger.info(f"New best model saved: {best_ckpt_path} (Val Dice: {best_val_dice:.4f})")
 
         # Explicit CPU RAM and CUDA memory cleanup between epochs
-        del images, masks, batch
+        if "images" in locals():
+            del images
+        if "masks" in locals():
+            del masks
+        if "batch" in locals():
+            del batch
         gc.collect()
         if device.type == "cuda":
             torch.cuda.empty_cache()

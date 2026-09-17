@@ -135,8 +135,10 @@ def main():
         train_dataset = BraTS3DDataset(split="train", augmentations=aug_tf)
         val_dataset = BraTS3DDataset(split="val", augmentations=None)
     except FileNotFoundError:
+        if not args.smoke_test:
+            raise
         logger.warning(
-            "Processed dataset not found. Generating synthetic volume dataset for verification."
+            "Processed dataset not found. Generating synthetic volume dataset for smoke test verification."
         )
         train_dataset = [
             {
@@ -279,7 +281,12 @@ def main():
             logger.info(f"New best model saved: {best_ckpt_path} (Val Dice: {best_val_dice:.4f})")
 
         # Explicit CPU RAM and CUDA memory cleanup between epochs
-        del images, masks, batch
+        if "images" in locals():
+            del images
+        if "masks" in locals():
+            del masks
+        if "batch" in locals():
+            del batch
         gc.collect()
         if device.type == "cuda":
             torch.cuda.empty_cache()

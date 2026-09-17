@@ -54,6 +54,12 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
     parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default="all",
+        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, ijepa, unet_3d, nnunet_3d, or all)",
+    )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
 
@@ -67,8 +73,11 @@ def evaluate_perturbation(
         for batch_idx, batch in enumerate(loader):
             images = batch["image"].to(device)
             masks = batch["mask"].to(device)
+            brain_mask = batch.get("brain_mask")
+            if brain_mask is not None:
+                brain_mask = brain_mask.to(device)
             if perturb_fn is not None:
-                images = perturb_fn(images)
+                images = perturb_fn(images, brain_mask)
 
             with get_autocast_context(device, enabled=amp):
                 out = model(images)
@@ -92,14 +101,48 @@ def main():
     try:
         test_dataset = BraTS3DDataset(split="test")
     except FileNotFoundError:
+        if not args.smoke_test:
+            raise
+        logger.warning("BraTS3D test split not found. Using synthetic dataset for smoke test.")
         test_dataset = [
             {
                 "image": torch.randn(4, 128, 128, 128),
                 "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                "brain_mask": (torch.rand(1, 128, 128, 128) > 0.5).float(),
             }
             for _ in range(2)
         ]
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+
+    all_models = [
+        ("3D VisReg JEPA (FPN)", "visreg_jepa"),
+        ("3D SigReg JEPA (FPN)", "sigreg_jepa"),
+        ("3D I-JEPA (FPN)", "ijepa"),
+        ("3D nnU-Net", "nnunet_3d"),
+        ("3D UNet", "unet_3d"),
+    ]
+
+    alias_map = {
+        "visreg": "visreg_jepa",
+        "visreg_jepa": "visreg_jepa",
+        "sigreg": "sigreg_jepa",
+        "sigreg_jepa": "sigreg_jepa",
+        "ijepa": "ijepa",
+        "unet": "unet_3d",
+        "unet_3d": "unet_3d",
+        "nnunet": "nnunet_3d",
+        "nnunet_3d": "nnunet_3d",
+        "all": "all",
+    }
+
+    req_model = alias_map.get(args.model_type.lower(), args.model_type.lower())
+    if req_model != "all":
+        selected_models = [m for m in all_models if m[1] == req_model]
+        if not selected_models:
+            logger.warning(f"Unknown model_type '{args.model_type}'. Defaulting to all models.")
+            selected_models = all_models
+    else:
+        selected_models = all_models
 
     def get_model(name: str):
         jepa_prefixes = {
@@ -171,8 +214,9 @@ def main():
                     )
                 else:
                     logger.warning(
-                        f"Checkpoint for {name} not found. Evaluating initialized weights."
+                        f"Checkpoint for {name} not found. Skipping OOD evaluation."
                     )
+                    return None
             return m.to(device)
 
         elif name == "3D nnU-Net":
@@ -194,8 +238,9 @@ def main():
                 logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             else:
                 logger.warning(
-                    f"Checkpoint for {name} not found at {ckpt}. Evaluating initialized weights."
+                    f"Checkpoint for {name} not found at {ckpt}. Skipping OOD evaluation."
                 )
+                return None
             return m.to(device)
 
         elif name == "3D UNet":
@@ -218,34 +263,34 @@ def main():
                 logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             else:
                 logger.warning(
-                    f"Checkpoint for {name} not found at {ckpt}. Evaluating initialized weights."
+                    f"Checkpoint for {name} not found at {ckpt}. Skipping OOD evaluation."
                 )
+                return None
             return m.to(device)
         else:
             raise ValueError(f"Unknown model name: {name}")
 
-    model_names = [
-        "3D VisReg JEPA (FPN)",
-        "3D SigReg JEPA (FPN)",
-        "3D I-JEPA (FPN)",
-        "3D nnU-Net",
-        "3D UNet",
-    ]
-    instantiated_models = [(m_name, get_model(m_name)) for m_name in model_names]
+    instantiated_models = [(m_name, get_model(m_name)) for m_name, _ in selected_models]
 
     perturbations = [
         ("Clean Baseline", None),
-        ("Rician Noise (sigma=0.08)", lambda img: apply_rician_noise_3d(img, sigma=0.08)),
-        ("B1 Bias Field Inhomogeneity", lambda img: apply_b1_bias_field_3d(img, strength=0.35)),
+        (
+            "Rician Noise (sigma=0.08)",
+            lambda img, bm: apply_rician_noise_3d(img, sigma=0.08, brain_mask=bm),
+        ),
+        (
+            "B1 Bias Field Inhomogeneity",
+            lambda img, bm: apply_b1_bias_field_3d(img, strength=0.35, brain_mask=bm),
+        ),
         (
             "Missing Modalities: T1c Only",
-            lambda img: img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(1, 4, 1, 1, 1)
+            lambda img, bm: img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(1, 4, 1, 1, 1)
             if img.dim() == 5
             else img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(4, 1, 1, 1),
         ),
         (
             "Missing Modalities: FLAIR Only",
-            lambda img: img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(1, 4, 1, 1, 1)
+            lambda img, bm: img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(1, 4, 1, 1, 1)
             if img.dim() == 5
             else img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(4, 1, 1, 1),
         ),
@@ -257,6 +302,9 @@ def main():
         logger.info(f"\n--- Evaluating Regime: {p_name} ---")
         row = {"Regime": p_name}
         for m_name, m in instantiated_models:
+            if m is None:
+                row[m_name] = "N/A"
+                continue
             dice = evaluate_perturbation(
                 m, test_loader, device, p_fn, amp=args.amp, smoke_test=args.smoke_test
             )
@@ -264,9 +312,31 @@ def main():
             row[m_name] = f"{dice * 100:.2f}%"
         records.append(row)
 
-    df = pd.DataFrame(records)
+    new_df = pd.DataFrame(records)
     csv_path = METRICS_DIR / "ood_3d_summary.csv"
     md_path = METRICS_DIR / "ood_3d_summary.md"
+
+    if csv_path.exists():
+        try:
+            existing_df = pd.read_csv(csv_path)
+            existing_df["Regime"] = existing_df["Regime"].astype(str)
+            new_df["Regime"] = new_df["Regime"].astype(str)
+            for col in new_df.columns:
+                if col == "Regime":
+                    continue
+                new_vals = new_df.set_index("Regime")[col]
+                if not (new_vals == "N/A").all():
+                    if col not in existing_df.columns:
+                        existing_df[col] = "N/A"
+                    for r_val, val in new_vals.items():
+                        if val != "N/A":
+                            existing_df.loc[existing_df["Regime"] == r_val, col] = val
+            df = existing_df
+        except Exception as e:
+            logger.warning(f"Could not merge with existing CSV: {e}. Writing new CSV.")
+            df = new_df
+    else:
+        df = new_df
 
     df.to_csv(csv_path, index=False)
     with open(md_path, "w", encoding="utf-8") as f:

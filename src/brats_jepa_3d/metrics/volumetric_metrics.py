@@ -156,10 +156,15 @@ def compute_volumetric_metrics_3d(
        Follows Powers (2011) and Taha & Hanbury (2015): if both prediction and target are empty,
        Dice=1.0; if one is empty while the other is non-empty, Dice=0.0 and HD95=bounding box diagonal.
     """
-    # Normalize singleton channel dimension between 4D [B, D, H, W] and 5D [B, 1, D, H, W]
-    if pred.dim() == 4 and target.dim() == 5 and target.shape[1] == 1:
+    # Normalize unbatched 3D volumes [D, H, W] and unchannelled 4D [B, D, H, W] to 5D [B, 1, D, H, W]
+    if pred.dim() == 3:
+        pred = pred.unsqueeze(0).unsqueeze(0)
+    elif pred.dim() == 4:
         pred = pred.unsqueeze(1)
-    elif pred.dim() == 5 and pred.shape[1] == 1 and target.dim() == 4:
+
+    if target.dim() == 3:
+        target = target.unsqueeze(0).unsqueeze(0)
+    elif target.dim() == 4:
         target = target.unsqueeze(1)
 
     # Technical Guard: Multi-class tensors must be binarized/sub-indexed prior to metric computation

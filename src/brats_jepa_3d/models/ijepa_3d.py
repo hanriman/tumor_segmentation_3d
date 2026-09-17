@@ -45,10 +45,11 @@ class IJEPA3D(nn.Module):
             mlp_ratio=mlp_ratio,
         )
 
-        # 2. Target Encoder (EMA updated, gradients stopped)
+        # 2. Target Encoder (EMA updated, gradients stopped, evaluated in eval mode)
         self.target_encoder = copy.deepcopy(self.context_encoder)
         for p in self.target_encoder.parameters():
             p.requires_grad = False
+        self.target_encoder.eval()
 
         # 3. 3D Predictor
         self.predictor = JEPAPredictor3D(
@@ -60,6 +61,12 @@ class IJEPA3D(nn.Module):
             num_heads=num_heads,
             mlp_ratio=mlp_ratio,
         )
+
+    def train(self, mode: bool = True):
+        r"""Override train to keep target_encoder strictly in eval mode (Assran et al., 2023)."""
+        super().train(mode)
+        self.target_encoder.eval()
+        return self
 
     @torch.no_grad()
     def update_target_encoder(self, momentum: float | None = None):

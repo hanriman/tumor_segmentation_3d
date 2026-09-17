@@ -54,7 +54,12 @@ def parse_args():
         default=True,
         help="Enable pinned memory for faster host-to-device transfers (default: True)",
     )
-    parser.add_argument("--no_pin_memory", action="store_false", dest="pin_memory")
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default="all",
+        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, ijepa, unet_3d, nnunet_3d, or all)",
+    )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
 
@@ -154,6 +159,9 @@ def main():
     try:
         test_dataset = BraTS3DDataset(split="test")
     except FileNotFoundError:
+        if not args.smoke_test:
+            raise
+        logger.warning("BraTS3D test split not found. Using synthetic dataset for smoke test.")
         test_dataset = [
             {
                 "image": torch.randn(4, 128, 128, 128),
@@ -174,6 +182,36 @@ def main():
         prefetch_factor=2 if num_workers > 0 else None,
     )
 
+    all_models = [
+        ("3D VisReg JEPA (FPN)", "visreg_jepa"),
+        ("3D SigReg JEPA (FPN)", "sigreg_jepa"),
+        ("3D I-JEPA (FPN)", "ijepa"),
+        ("3D nnU-Net", "nnunet_3d"),
+        ("3D UNet", "unet_3d"),
+    ]
+
+    alias_map = {
+        "visreg": "visreg_jepa",
+        "visreg_jepa": "visreg_jepa",
+        "sigreg": "sigreg_jepa",
+        "sigreg_jepa": "sigreg_jepa",
+        "ijepa": "ijepa",
+        "unet": "unet_3d",
+        "unet_3d": "unet_3d",
+        "nnunet": "nnunet_3d",
+        "nnunet_3d": "nnunet_3d",
+        "all": "all",
+    }
+
+    req_model = alias_map.get(args.model_type.lower(), args.model_type.lower())
+    if req_model != "all":
+        selected_models = [m for m in all_models if m[1] == req_model]
+        if not selected_models:
+            logger.warning(f"Unknown model_type '{args.model_type}'. Defaulting to all models.")
+            selected_models = all_models
+    else:
+        selected_models = all_models
+
     def build_model(name: str):
         jepa_prefixes = {
             "3D VisReg JEPA (FPN)": "visreg_jepa",
@@ -186,15 +224,26 @@ def main():
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
             ckpts = sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{prefix}*epoch*.pt")))
+            if not ckpts:
+                best_ckpts = sorted(CHECKPOINTS_DIR.glob(f"{prefix}*best.pt"))
+                if best_ckpts:
+                    ckpts = [best_ckpts[-1]]
+
+            if not ckpts:
+                logger.warning(
+                    f"No pre-trained weights found for {name} ({prefix}*.pt). "
+                    f"Skipping evaluation (will not train random uninitialized encoder on low data)."
+                )
+                return None
+
             ds_flag = False
-            if ckpts:
-                try:
-                    sd_peek = torch.load(ckpts[-1], map_location="cpu")
-                    sd_peek = sd_peek.get("model_state_dict", sd_peek)
-                    if any(k.startswith("decoder.ds") for k in sd_peek):
-                        ds_flag = True
-                except (KeyError, OSError, RuntimeError, AttributeError):
-                    pass
+            try:
+                sd_peek = torch.load(ckpts[-1], map_location="cpu")
+                sd_peek = sd_peek.get("model_state_dict", sd_peek)
+                if any(k.startswith("decoder.ds") for k in sd_peek):
+                    ds_flag = True
+            except (KeyError, OSError, RuntimeError, AttributeError):
+                pass
 
             m = JEPASegmentationModel3D(
                 img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
@@ -207,17 +256,12 @@ def main():
                 decoder_type="multiscale",
                 deep_supervision=ds_flag,
             )
-            if ckpts:
-                ckpt_path = ckpts[-1]
-                ckpt = torch.load(ckpt_path, map_location=device)
-                res = m.load_pretrained_encoder(ckpt)
-                logger.info(
-                    f"Initialized {name} with pre-trained encoder weights from: {ckpt_path.name} ({res['loaded_keys']} keys)"
-                )
-            else:
-                logger.warning(
-                    f"No pre-trained weights found for {name}. Initialized from scratch."
-                )
+            ckpt_path = ckpts[-1]
+            ckpt = torch.load(ckpt_path, map_location=device)
+            res = m.load_pretrained_encoder(ckpt)
+            logger.info(
+                f"Initialized {name} with pre-trained encoder weights from: {ckpt_path.name} ({res['loaded_keys']} keys)"
+            )
             return m.to(device)
 
         elif name == "3D nnU-Net":
@@ -246,14 +290,6 @@ def main():
         else:
             raise ValueError(f"Unknown model name: {name}")
 
-    models = [
-        ("3D VisReg JEPA (FPN)", lambda: build_model("3D VisReg JEPA (FPN)")),
-        ("3D SigReg JEPA (FPN)", lambda: build_model("3D SigReg JEPA (FPN)")),
-        ("3D I-JEPA (FPN)", lambda: build_model("3D I-JEPA (FPN)")),
-        ("3D nnU-Net", lambda: build_model("3D nnU-Net")),
-        ("3D UNet", lambda: build_model("3D UNet")),
-    ]
-
     records = []
 
     for frac in fractions:
@@ -263,6 +299,11 @@ def main():
                 split="train", fraction=frac, seed=args.seed, augmentations=aug_tf
             )
         except FileNotFoundError:
+            if not args.smoke_test:
+                raise
+            logger.warning(
+                f"BraTS3D train split not found for fraction {frac}. Using synthetic dataset for smoke test."
+            )
             train_dataset = [
                 {
                     "image": torch.randn(4, 128, 128, 128),
@@ -281,8 +322,11 @@ def main():
         )
 
         row = {"Fraction": f"{frac * 100:.1f}%"}
-        for name, model_fn in models:
-            m = model_fn().to(device)
+        for name, _ in selected_models:
+            m = build_model(name)
+            if m is None:
+                row[name] = "N/A"
+                continue
             dice = train_and_eval(
                 m,
                 train_loader,
@@ -306,9 +350,31 @@ def main():
 
         records.append(row)
 
-    df = pd.DataFrame(records)
+    new_df = pd.DataFrame(records)
     csv_path = METRICS_DIR / "low_data_3d_summary.csv"
     md_path = METRICS_DIR / "low_data_3d_summary.md"
+
+    if csv_path.exists():
+        try:
+            existing_df = pd.read_csv(csv_path)
+            existing_df["Fraction"] = existing_df["Fraction"].astype(str)
+            new_df["Fraction"] = new_df["Fraction"].astype(str)
+            for col in new_df.columns:
+                if col == "Fraction":
+                    continue
+                new_vals = new_df.set_index("Fraction")[col]
+                if not (new_vals == "N/A").all():
+                    if col not in existing_df.columns:
+                        existing_df[col] = "N/A"
+                    for f_val, val in new_vals.items():
+                        if val != "N/A":
+                            existing_df.loc[existing_df["Fraction"] == f_val, col] = val
+            df = existing_df
+        except Exception as e:
+            logger.warning(f"Could not merge with existing CSV: {e}. Writing new CSV.")
+            df = new_df
+    else:
+        df = new_df
 
     df.to_csv(csv_path, index=False)
     with open(md_path, "w", encoding="utf-8") as f:

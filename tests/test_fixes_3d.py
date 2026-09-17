@@ -193,7 +193,7 @@ def test_config_merging_in_runners():
 
 
 def test_combined_dice_bce_loss_multiclass_ignore_index():
-    """Verify that include_background=False correctly sets ignore_index=0 on CrossEntropyLoss."""
+    """Verify that CrossEntropyLoss supervises background (class 0) even when include_background=False."""
     loss_exc = CombinedDiceBCELoss3D(num_classes=4, include_background=False)
     assert loss_exc.include_background is False
     assert loss_exc.dice_loss.include_background is False
@@ -205,7 +205,7 @@ def test_combined_dice_bce_loss_multiclass_ignore_index():
     # Targets: mostly background (class 0), with a single voxel of class 1
     # Prediction: class 1 is predicted correctly (+10.0), but class 0 is predicted incorrectly (-10.0)
     logits = torch.zeros(1, 4, 4, 4, 4)
-    logits[:, 0] = -10.0  # wrong prediction for class 0
+    logits[:, 0] = -10.0  # wrong prediction for class 0 (predicts foreground on background)
     logits[:, 1] = 10.0   # correct prediction for class 1
     targets = torch.zeros(1, 4, 4, 4, dtype=torch.long)
     targets[:, 0, 0, 0] = 1  # class 1 at (0, 0, 0)
@@ -213,10 +213,9 @@ def test_combined_dice_bce_loss_multiclass_ignore_index():
     res_inc = loss_inc(logits, targets)
     res_exc = loss_exc(logits, targets)
 
-    # When background is included, CE loss on incorrect class 0 is large
+    # Cross-Entropy must supervise class 0 to actively penalize exploratory false positives on background
     assert res_inc["bce_loss"].item() > 5.0
-    # When background is excluded, CE loss on class 0 is ignored and class 1 is accurate
-    assert res_exc["bce_loss"].item() < 0.05
+    assert res_exc["bce_loss"].item() > 5.0
 
 
 def test_compute_volumetric_metrics_validation_and_from_logits():
@@ -612,6 +611,161 @@ def test_metric_tracker_ragged_epoch_metrics_csv_serialization(tmp_path):
     assert len(loaded_df) == 3
     assert "train_center_loss" in loaded_df.columns
     assert "effective_rank" in loaded_df.columns
+
+
+def test_effective_rank_half_precision():
+    """Verify compute_effective_rank and collapse metrics do not fail with float16 or bfloat16 inputs."""
+    from brats_jepa_3d.metrics.probing_metrics import (
+        compute_effective_rank,
+        compute_representation_collapse_metrics,
+    )
+
+    z_half = torch.randn(2, 64, 128, dtype=torch.float16)
+    erank = compute_effective_rank(z_half)
+    assert isinstance(erank, float)
+    assert erank > 0.0
+
+    metrics = compute_representation_collapse_metrics(z_half)
+    assert "effective_rank" in metrics
+    assert metrics["effective_rank"] > 0.0
+
+    z_bf16 = torch.randn(2, 64, 128, dtype=torch.bfloat16)
+    erank_bf = compute_effective_rank(z_bf16)
+    assert isinstance(erank_bf, float)
+    assert erank_bf > 0.0
+
+
+def test_volumetric_metrics_unbatched_3d():
+    """Verify compute_volumetric_metrics_3d accepts 3D tensors [D, H, W] without treating D as batch size."""
+    pred = torch.randn(16, 16, 16)  # unbatched 3D
+    target = (torch.rand(16, 16, 16) > 0.8).float()
+
+    metrics = compute_volumetric_metrics_3d(pred, target)
+    assert "dice" in metrics
+    assert "hd95" in metrics
+    assert len(metrics["dice_per_sample"]) == 1  # 1 sample, NOT 16!
+    assert 0.0 <= metrics["dice"] <= 1.0
+
+
+def test_dice_bce_loss_multiclass_background_supervision():
+    """Verify CombinedDiceBCELoss3D supervises background with CE even when include_background=False."""
+    loss_fn = CombinedDiceBCELoss3D(num_classes=4, include_background=False)
+    logits = torch.zeros(1, 4, 8, 8, 8, requires_grad=True)
+    logits.data[:, 1] = 10.0
+    logits.data[:, 0] = -10.0
+
+    targets = torch.zeros(1, 8, 8, 8, dtype=torch.long)
+    res = loss_fn(logits, targets)
+
+    # Because targets are background (class 0), CE MUST be large and non-zero
+    assert res["bce_loss"].item() > 5.0
+    assert res["loss"].item() > 5.0
+
+
+def test_ijepa3d_target_encoder_eval_mode():
+    """Verify IJEPA3D keeps target_encoder in eval mode even after model.train() is called."""
+    from brats_jepa_3d.models import IJEPA3D
+
+    model = IJEPA3D(
+        img_size=(32, 32, 32),
+        patch_size=(16, 16, 16),
+        in_channels=4,
+        embed_dim=64,
+        encoder_depth=2,
+        predictor_depth=1,
+        predictor_embed_dim=32,
+        num_heads=2,
+    )
+    assert not model.target_encoder.training
+    model.train()
+    assert not model.target_encoder.training
+    model.train(True)
+    assert not model.target_encoder.training
+    model.eval()
+    assert not model.target_encoder.training
+
+
+def test_generate_figures_safe_float():
+    """Verify safe_float in generate_figures_3d handles edge cases properly."""
+    import sys
+    from brats_jepa_3d.config import PROJECT_ROOT
+
+    scripts_dir = str(PROJECT_ROOT / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from generate_figures_3d import safe_float
+
+    assert safe_float("89.60 ± 2.10") == pytest.approx(89.60)
+    assert safe_float("12.5%") == pytest.approx(12.5)
+    assert safe_float("N/A") == 0.0
+    assert safe_float("-") == 0.0
+    assert safe_float("") == 0.0
+    assert safe_float(None) == 0.0
+    assert safe_float(42.5) == pytest.approx(42.5)
+
+
+def test_evaluate_scripts_model_type_parsing():
+    """Verify --model_type argument is present in argument parsers."""
+    import sys
+    from brats_jepa_3d.config import PROJECT_ROOT
+
+    scripts_dir = str(PROJECT_ROOT / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from evaluate_low_data_3d import parse_args as parse_low_data_args
+    from evaluate_ood_3d import parse_args as parse_ood_args
+
+    orig_argv = sys.argv
+    try:
+        sys.argv = ["evaluate_low_data_3d.py", "--model_type", "visreg_jepa", "--smoke_test"]
+        args = parse_low_data_args()
+        assert args.model_type == "visreg_jepa"
+        assert args.smoke_test is True
+
+        sys.argv = ["evaluate_ood_3d.py", "--model_type", "sigreg_jepa", "--smoke_test"]
+        args_ood = parse_ood_args()
+        assert args_ood.model_type == "sigreg_jepa"
+    finally:
+        sys.argv = orig_argv
+
+
+def test_incremental_csv_merging(tmp_path):
+    """Verify incremental CSV merging updates matching fraction without wiping other models."""
+    import pandas as pd
+
+    csv_path = tmp_path / "low_data_3d_summary.csv"
+    existing_df = pd.DataFrame([
+        {"Fraction": "1.0%", "3D VisReg JEPA (FPN)": "6.79%", "3D nnU-Net": "12.12%"},
+        {"Fraction": "5.0%", "3D VisReg JEPA (FPN)": "25.00%", "3D nnU-Net": "30.00%"},
+    ])
+    existing_df.to_csv(csv_path, index=False)
+
+    new_records = [
+        {"Fraction": "1.0%", "3D SigReg JEPA (FPN)": "8.50%"},
+        {"Fraction": "5.0%", "3D SigReg JEPA (FPN)": "28.00%"},
+    ]
+    new_df = pd.DataFrame(new_records)
+
+    existing_df = pd.read_csv(csv_path)
+    existing_df["Fraction"] = existing_df["Fraction"].astype(str)
+    new_df["Fraction"] = new_df["Fraction"].astype(str)
+    for col in new_df.columns:
+        if col == "Fraction":
+            continue
+        new_vals = new_df.set_index("Fraction")[col]
+        if not (new_vals == "N/A").all():
+            if col not in existing_df.columns:
+                existing_df[col] = "N/A"
+            for f_val, val in new_vals.items():
+                if val != "N/A":
+                    existing_df.loc[existing_df["Fraction"] == f_val, col] = val
+
+    assert "3D VisReg JEPA (FPN)" in existing_df.columns
+    assert "3D SigReg JEPA (FPN)" in existing_df.columns
+    assert "3D nnU-Net" in existing_df.columns
+    assert existing_df.loc[existing_df["Fraction"] == "1.0%", "3D SigReg JEPA (FPN)"].values[0] == "8.50%"
+    assert existing_df.loc[existing_df["Fraction"] == "1.0%", "3D VisReg JEPA (FPN)"].values[0] == "6.79%"
+
 
 
 

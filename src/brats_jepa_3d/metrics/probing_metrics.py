@@ -31,7 +31,8 @@ def compute_effective_rank(z: torch.Tensor) -> float:
     - Roy, O., & Vetterli, M. (2007). "The effective rank: A measure of effective dimensionality."
       15th European Signal Processing Conference (EUSIPCO 2007), pp. 606-610.
     """
-    z_flat = z.reshape(-1, z.shape[-1])
+    # Upcast to float32 to ensure SVD is supported and numerically stable across CUDA, MPS, and CPU
+    z_flat = z.reshape(-1, z.shape[-1]).float()
     z_centered = z_flat - z_flat.mean(dim=0, keepdim=True)
     try:
         _, S, _ = torch.linalg.svd(z_centered, full_matrices=False)
@@ -50,7 +51,7 @@ def compute_representation_collapse_metrics(z: torch.Tensor) -> dict[str, float]
     r"""
     Multi-Faceted Representation Collapse Diagnostic Suite.
     """
-    z_flat = z.reshape(-1, z.shape[-1])  # [N, D]
+    z_flat = z.reshape(-1, z.shape[-1]).float()  # [N, D] in float32
     N_total = z_flat.shape[0]
 
     if N_total <= 1:

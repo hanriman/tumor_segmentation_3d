@@ -77,7 +77,8 @@ def main():
     run_cmd([py, "scripts/train_nnunet_3d.py"] + smoke_flag)
 
     # 5. Master Benchmark Evaluation
-    run_cmd([py, "scripts/evaluate_3d.py"] + smoke_flag)
+    eval_model_arg = ["--all_models"] if args.model_type == "all" else ["--model_type", args.model_type]
+    run_cmd([py, "scripts/evaluate_3d.py"] + eval_model_arg + smoke_flag)
 
     # 6. Figures
     run_cmd([py, "scripts/generate_figures_3d.py"])

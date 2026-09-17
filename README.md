@@ -45,7 +45,7 @@ Gliomas (glioblastomas and astrocytomas) are intrinsically **three-dimensional, 
 | **Exact 3D HD95 Metric** | $d_{\text{HD95}}^{3\text{D}}$ via 3D 26-connectivity morphological erosion and `cKDTree` in physical mm ($1.0\text{ mm}^3$). | **Huttenlocher et al. (1993)**; **Taha & Hanbury (2015)**; **Powers (2011)**. Guarded zero-division prevents artificial epsilon score inflation. |
 | **Effective Rank ($S_k^2$)** | $\text{erank}(Z) = \exp\left(-\sum p_k \ln p_k\right)$, $p_k = S_k^2 / \sum S_j^2$. | **Roy & Vetterli (2007)**. Strictly uses covariance eigenvalues $S_k^2$, preventing linear $S_k$ from masking dimensional collapse. |
 | **Centered Cosine Sim** | $\bar{S}_{\text{centered}} = \frac{1}{N(N-1)} \sum_{i \neq j} \frac{(z_i - \bar{z})^\top (z_j - \bar{z})}{\|z_i - \bar{z}\|_2 \|z_j - \bar{z}\|_2}$. | **Wang & Isola (2020)**. Decouples centroid translation from angular dispersion, diagnosing directional collapse. |
-| **Combined Loss Alignment** | Cross-Entropy masks background (`ignore_index=0`) when Dice excludes background (`include_background=False`). | **Milletari et al. (2016)**. Guarantees consistent foreground-only supervision, eliminating multi-task gradient conflict. |
+| **Combined Loss Alignment** | Multi-class Cross-Entropy supervises all voxels including background (`ignore_index=-100`) while Dice excludes background (`include_background=False`). | **Isensee et al. (2021)**; **Milletari et al. (2016)**. Dense CE penalizes false-positive foreground predictions across healthy tissue while Dice prevents background dominance. |
 | **Quartile-Stratified Splits** | Low-data tiers ($1\%$ to $50\%$) stratified by tumor volume quartile. | **Isensee et al. (2021)**. Preserves macro- and micro-lesion representation balance across low-data fractions. |
 | **Metric Validation Guard** | Strict single-channel validation ($C=1$) + `from_logits` toggle in `compute_volumetric_metrics_3d`. | **Taha & Hanbury (2015)**. Prevents silent metric computation on background channel 0 and avoids double-sigmoid distortion. |
 | **3D Rician Scanner Noise** | $M = \sqrt{(X + \eta_1)^2 + \eta_2^2}$, $\eta_1, \eta_2 \sim \mathcal{N}(0, \sigma_{\text{noise}}^2)$. | **Gudbjartsson & Patz (1995)**. Accurately simulates MRI magnitude reconstruction from quadrature RF coil channels. |
@@ -64,8 +64,9 @@ thesis_3d/
 ├── agents.md                     # Scientific writing & research guidelines
 │
 ├── docs/
-│   ├── audit_and_remediation_plan.md # Formal mathematical audit & verification report
-│   └── kaggle_guide.md           # End-to-end Kaggle GPU execution guide
+│   ├── audit_and_remediation_plan.md    # Formal mathematical audit & verification report
+│   ├── audit_and_remediation_plan_3d.md # Forensic root-cause analysis & code remediation
+│   └── kaggle_guide.md                  # End-to-end Kaggle GPU execution guide
 │
 ├── notebooks/
 │   ├── 01_train_visreg_3d.ipynb  # Primary method: 3D VisReg pre-training & fine-tuning
@@ -162,7 +163,7 @@ uv pip install -e ".[dev]"
 ### Step 2: Run Unit Tests
 ```bash
 pytest tests/ -v
-# Verified: 47 passed in ~15s
+# Verified: 58 passed in ~14s
 ```
 
 ---
@@ -216,14 +217,14 @@ python scripts/train_nnunet_3d.py --epochs 30 --batch_size 2 --amp
 
 ### 5. Full Evaluation Suite
 ```bash
-# Master volumetric benchmark (Dice, IoU, cKDTree HD95, Latency, Effective Rank, CosSim)
+# Master volumetric benchmark across models (supports --model_type or --all_models)
 python scripts/evaluate_3d.py --batch_size 2 --amp
 
-# Low-data label efficiency benchmark (1%, 5%, 10%, 25%, 50%, 100% volumetric labels)
-python scripts/evaluate_low_data_3d.py --fractions 0.01 0.05 0.10 0.25 0.50 1.00 --amp
+# Low-data label efficiency benchmark (pass --model_type to evaluate a single model, or omit to run all available)
+python scripts/evaluate_low_data_3d.py --model_type visreg_jepa --fractions 0.01 0.05 0.10 0.25 0.50 1.00 --amp
 
-# Out-of-Distribution (OOD) scanner shift & missing modality stress test
-python scripts/evaluate_ood_3d.py --amp
+# Out-of-Distribution (OOD) scanner shift & missing modality stress test (supports --model_type)
+python scripts/evaluate_ood_3d.py --model_type visreg_jepa --amp
 
 # Publication figures generator (orthogonal slices, comparison bars, label efficiency, OOD)
 python scripts/generate_figures_3d.py

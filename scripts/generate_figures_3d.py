@@ -118,6 +118,16 @@ def plot_orthogonal_slices(
     plt.close()
 
 
+def safe_float(v, default: float = 0.0) -> float:
+    try:
+        s = str(v).split("±")[0].replace("%", "").strip()
+        if s in ("N/A", "-", "nan", ""):
+            return default
+        return float(s)
+    except (ValueError, TypeError):
+        return default
+
+
 def plot_benchmark_metrics(metrics_csv: Path, out_dir: Path):
     """
     Plots benchmark comparisons across evaluated models.
@@ -126,12 +136,14 @@ def plot_benchmark_metrics(metrics_csv: Path, out_dir: Path):
         return
 
     df = pd.read_csv(metrics_csv)
+    if "Model" not in df.columns or len(df) == 0:
+        return
     models = df["Model"].tolist()
 
     # Extract mean Dice
-    dices = [float(str(v).split("±")[0].strip()) for v in df["Dice (%)"]]
-    hd95s = [float(str(v).split("±")[0].strip()) for v in df["HD95 (mm)"]]
-    latencies = [float(v) for v in df["Latency (ms)"]]
+    dices = [safe_float(v) for v in df["Dice (%)"]]
+    hd95s = [safe_float(v) for v in df["HD95 (mm)"]]
+    latencies = [safe_float(v) for v in df["Latency (ms)"]]
 
     has_erank = "EffRank (S²)" in df.columns
     n_panels = 4 if has_erank else 3
@@ -189,22 +201,34 @@ def plot_low_data_curves(low_data_csv: Path, out_dir: Path):
         return
 
     df = pd.read_csv(low_data_csv)
-    fractions = [float(f.replace("%", "")) for f in df["Fraction"]]
+    if "Fraction" not in df.columns or len(df) == 0:
+        return
+    fractions = [safe_float(f) for f in df["Fraction"]]
 
     plt.figure(figsize=(8, 5))
     styles = {
         "3D VisReg JEPA (FPN)": ("#2A9D8F", "o-"),
         "3D SigReg JEPA (FPN)": ("#E76F51", "s-"),
+        "3D I-JEPA (FPN)": ("#F4A261", "d-"),
         "3D nnU-Net": ("#1D3557", "^--"),
         "3D UNet": ("#457B9D", "v--"),
     }
 
+    plotted_any = False
     for col in df.columns:
         if col == "Fraction":
             continue
-        vals = [float(str(v).replace("%", "")) for v in df[col]]
+        col_str_vals = [str(v).strip() for v in df[col]]
+        if all(v in ("N/A", "-", "nan", "") for v in col_str_vals):
+            continue
+        vals = [safe_float(v) for v in df[col]]
         color, style = styles.get(col, ("#000000", "o-"))
         plt.plot(fractions, vals, style, color=color, linewidth=2.0, markersize=7, label=col)
+        plotted_any = True
+
+    if not plotted_any:
+        plt.close()
+        return
 
     plt.xlabel("Annotated Training Data Fraction (%)", fontsize=12, fontweight="bold")
     plt.ylabel("3D Dice Score (%)", fontsize=12, fontweight="bold")
@@ -228,16 +252,27 @@ def plot_ood_robustness(ood_csv: Path, out_dir: Path):
         return
 
     df = pd.read_csv(ood_csv)
+    if "Regime" not in df.columns or len(df) == 0:
+        return
     regimes = df["Regime"].tolist()
     models = [c for c in df.columns if c != "Regime"]
 
+    active_models = []
+    for c in models:
+        col_str_vals = [str(v).strip() for v in df[c]]
+        if not all(v in ("N/A", "-", "nan", "") for v in col_str_vals):
+            active_models.append(c)
+
+    if not active_models:
+        return
+
     x = np.arange(len(regimes))
-    width = 0.8 / len(models)
-    colors = ["#2A9D8F", "#E76F51", "#1D3557", "#457B9D"]
+    width = 0.8 / len(active_models)
+    colors = ["#2A9D8F", "#E76F51", "#F4A261", "#457B9D", "#1D3557"]
 
     _fig, ax = plt.subplots(figsize=(12, 6))
-    for i, model_col in enumerate(models):
-        vals = [float(str(v).replace("%", "")) for v in df[model_col]]
+    for i, model_col in enumerate(active_models):
+        vals = [safe_float(v) for v in df[model_col]]
         ax.bar(x + i * width, vals, width, label=model_col, color=colors[i % len(colors)])
 
     ax.set_ylabel("3D Dice Score (%)", fontsize=12, fontweight="bold")
@@ -246,7 +281,7 @@ def plot_ood_robustness(ood_csv: Path, out_dir: Path):
         fontsize=13,
         fontweight="bold",
     )
-    ax.set_xticks(x + width * (len(models) - 1) / 2)
+    ax.set_xticks(x + width * (len(active_models) - 1) / 2)
     ax.set_xticklabels(regimes, rotation=20, ha="right", fontsize=10)
     ax.legend(frameon=True, fontsize=11)
     ax.grid(axis="y", linestyle="--", alpha=0.7)

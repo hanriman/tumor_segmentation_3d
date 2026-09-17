@@ -180,8 +180,10 @@ def main():
     try:
         test_dataset = BraTS3DDataset(split="test", augmentations=None)
     except FileNotFoundError:
+        if not args.smoke_test:
+            raise
         logger.warning(
-            "Processed dataset not found. Generating synthetic test dataset for verification."
+            "Processed dataset not found. Generating synthetic test dataset for smoke test verification."
         )
         test_dataset = [
             {
@@ -267,6 +269,11 @@ def main():
                     ckpt_file = CHECKPOINTS_DIR / f"{model_type}_{decoder_type}_best.pt"
 
         if model_type == "unet_3d":
+            if not ckpt_file.exists():
+                logger.warning(
+                    f"Checkpoint for {label} not found at {ckpt_file}. Skipping evaluation."
+                )
+                continue
             unet_cfg_path = CONFIGS_DIR / "model" / "unet_3d.yaml"
             unet_cfg = load_yaml_config(unet_cfg_path) if unet_cfg_path.exists() else {}
             model = BraTS3DUNet(
@@ -277,19 +284,19 @@ def main():
                 num_res_units=unet_cfg.get("num_res_units", 2),
                 dropout=unet_cfg.get("dropout", 0.1),
             ).to(device)
-            if ckpt_file.exists():
-                sd = torch.load(ckpt_file, map_location=device)
-                sd = sd.get("model_state_dict", sd)
-                missing, _unexpected = model.load_state_dict(sd, strict=False)
-                matched = [k for k in model.state_dict() if k not in missing]
-                logger.info(f"Loaded {label} weights from {ckpt_file.name} ({len(matched)} matched keys)")
-            else:
-                logger.warning(
-                    f"Checkpoint for {label} not found at {ckpt_file}. Evaluating initialized weights."
-                )
+            sd = torch.load(ckpt_file, map_location=device)
+            sd = sd.get("model_state_dict", sd)
+            missing, _unexpected = model.load_state_dict(sd, strict=False)
+            matched = [k for k in model.state_dict() if k not in missing]
+            logger.info(f"Loaded {label} weights from {ckpt_file.name} ({len(matched)} matched keys)")
             erank, cossim = "-", "-"
 
         elif model_type == "nnunet_3d":
+            if not ckpt_file.exists():
+                logger.warning(
+                    f"Checkpoint for {label} not found at {ckpt_file}. Skipping evaluation."
+                )
+                continue
             nnunet_cfg_path = CONFIGS_DIR / "model" / "nnunet_3d.yaml"
             nnunet_cfg = load_yaml_config(nnunet_cfg_path) if nnunet_cfg_path.exists() else {}
             model = BraTS3DnnUNet(
@@ -299,33 +306,32 @@ def main():
                 deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
                 res_block=nnunet_cfg.get("res_block", True),
             ).to(device)
-            if ckpt_file.exists():
-                sd = torch.load(ckpt_file, map_location=device)
-                sd = sd.get("model_state_dict", sd)
-                missing, _unexpected = model.load_state_dict(sd, strict=False)
-                matched = [k for k in model.state_dict() if k not in missing]
-                logger.info(f"Loaded {label} weights from {ckpt_file.name} ({len(matched)} matched keys)")
-            else:
-                logger.warning(
-                    f"Checkpoint for {label} not found at {ckpt_file}. Evaluating initialized weights."
-                )
+            sd = torch.load(ckpt_file, map_location=device)
+            sd = sd.get("model_state_dict", sd)
+            missing, _unexpected = model.load_state_dict(sd, strict=False)
+            matched = [k for k in model.state_dict() if k not in missing]
+            logger.info(f"Loaded {label} weights from {ckpt_file.name} ({len(matched)} matched keys)")
             erank, cossim = "-", "-"
 
         else:
+            if not (ckpt_file and ckpt_file.exists()):
+                logger.warning(
+                    f"Checkpoint for {label} not found at {ckpt_file}. Skipping evaluation."
+                )
+                continue
             # JEPA Downstream Model
             jepa_cfg_path = CONFIGS_DIR / "model" / f"{model_type}_3d.yaml"
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
             # Detect whether checkpoint has deep supervision heads
             ds_flag = getattr(args, "deep_supervision", False)
-            if ckpt_file and ckpt_file.exists():
-                try:
-                    sd_peek = torch.load(ckpt_file, map_location="cpu")
-                    sd_peek = sd_peek.get("model_state_dict", sd_peek)
-                    if any(k.startswith("decoder.ds") for k in sd_peek):
-                        ds_flag = True
-                except (KeyError, OSError, RuntimeError, AttributeError):
-                    pass
+            try:
+                sd_peek = torch.load(ckpt_file, map_location="cpu")
+                sd_peek = sd_peek.get("model_state_dict", sd_peek)
+                if any(k.startswith("decoder.ds") for k in sd_peek):
+                    ds_flag = True
+            except (KeyError, OSError, RuntimeError, AttributeError):
+                pass
 
             model = JEPASegmentationModel3D(
                 img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
@@ -339,29 +345,24 @@ def main():
                 decoder_type=decoder_type or "multiscale",
                 deep_supervision=ds_flag,
             ).to(device)
-            if ckpt_file and ckpt_file.exists():
-                sd = torch.load(ckpt_file, map_location=device)
-                sd = sd.get("model_state_dict", sd)
-                has_downstream = any(k.startswith("encoder.") for k in sd) or any(k.startswith("decoder.") for k in sd)
-                has_pretrain = any(k.startswith("context_encoder.") for k in sd)
-                if has_downstream:
-                    missing, _unexpected = model.load_state_dict(sd, strict=False)
-                    matched = [k for k in model.state_dict() if k not in missing]
-                    logger.info(f"Loaded downstream fine-tuned weights from {ckpt_file.name} ({len(matched)} matched keys)")
-                elif has_pretrain:
-                    res = model.load_pretrained_encoder(sd)
-                    logger.warning(
-                        f"Loaded pre-trained encoder weights from {ckpt_file.name} ({res['loaded_keys']} keys), "
-                        f"but decoder is randomly initialized."
-                    )
-                else:
-                    missing, _unexpected = model.load_state_dict(sd, strict=False)
-                    matched = [k for k in model.state_dict() if k not in missing]
-                    logger.info(f"Loaded weights from {ckpt_file.name} ({len(matched)} matched keys)")
-            else:
+            sd = torch.load(ckpt_file, map_location=device)
+            sd = sd.get("model_state_dict", sd)
+            has_downstream = any(k.startswith("encoder.") for k in sd) or any(k.startswith("decoder.") for k in sd)
+            has_pretrain = any(k.startswith("context_encoder.") for k in sd)
+            if has_downstream:
+                missing, _unexpected = model.load_state_dict(sd, strict=False)
+                matched = [k for k in model.state_dict() if k not in missing]
+                logger.info(f"Loaded downstream fine-tuned weights from {ckpt_file.name} ({len(matched)} matched keys)")
+            elif has_pretrain:
+                res = model.load_pretrained_encoder(sd)
                 logger.warning(
-                    f"Checkpoint for {label} not found at {ckpt_file}. Evaluating initialized weights."
+                    f"Loaded pre-trained encoder weights from {ckpt_file.name} ({res['loaded_keys']} keys), "
+                    f"but decoder is randomly initialized."
                 )
+            else:
+                missing, _unexpected = model.load_state_dict(sd, strict=False)
+                matched = [k for k in model.state_dict() if k not in missing]
+                logger.info(f"Loaded weights from {ckpt_file.name} ({len(matched)} matched keys)")
 
             # Evaluate representation diagnostics
             rep_stats = evaluate_representation(
@@ -392,6 +393,10 @@ def main():
         gc.collect()
         if device.type == "cuda":
             torch.cuda.empty_cache()
+
+    if not results:
+        logger.warning("No models were evaluated (checkpoints not found). Exiting without updating benchmark summary.")
+        return
 
     df_new = pd.DataFrame(results)
     csv_path = METRICS_DIR / "benchmark_3d_summary.csv"

@@ -162,8 +162,10 @@ def main():
         if len(val_dataset) == 0:
             val_dataset = train_dataset
     except FileNotFoundError:
+        if not args.smoke_test:
+            raise
         logger.warning(
-            "Processed dataset not found. Generating synthetic volume dataset for verification."
+            "Processed dataset not found. Generating synthetic volume dataset for smoke test verification."
         )
         # Synthetic dataset fallback for testing
         train_dataset = [
@@ -278,18 +280,22 @@ def main():
     else:
         raise ValueError(f"Unknown model_type: {args.model_type}")
 
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(
-        model.parameters(),
+        trainable_params,
         lr=args.learning_rate,
         weight_decay=args.weight_decay,
-        betas=(0.9, 0.95),
+        betas=tuple(getattr(args, "betas", (0.9, 0.95))),
     )
     epochs = 1 if args.smoke_test else args.epochs
+    warmup_epochs = getattr(args, "warmup_epochs", max(1, epochs // 10))
+    min_lr = getattr(args, "min_lr", 1e-5)
     scheduler = get_lr_scheduler(
         optimizer,
-        warmup_epochs=max(1, epochs // 10),
+        warmup_epochs=warmup_epochs,
         total_epochs=epochs,
         base_lr=args.learning_rate,
+        min_lr=min_lr,
     )
     scaler = torch.amp.GradScaler(
         device="cuda" if device.type == "cuda" else "cpu",
@@ -488,7 +494,8 @@ def main():
             logger.info(f"Best model checkpoint saved: {best_ckpt_path} (val_loss: {best_val_loss:.5f})")
 
         # Save periodic checkpoint
-        if epoch % 10 == 0 or epoch == epochs or args.smoke_test:
+        save_freq = getattr(args, "save_freq", 10)
+        if epoch % save_freq == 0 or epoch == epochs or args.smoke_test:
             ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_3d_epoch_{epoch}.pt"
             torch.save(
                 {

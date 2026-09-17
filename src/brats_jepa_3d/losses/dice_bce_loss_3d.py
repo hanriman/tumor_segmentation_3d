@@ -66,15 +66,15 @@ class CombinedDiceBCELoss3D(nn.Module):
     Combined Volumetric 3D Dice + Cross-Entropy Loss.
     Supports binary (C=1) and multi-class (C>1) segmentation.
 
-    Technical Rationale & Mathematical Alignment:
-    --------------------------------------------
+    Technical Rationale & Mathematical Alignment (Isensee et al., 2021; MONAI):
+    --------------------------------------------------------------------------
     In multi-class brain tumor segmentation (e.g. background=0, NCR=1, ED=2, ET=3),
     setting `include_background=False` directs the Dice metric to exclude class 0
-    (`dice[:, 1:]`), focusing supervision exclusively on pathological tumor subregions.
-    To prevent optimization conflicts where Cross-Entropy penalizes exploratory foreground
-    predictions on background voxels while Dice ignores them, `F.cross_entropy` explicitly
-    sets `ignore_index=0` when `include_background=False`. When `include_background=True`,
-    standard PyTorch `ignore_index=-100` is retained.
+    (`dice[:, 1:]`), focusing overlap supervision exclusively on pathological tumor subregions
+    without background domination.
+    Cross-Entropy (`F.cross_entropy`), however, supervises all voxels including background
+    (`ignore_index=-100`), ensuring dense voxel-level negative supervision so that
+    exploratory foreground predictions on intracranial background are actively penalized.
     """
 
     def __init__(
@@ -114,10 +114,8 @@ class CombinedDiceBCELoss3D(nn.Module):
             else:
                 targets_long = targets.long()
             targets_long = targets_long.clamp(0, C - 1)
-            # Technical Decision: Align CE ignore_index with Dice include_background
-            # to guarantee consistent foreground-only supervision without multi-task gradient conflict.
-            ignore_idx = 0 if not self.include_background else -100
-            ce = F.cross_entropy(logits, targets_long, ignore_index=ignore_idx)
+            # Mathematical Alignment: Supervise all voxels including background to penalize false positives
+            ce = F.cross_entropy(logits, targets_long, ignore_index=-100)
 
         total = self.dice_weight * dice + self.bce_weight * ce
         return {

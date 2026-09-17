@@ -9,7 +9,6 @@ num_heads: 6
 mlp_ratio: 4.0
 predictor_depth: 4
 predictor_embed_dim: 192
-target_aspect_ratio: [1.0, 1.0, 1.0]
 
 # EMA Momentum Teacher
 ema_start_momentum: 0.996
