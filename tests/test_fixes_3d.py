@@ -555,5 +555,65 @@ def test_resampling_boundary_mask_bleed_suppression_and_brain_mask():
     assert torch.all(aug_img[:, aug_bmask[0] == 0] == 0.0)
 
 
+def test_metric_tracker_ragged_epoch_metrics_csv_serialization(tmp_path):
+    """Verify MetricTracker handles uneven/ragged keys across epochs and serializes to CSV without ValueError."""
+    from brats_jepa_3d.utils.logging import MetricTracker
+
+    tracker = MetricTracker()
+
+    # Epoch 1: standard keys only
+    tracker.update({
+        "epoch": 1,
+        "loss": 0.2086,
+        "val_loss": 0.1843,
+        "train_jepa_loss": 0.0881,
+        "train_center_loss": 0.0166,
+        "epoch_duration_sec": 53.04,
+    })
+
+    # Epoch 2: standard keys only
+    tracker.update({
+        "epoch": 2,
+        "loss": 0.1315,
+        "val_loss": 0.1520,
+        "train_jepa_loss": 0.0750,
+        "train_center_loss": 0.0142,
+        "epoch_duration_sec": 51.20,
+    })
+
+    # Epoch 3: checkpoint interval includes representation collapse metrics (ragged keys)
+    tracker.update({
+        "epoch": 3,
+        "loss": 0.1240,
+        "val_loss": 0.1410,
+        "train_jepa_loss": 0.0690,
+        "train_center_loss": 0.0125,
+        "epoch_duration_sec": 52.10,
+        "effective_rank": 53.05,
+        "avg_cosine_sim_centered": 0.012,
+        "feature_variance": 0.985,
+    })
+
+    # Convert to DataFrame - must not raise ValueError: All arrays must be of the same length
+    df = tracker.to_dataframe()
+    assert len(df) == 3
+    assert "effective_rank" in df.columns
+    # Epochs 1 & 2 should have NaN for representation metrics
+    assert df["effective_rank"].isna().sum() == 2
+    assert df.loc[df["epoch"] == 3, "effective_rank"].values[0] == pytest.approx(53.05)
+
+    # Save to CSV and reload
+    csv_file = tmp_path / "metrics.csv"
+    tracker.save_csv(csv_file)
+    assert csv_file.exists()
+
+    import pandas as pd
+    loaded_df = pd.read_csv(csv_file)
+    assert len(loaded_df) == 3
+    assert "train_center_loss" in loaded_df.columns
+    assert "effective_rank" in loaded_df.columns
+
+
+
 
 

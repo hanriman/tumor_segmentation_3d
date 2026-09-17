@@ -5,8 +5,10 @@ Supports 3D I-JEPA, 3D SigReg JEPA, and 3D VisReg JEPA.
 """
 
 import argparse
+import gc
 import math
 from pathlib import Path
+import time
 
 import torch
 from torch.utils.data import DataLoader
@@ -63,6 +65,19 @@ def parse_args():
     parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
     parser.add_argument("--clip_grad_norm", type=float, default=1.0)
     parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=2,
+        help="Number of parallel DataLoader worker processes (default: 2)",
+    )
+    parser.add_argument(
+        "--pin_memory",
+        action="store_true",
+        default=True,
+        help="Enable pinned memory for faster host-to-device transfers (default: True)",
+    )
+    parser.add_argument("--no_pin_memory", action="store_false", dest="pin_memory")
+    parser.add_argument(
         "--smoke_test", action="store_true", help="Run 1 epoch with 2 batches for fast verification"
     )
     return parser.parse_args()
@@ -105,7 +120,7 @@ def main():
     ensure_directories()
     set_seed(args.seed)
     device = get_device()
-    logger = setup_logger("pretrain_3d", LOGS_DIR / f"{args.model_type}_pretrain.log")
+    logger = setup_logger(f"train_{args.model_type}", LOGS_DIR / f"{args.model_type}_pretrain.log")
     logger.info(
         f"Starting 3D JEPA Pre-training: Model={args.model_type}, Device={device}, AMP={args.amp}"
     )
@@ -134,32 +149,67 @@ def main():
     )
 
     try:
-        dataset = BraTS3DDataset(
+        train_dataset = BraTS3DDataset(
             split="train",
             masking_transform=masking_tf,
             augmentations=aug_tf,
         )
+        val_dataset = BraTS3DDataset(
+            split="val",
+            masking_transform=masking_tf,
+            augmentations=None,
+        )
+        if len(val_dataset) == 0:
+            val_dataset = train_dataset
     except FileNotFoundError:
         logger.warning(
             "Processed dataset not found. Generating synthetic volume dataset for verification."
         )
         # Synthetic dataset fallback for testing
-        dataset = [
+        train_dataset = [
             {
                 "image": torch.randn(4, 128, 128, 128),
                 "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
-                "patient_id": f"synthetic_{i}",
+                "patient_id": f"synthetic_train_{i}",
                 **masking_tf(),
             }
             for i in range(8)
         ]
+        val_dataset = [
+            {
+                "image": torch.randn(4, 128, 128, 128),
+                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                "patient_id": f"synthetic_val_{i}",
+                **masking_tf(),
+            }
+            for i in range(4)
+        ]
 
-    loader = DataLoader(
-        dataset,
+    num_workers = getattr(args, "num_workers", 2)
+    use_pin_memory = getattr(args, "pin_memory", True) and (device.type == "cuda")
+
+    train_loader = DataLoader(
+        train_dataset,
         batch_size=args.batch_size if not args.smoke_test else 2,
         shuffle=True,
         collate_fn=jepa_masking_collate_fn_3d,
-        num_workers=0,
+        num_workers=num_workers,
+        pin_memory=use_pin_memory,
+        persistent_workers=(num_workers > 0),
+        prefetch_factor=2 if num_workers > 0 else None,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=args.batch_size if not args.smoke_test else 2,
+        shuffle=False,
+        collate_fn=jepa_masking_collate_fn_3d,
+        num_workers=num_workers,
+        pin_memory=use_pin_memory,
+        persistent_workers=(num_workers > 0),
+        prefetch_factor=2 if num_workers > 0 else None,
+    )
+    logger.info(
+        f"Loaded {len(train_dataset)} training volumes and {len(val_dataset)} validation volumes."
     )
 
     spatial_shape = tuple(getattr(args, "spatial_shape", (128, 128, 128)))
@@ -251,15 +301,18 @@ def main():
         f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}"
     )
 
-    steps_per_epoch = min(len(loader), 2) if args.smoke_test else len(loader)
+    steps_per_epoch = min(len(train_loader), 2) if args.smoke_test else len(train_loader)
     global_step = 0
+    best_val_loss = float("inf")
 
     for epoch in range(1, epochs + 1):
+        epoch_start = time.perf_counter()
         model.train()
         epoch_loss = 0.0
+        train_sublosses: dict[str, float] = {}
         num_batches = 0
 
-        pbar = tqdm(loader, desc=f"Epoch {epoch}/{epochs}")
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}")
         for batch_idx, batch in enumerate(pbar):
             images = batch["images"].to(device)
             ctx_idx = batch["context_indices"].to(device)
@@ -280,6 +333,10 @@ def main():
                         projected_tokens=out["projected_tokens"],
                     )
                     loss = loss_dict["loss"]
+
+            for k, v in loss_dict.items():
+                if isinstance(v, torch.Tensor):
+                    train_sublosses[k] = train_sublosses.get(k, 0.0) + v.item()
 
             if scaler.is_enabled():
                 scaler.scale(loss).backward()
@@ -320,6 +377,72 @@ def main():
             if args.smoke_test and batch_idx >= 1:
                 break
 
+        scheduler.step()
+        avg_train_loss = epoch_loss / max(1, num_batches)
+        avg_train_sublosses = {
+            f"train_{k}": v / max(1, num_batches) for k, v in train_sublosses.items()
+        }
+
+        # Validation evaluation
+        model.eval()
+        val_loss_sum = 0.0
+        val_sublosses: dict[str, float] = {}
+        val_batches = 0
+
+        with torch.no_grad():
+            for val_batch_idx, val_batch in enumerate(val_loader):
+                if args.smoke_test and val_batch_idx >= 1:
+                    break
+                val_images = val_batch["images"].to(device)
+                val_ctx_idx = val_batch["context_indices"].to(device)
+                val_tgt_idx_list = [t.to(device) for t in val_batch["target_indices_list"]]
+
+                with get_autocast_context(device, enabled=args.amp):
+                    val_out = model(val_images, val_ctx_idx, val_tgt_idx_list)
+                    if args.model_type == "ijepa":
+                        v_loss = criterion(val_out["predictions"], val_out["targets"])
+                        v_loss_dict = {"loss": v_loss, "jepa_loss": v_loss}
+                    elif args.model_type in ("sigreg_jepa", "visreg_jepa"):
+                        v_loss_dict = criterion(
+                            val_out["predictions"],
+                            val_out["targets"],
+                            projected_tokens=val_out["projected_tokens"],
+                        )
+                        v_loss = v_loss_dict["loss"]
+
+                val_loss_sum += v_loss.item()
+                val_batches += 1
+                for k, v in v_loss_dict.items():
+                    if isinstance(v, torch.Tensor):
+                        val_sublosses[k] = val_sublosses.get(k, 0.0) + v.item()
+
+                del val_images, val_ctx_idx, val_tgt_idx_list, val_batch, val_out
+
+        avg_val_loss = val_loss_sum / max(1, val_batches) if val_batches > 0 else avg_train_loss
+        avg_val_sublosses = (
+            {f"val_{k}": v / max(1, val_batches) for k, v in val_sublosses.items()}
+            if val_batches > 0
+            else {}
+        )
+        epoch_duration = time.perf_counter() - epoch_start
+
+        # Detailed component loss formatting matching 2D training logs
+        if args.model_type == "sigreg_jepa":
+            loss_detail = f" (JEPA: {avg_train_sublosses.get('train_jepa_loss', 0.0):.4f}, SigReg: {avg_train_sublosses.get('train_sigreg_loss', 0.0):.4f})"
+        elif args.model_type == "visreg_jepa":
+            loss_detail = (
+                f" (JEPA: {avg_train_sublosses.get('train_jepa_loss', 0.0):.4f}, "
+                f"Ctr: {avg_train_sublosses.get('train_center_loss', 0.0):.4f}, "
+                f"Scl: {avg_train_sublosses.get('train_scale_loss', 0.0):.4f}, "
+                f"Shp: {avg_train_sublosses.get('train_shape_loss', 0.0):.4f})"
+            )
+        else:
+            loss_detail = ""
+
+        logger.info(
+            f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {avg_train_loss:.5f}{loss_detail} | Val Loss: {avg_val_loss:.5f} | Duration: {epoch_duration:.2f}s"
+        )
+
         # Compute representation quality metrics at checkpoint intervals
         rep_metrics = {}
         if epoch % 10 == 0 or epoch == epochs or args.smoke_test:
@@ -334,14 +457,37 @@ def main():
             )
             model.train()
 
-        scheduler.step()
-        avg_loss = epoch_loss / max(1, num_batches)
-        tracker.update(
-            {"epoch": epoch, "loss": avg_loss, "lr": scheduler.get_last_lr()[0], **rep_metrics}
-        )
-        logger.info(f"Epoch {epoch}/{epochs} - Loss: {avg_loss:.4f}")
+        epoch_metrics = {
+            "epoch": epoch,
+            "loss": avg_train_loss,
+            "train_loss": avg_train_loss,
+            "val_loss": avg_val_loss,
+            "epoch_duration_sec": epoch_duration,
+            "lr": scheduler.get_last_lr()[0],
+            **avg_train_sublosses,
+            **avg_val_sublosses,
+            **rep_metrics,
+        }
+        tracker.update(epoch_metrics)
 
-        # Save checkpoint
+        # Save best checkpoint
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            best_ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_3d_best.pt"
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "encoder_state_dict": model.context_encoder.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "loss": avg_train_loss,
+                    "val_loss": avg_val_loss,
+                },
+                best_ckpt_path,
+            )
+            logger.info(f"Best model checkpoint saved: {best_ckpt_path} (val_loss: {best_val_loss:.5f})")
+
+        # Save periodic checkpoint
         if epoch % 10 == 0 or epoch == epochs or args.smoke_test:
             ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_3d_epoch_{epoch}.pt"
             torch.save(
@@ -350,11 +496,27 @@ def main():
                     "model_state_dict": model.state_dict(),
                     "encoder_state_dict": model.context_encoder.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
-                    "loss": avg_loss,
+                    "loss": avg_train_loss,
+                    "val_loss": avg_val_loss,
                 },
                 ckpt_path,
             )
             logger.info(f"Checkpoint saved: {ckpt_path}")
+
+        # Explicit CPU RAM and CUDA memory cleanup between epochs
+        if "images" in locals():
+            del images
+        if "ctx_idx" in locals():
+            del ctx_idx
+        if "tgt_idx_list" in locals():
+            del tgt_idx_list
+        if "batch" in locals():
+            del batch
+        if "sample_tokens" in locals():
+            del sample_tokens
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
     # Save metrics history
     tracker.save_json(LOGS_DIR / f"{args.model_type}_pretrain_metrics.json")

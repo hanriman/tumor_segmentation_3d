@@ -5,6 +5,7 @@ Couples pre-trained 3D JEPA encoders with Bottleneck or Multi-Scale FPN Decoders
 """
 
 import argparse
+import gc
 from pathlib import Path
 
 import numpy as np
@@ -67,6 +68,19 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
     parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=2,
+        help="Number of parallel DataLoader worker processes (default: 2)",
+    )
+    parser.add_argument(
+        "--pin_memory",
+        action="store_true",
+        default=True,
+        help="Enable pinned memory for faster host-to-device transfers (default: True)",
+    )
+    parser.add_argument("--no_pin_memory", action="store_false", dest="pin_memory")
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
 
@@ -162,10 +176,27 @@ def main():
             for i in range(2)
         ]
 
+    num_workers = getattr(args, "num_workers", 2)
+    use_pin_memory = getattr(args, "pin_memory", True) and (device.type == "cuda")
+
     train_loader = DataLoader(
-        train_dataset, batch_size=args.batch_size if not args.smoke_test else 2, shuffle=True
+        train_dataset,
+        batch_size=args.batch_size if not args.smoke_test else 2,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=use_pin_memory,
+        persistent_workers=(num_workers > 0),
+        prefetch_factor=2 if num_workers > 0 else None,
     )
-    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=use_pin_memory,
+        persistent_workers=(num_workers > 0),
+        prefetch_factor=2 if num_workers > 0 else None,
+    )
 
     spatial_shape = tuple(getattr(args, "spatial_shape", (128, 128, 128)))
     patch_size = tuple(getattr(args, "patch_size", (16, 16, 16)))
@@ -305,6 +336,12 @@ def main():
                 best_ckpt_path,
             )
             logger.info(f"New best model saved: {best_ckpt_path} (Val Dice: {best_val_dice:.4f})")
+
+        # Explicit CPU RAM and CUDA memory cleanup between epochs
+        del images, masks, batch
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
     tracker.save_json(LOGS_DIR / f"{args.model_type}_{args.decoder_type}_downstream_metrics.json")
     tracker.save_csv(LOGS_DIR / f"{args.model_type}_{args.decoder_type}_downstream_metrics.csv")

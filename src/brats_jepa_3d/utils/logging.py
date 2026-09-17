@@ -40,15 +40,28 @@ class MetricTracker:
 
     def __init__(self):
         self.history: dict[str, list] = {}
+        self.records: list[dict[str, float]] = []
 
     def update(self, metrics: dict[str, float]):
-        for k, v in metrics.items():
+        clean_metrics = {k: float(v) for k, v in metrics.items()}
+        self.records.append(clean_metrics)
+        for k, v in clean_metrics.items():
             if k not in self.history:
                 self.history[k] = []
-            self.history[k].append(float(v))
+            self.history[k].append(v)
 
     def get_latest(self) -> dict[str, float]:
         return {k: v[-1] for k, v in self.history.items() if v}
+
+    def to_dataframe(self) -> pd.DataFrame:
+        """Converts metric history to DataFrame, properly aligning ragged/intermittent metrics."""
+        if self.records:
+            return pd.DataFrame(self.records)
+        elif self.history:
+            max_len = max((len(v) for v in self.history.values()), default=0)
+            padded = {k: list(v) + [None] * (max_len - len(v)) for k, v in self.history.items()}
+            return pd.DataFrame(padded)
+        return pd.DataFrame()
 
     def save_json(self, file_path: str | Path):
         path = Path(file_path)
@@ -59,7 +72,7 @@ class MetricTracker:
     def save_csv(self, file_path: str | Path):
         path = Path(file_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        df = pd.DataFrame(self.history)
+        df = self.to_dataframe()
         df.to_csv(path, index=False)
 
 

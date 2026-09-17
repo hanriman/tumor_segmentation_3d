@@ -8,6 +8,7 @@ Evaluates all models on the BraTS 2024 GLI test split across:
 """
 
 import argparse
+import gc
 import time
 from pathlib import Path
 
@@ -75,6 +76,19 @@ def parse_args():
         default=None,
         help="Path to an explicit checkpoint file (.pt)",
     )
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=2,
+        help="Number of parallel DataLoader worker processes (default: 2)",
+    )
+    parser.add_argument(
+        "--pin_memory",
+        action="store_true",
+        default=True,
+        help="Enable pinned memory for faster host-to-device transfers (default: True)",
+    )
+    parser.add_argument("--no_pin_memory", action="store_false", dest="pin_memory")
     return parser.parse_args()
 
 
@@ -178,7 +192,18 @@ def main():
             for i in range(2)
         ]
 
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+    num_workers = getattr(args, "num_workers", 2)
+    use_pin_memory = getattr(args, "pin_memory", True) and (device.type == "cuda")
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=use_pin_memory,
+        persistent_workers=(num_workers > 0),
+        prefetch_factor=2 if num_workers > 0 else None,
+    )
 
     all_models_list = [
         ("3D SigReg JEPA (FPN)", "sigreg_jepa", args.decoder_type or "multiscale"),
@@ -363,6 +388,11 @@ def main():
             }
         )
 
+        del model
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
     df_new = pd.DataFrame(results)
     csv_path = METRICS_DIR / "benchmark_3d_summary.csv"
     master_csv_path = METRICS_DIR / "master_3d_benchmark.csv"
@@ -371,11 +401,12 @@ def main():
 
     if csv_path.exists() and len(models_to_evaluate) < len(all_models_list):
         try:
-            df_old = pd.read_csv(csv_path)
-            for _, row in df_new.iterrows():
+            df_old = pd.read_csv(csv_path, dtype=str)
+            df_new_str = df_new.astype(str)
+            for _, row in df_new_str.iterrows():
                 mask = df_old["Model"] == row["Model"]
                 if mask.any():
-                    for col in df_new.columns:
+                    for col in df_new_str.columns:
                         df_old.loc[mask, col] = row[col]
                 else:
                     df_old = pd.concat([df_old, pd.DataFrame([row])], ignore_index=True)

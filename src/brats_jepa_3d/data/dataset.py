@@ -99,11 +99,17 @@ class BraTS3DDataset(Dataset):
             else:
                 raise FileNotFoundError(f"Volume file not found: {file_path}")
 
-        with np.load(file_path, mmap_mode="r") as data:
-            image = torch.from_numpy(data["image"].astype(np.float32).copy())  # [4, 128, 128, 128]
-            mask = torch.from_numpy(data["mask"].astype(np.float32).copy())  # [1, 128, 128, 128]
-            if "brain_mask" in data:
-                brain_mask = torch.from_numpy(data["brain_mask"].astype(np.float32).copy())
+        with np.load(file_path) as data:
+            image_arr = data["image"]
+            mask_arr = data["mask"]
+            has_bm = "brain_mask" in data
+            brain_mask_arr = data["brain_mask"] if has_bm else None
+
+            # Convert directly to PyTorch tensors and cast to float32
+            image = torch.from_numpy(image_arr.astype(np.float32, copy=False))
+            mask = torch.from_numpy(mask_arr.astype(np.float32, copy=False))
+            if brain_mask_arr is not None:
+                brain_mask = torch.from_numpy(brain_mask_arr.astype(np.float32, copy=False))
             else:
                 brain_mask = (image != 0).any(dim=0, keepdim=True).float()
 

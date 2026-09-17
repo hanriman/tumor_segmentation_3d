@@ -5,6 +5,7 @@ Evaluates model performance under extreme label scarcity (1% to 100% volumetric 
 """
 
 import argparse
+import gc
 
 import numpy as np
 import pandas as pd
@@ -41,6 +42,19 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
     parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=2,
+        help="Number of parallel DataLoader worker processes (default: 2)",
+    )
+    parser.add_argument(
+        "--pin_memory",
+        action="store_true",
+        default=True,
+        help="Enable pinned memory for faster host-to-device transfers (default: True)",
+    )
+    parser.add_argument("--no_pin_memory", action="store_false", dest="pin_memory")
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
 
@@ -147,7 +161,18 @@ def main():
             }
             for _ in range(2)
         ]
-    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+    num_workers = getattr(args, "num_workers", 2)
+    use_pin_memory = getattr(args, "pin_memory", True) and (device.type == "cuda")
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=use_pin_memory,
+        persistent_workers=(num_workers > 0),
+        prefetch_factor=2 if num_workers > 0 else None,
+    )
 
     def build_model(name: str):
         jepa_prefixes = {
@@ -246,7 +271,13 @@ def main():
                 for _ in range(2)
             ]
         train_loader = DataLoader(
-            train_dataset, batch_size=args.batch_size if not args.smoke_test else 2, shuffle=True
+            train_dataset,
+            batch_size=args.batch_size if not args.smoke_test else 2,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=use_pin_memory,
+            persistent_workers=(num_workers > 0),
+            prefetch_factor=2 if num_workers > 0 else None,
         )
 
         row = {"Fraction": f"{frac * 100:.1f}%"}
@@ -263,6 +294,15 @@ def main():
             )
             logger.info(f"{name} ({frac * 100:.1f}% labels) -> Test Dice: {dice * 100:.2f}%")
             row[name] = f"{dice * 100:.2f}%"
+            del m
+            gc.collect()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
+        del train_loader, train_dataset
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
         records.append(row)
 
