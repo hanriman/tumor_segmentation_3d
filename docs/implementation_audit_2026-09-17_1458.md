@@ -266,3 +266,5 @@
 | `scripts/evaluate_3d.py` | ✅ | Consistent model initialization from YAML configs and checkpoint key matching. |
 | `scripts/evaluate_ood_3d.py` | ✅ | Consistent model initialization from YAML configs. |
 | `scripts/evaluate_low_data_3d.py` | ✅ | Consistent model initialization from YAML configs. |
+| `scripts/prepare_data_3d.py` | ✅ | Auto-detects raw directories, multi-core parallel workers, compact float16 storage. |
+| `scripts/package_for_kaggle.py` | ✅ | Packages 3D datasets into Kaggle-ready upload archives (dist_kaggle/). |

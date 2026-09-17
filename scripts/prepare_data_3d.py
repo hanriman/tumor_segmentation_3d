@@ -19,6 +19,8 @@ Theoretical & Methodological References:
 """
 
 import argparse
+import os
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import nibabel as nib
@@ -34,10 +36,13 @@ from brats_jepa_3d.config import PROCESSED_DATA_DIR, RAW_DATA_DIR
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Prepare 3D BraTS 2024 GLI volumes")
+    default_data_dir = RAW_DATA_DIR / "BraTS_2024" / "BraTS-GLI" / "training_data1_v2"
+    if not default_data_dir.exists():
+        default_data_dir = RAW_DATA_DIR / "BraTS-GLI" / "training_data1_v2"
     parser.add_argument(
         "--data_dir",
         type=str,
-        default=str(RAW_DATA_DIR / "BraTS-GLI" / "training_data1_v2"),
+        default=str(default_data_dir),
         help="Path to raw BraTS-GLI patient folders",
     )
     parser.add_argument(
@@ -57,6 +62,19 @@ def parse_args():
         type=int,
         default=None,
         help="Limit number of patients to process (for rapid testing/verification)",
+    )
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        default="float16",
+        choices=["float16", "float32"],
+        help="Storage dtype for images in .npz files (default: float16 for 2x smaller footprint)",
+    )
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=min(os.cpu_count() or 4, 8),
+        help="Number of parallel worker processes for volume preprocessing (default: min(cpu_count, 8))",
     )
     parser.add_argument(
         "--seed",
@@ -110,9 +128,7 @@ def resample_3d_volume(
 
 
 def process_patient(
-    patient_dir: Path,
-    output_dir: Path,
-    target_size: int = 128,
+    patient_dir: Path, output_dir: Path, target_size: int = 128, dtype: str = "float16"
 ) -> dict | None:
     """Processes a single patient's 4 MRI sequences + segmentation into a 128^3 .npz."""
     pid = patient_dir.name
@@ -169,7 +185,8 @@ def process_patient(
     t2f_norm = zscore_normalize_non_zero(t2f_resampled)
 
     # Stack channels: [4, 128, 128, 128]
-    image_4ch = np.stack([t1n_norm, t1c_norm, t2w_norm, t2f_norm], axis=0).astype(np.float32)
+    np_dtype = np.float16 if dtype == "float16" else np.float32
+    image_4ch = np.stack([t1n_norm, t1c_norm, t2w_norm, t2f_norm], axis=0).astype(np_dtype)
     mask_1ch = np.expand_dims((seg_resampled > 0).astype(np.uint8), axis=0)  # [1, 128, 128, 128]
 
     # Save compressed .npz
@@ -209,6 +226,13 @@ def process_patient(
     }
 
 
+def _process_patient_worker(args_tuple):
+    """Worker function for ProcessPoolExecutor with isolated thread count."""
+    patient_dir, output_dir, target_size, dtype = args_tuple
+    torch.set_num_threads(1)
+    return process_patient(patient_dir, output_dir, target_size=target_size, dtype=dtype)
+
+
 def main():
     args = parse_args()
     data_dir = Path(args.data_dir).resolve()
@@ -217,7 +241,10 @@ def main():
     # Fallback to local and Kaggle search if default path is not found directly
     if not data_dir.exists():
         fallback_candidates = [
+            RAW_DATA_DIR / "BraTS_2024" / "BraTS-GLI" / "training_data1_v2",
+            RAW_DATA_DIR / "BraTS-GLI" / "training_data1_v2",
             Path("../thesis_2d/data/raw/BraTS-GLI/training_data1_v2").resolve(),
+            Path("data/raw/BraTS_2024/BraTS-GLI/training_data1_v2").resolve(),
             Path("data/raw/BraTS-GLI/training_data1_v2").resolve(),
             Path("/kaggle/input/brats-2024-gli/training_data1_v2"),
             Path("/kaggle/input/brats2024-gli/training_data1_v2"),
@@ -242,7 +269,7 @@ def main():
 
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Reading raw 3D BraTS NIfTI data from: {data_dir}")
-    print(f"Saving canonical 128^3 .npz volumes to: {output_dir}")
+    print(f"Saving canonical 128^3 .npz volumes ({args.dtype}) to: {output_dir}")
 
     # Gather patient directories
     patient_dirs = sorted(
@@ -255,10 +282,23 @@ def main():
         print(f"Found {len(patient_dirs)} patient volumes to process.")
 
     records = []
-    for pdir in tqdm(patient_dirs, desc="Processing 3D Volumes"):
-        rec = process_patient(pdir, output_dir, target_size=args.target_size)
-        if rec is not None:
-            records.append(rec)
+    if args.num_workers > 1 and len(patient_dirs) > 1:
+        tasks = [(pdir, output_dir, args.target_size, args.dtype) for pdir in patient_dirs]
+        with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
+            for rec in tqdm(
+                executor.map(_process_patient_worker, tasks),
+                total=len(tasks),
+                desc=f"Processing 3D Volumes ({args.num_workers} workers, {args.dtype})",
+            ):
+                if rec is not None:
+                    records.append(rec)
+    else:
+        for pdir in tqdm(patient_dirs, desc="Processing 3D Volumes"):
+            rec = process_patient(
+                pdir, output_dir, target_size=args.target_size, dtype=args.dtype
+            )
+            if rec is not None:
+                records.append(rec)
 
     if not records:
         print("No valid patient volumes were processed!")

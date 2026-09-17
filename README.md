@@ -174,14 +174,13 @@ pytest tests/ -v
 > All scripts support Automatic Mixed Precision (`--amp`, default for CUDA/Tensor Cores) and non-AMP execution (`--no-amp` or `--no_amp`) for CPU and Apple Silicon MPS debugging. Append `--smoke_test` to any script for fast 1-epoch verification.
 
 ### 1. 3D Data Preprocessing
-Extracts non-zero brain bounding boxes, applies trilinear resampling to canonical $128^3$ isotropic grids, executes parenchyma Z-score normalization, and exports compressed `.npz` files with stratified `metadata.csv`:
+Extracts non-zero brain bounding boxes, applies trilinear resampling to canonical $128^3$ isotropic grids, executes parenchyma Z-score normalization, and exports compressed `.npz` files (`float16` storage, auto-upcast to FP32 in RAM) with quartile-stratified `metadata.csv`:
 ```bash
-# Process raw BraTS volumes
-python scripts/prepare_data_3d.py \
-    --data_dir ../thesis_2d/data/raw/BraTS-GLI/training_data1_v2 \
-    --output_dir data/processed/brats_gli_3d \
-    --target_size 128 \
-    --limit 100
+# Process raw BraTS volumes with multi-core parallel processing (auto-detects raw data dir)
+python scripts/prepare_data_3d.py --dtype float16 --num_workers 8
+
+# Rapid verification on 100 cases
+python scripts/prepare_data_3d.py --limit 100 --dtype float16 --num_workers 4
 ```
 
 ### 2. Pre-training 3D JEPAs (50 Epochs)
