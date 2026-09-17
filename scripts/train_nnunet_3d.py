@@ -36,6 +36,7 @@ def parse_args():
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
+    parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
 
@@ -127,6 +128,21 @@ def main():
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )
     epochs = 1 if args.smoke_test else args.epochs
+
+    warmup_epochs = max(1, min(5, epochs // 5)) if epochs > 1 else 0
+    if epochs > 1 and warmup_epochs > 0:
+        warmup_sched = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=0.1, total_iters=warmup_epochs
+        )
+        cosine_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs - warmup_epochs, eta_min=1e-6
+        )
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer, schedulers=[warmup_sched, cosine_sched], milestones=[warmup_epochs]
+        )
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
+
     scaler = torch.amp.GradScaler(
         device="cuda" if device.type == "cuda" else "cpu",
         enabled=args.amp and device.type == "cuda",
@@ -153,10 +169,13 @@ def main():
 
             if scaler.is_enabled():
                 scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
             train_loss += loss.item()
@@ -166,16 +185,19 @@ def main():
             if args.smoke_test and batch_idx >= 1:
                 break
 
+        scheduler.step()
         val_metrics = evaluate(model, val_loader, device, amp=args.amp, smoke_test=args.smoke_test)
         avg_train_loss = train_loss / max(1, num_batches)
+        current_lr = scheduler.get_last_lr()[0]
         logger.info(
-            f"Epoch {epoch}/{epochs} - Train Loss: {avg_train_loss:.4f} | "
+            f"Epoch {epoch}/{epochs} - LR: {current_lr:.6f} | Train Loss: {avg_train_loss:.4f} | "
             f"Val Dice: {val_metrics['val_dice']:.4f} | Val HD95: {val_metrics['val_hd95']:.2f} mm"
         )
 
         tracker.update(
             {
                 "epoch": epoch,
+                "lr": current_lr,
                 "train_loss": avg_train_loss,
                 **val_metrics,
             }

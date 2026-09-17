@@ -64,7 +64,7 @@ def package_dataset(
     for root, _, files in os.walk(dataset_dir):
         for f in files:
             p = Path(root) / f
-            if not should_exclude(p.relative_to(PROJECT_ROOT)):
+            if not should_exclude(p.relative_to(dataset_dir)):
                 all_files.append(p)
 
     total_files = len(all_files)
@@ -132,7 +132,7 @@ def main():
     target_dir = PROJECT_ROOT / "data" / "processed" / args.dataset_name
     output_zip = out_dir / "brats_3d_datasets.zip"
 
-    file_count, uncompressed_bytes = package_dataset(
+    file_count, _uncompressed_bytes = package_dataset(
         args.dataset_name,
         target_dir,
         output_zip,

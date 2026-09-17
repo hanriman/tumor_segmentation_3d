@@ -22,7 +22,11 @@ import torch
 from torch.utils.data import DataLoader
 
 from brats_jepa_3d.config import CHECKPOINTS_DIR, METRICS_DIR, ensure_directories
-from brats_jepa_3d.data import BraTS3DDataset
+from brats_jepa_3d.data import (
+    BraTS3DDataset,
+    apply_b1_bias_field_3d,
+    apply_rician_noise_3d,
+)
 from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
 from brats_jepa_3d.models import BraTS3DnnUNet, BraTS3DUNet, JEPASegmentationModel3D
 from brats_jepa_3d.utils import get_autocast_context, get_device, set_seed, setup_logger
@@ -33,32 +37,9 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
+    parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
-
-
-def apply_rician_noise_3d(image: torch.Tensor, sigma: float = 0.10) -> torch.Tensor:
-    """Simulates 3D MRI quadrature Rician noise."""
-    eta1 = torch.randn_like(image) * sigma
-    eta2 = torch.randn_like(image) * sigma
-    return torch.sqrt((image + eta1) ** 2 + eta2**2)
-
-
-def apply_b1_bias_field_3d(image: torch.Tensor, strength: float = 0.3) -> torch.Tensor:
-    """Applies smooth multiplicative 3D B1 radiofrequency transmit/receive bias field."""
-    D, H, W = image.shape[-3], image.shape[-2], image.shape[-1]
-    z = torch.linspace(-1, 1, D, device=image.device)
-    y = torch.linspace(-1, 1, H, device=image.device)
-    x = torch.linspace(-1, 1, W, device=image.device)
-    grid_z, grid_y, grid_x = torch.meshgrid(z, y, x, indexing="ij")
-
-    # Smooth 2nd-order polynomial field
-    bias = 1.0 + strength * (
-        0.5 * grid_z + 0.3 * grid_y - 0.4 * grid_x + 0.2 * (grid_z**2 + grid_y**2 + grid_x**2)
-    )
-    if image.dim() == 5:
-        return image * bias.unsqueeze(0).unsqueeze(0)
-    return image * bias.unsqueeze(0)
 
 
 def evaluate_perturbation(
@@ -107,46 +88,47 @@ def main():
     def get_model(name: str):
         if name == "3D VisReg JEPA (FPN)":
             m = JEPASegmentationModel3D(decoder_type="multiscale")
-            ckpt = CHECKPOINTS_DIR / "visreg_jepa_multiscale_best.pt"
-            if not ckpt.exists():
-                c = sorted(CHECKPOINTS_DIR.glob("visreg_jepa*.pt"))
-                ckpt = c[-1] if c else ckpt
-            if ckpt.exists():
-                logger.info(f"Loaded {name} weights from {ckpt}")
-                m.load_state_dict(
-                    torch.load(ckpt, map_location=device)["model_state_dict"], strict=False
-                )
+            ms_candidates = sorted(CHECKPOINTS_DIR.glob("visreg_jepa*multiscale*best.pt"))
+            candidates = ms_candidates if ms_candidates else sorted(CHECKPOINTS_DIR.glob("visreg_jepa*best.pt"))
+            ckpt = candidates[-1] if candidates else None
+            if ckpt and ckpt.exists():
+                sd = torch.load(ckpt, map_location=device)
+                sd = sd.get("model_state_dict", sd)
+                missing, _unexpected = m.load_state_dict(sd, strict=False)
+                matched = [k for k in m.state_dict() if k not in missing]
+                logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             else:
                 logger.warning(
-                    f"Checkpoint for {name} not found at {ckpt}. Evaluating initialized weights."
+                    f"Fine-tuned checkpoint for {name} not found. Evaluating randomly initialized weights."
                 )
             return m.to(device)
 
         elif name == "3D SigReg JEPA (FPN)":
             m = JEPASegmentationModel3D(decoder_type="multiscale")
-            ckpt = CHECKPOINTS_DIR / "sigreg_jepa_multiscale_best.pt"
-            if not ckpt.exists():
-                c = sorted(CHECKPOINTS_DIR.glob("sigreg_jepa*.pt"))
-                ckpt = c[-1] if c else ckpt
-            if ckpt.exists():
-                logger.info(f"Loaded {name} weights from {ckpt}")
-                m.load_state_dict(
-                    torch.load(ckpt, map_location=device)["model_state_dict"], strict=False
-                )
+            ms_candidates = sorted(CHECKPOINTS_DIR.glob("sigreg_jepa*multiscale*best.pt"))
+            candidates = ms_candidates if ms_candidates else sorted(CHECKPOINTS_DIR.glob("sigreg_jepa*best.pt"))
+            ckpt = candidates[-1] if candidates else None
+            if ckpt and ckpt.exists():
+                sd = torch.load(ckpt, map_location=device)
+                sd = sd.get("model_state_dict", sd)
+                missing, _unexpected = m.load_state_dict(sd, strict=False)
+                matched = [k for k in m.state_dict() if k not in missing]
+                logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             else:
                 logger.warning(
-                    f"Checkpoint for {name} not found at {ckpt}. Evaluating initialized weights."
+                    f"Fine-tuned checkpoint for {name} not found. Evaluating randomly initialized weights."
                 )
             return m.to(device)
 
         elif name == "3D nnU-Net":
-            m = BraTS3DnnUNet(deep_supervision=False)
+            m = BraTS3DnnUNet(deep_supervision=True)
             ckpt = CHECKPOINTS_DIR / "nnunet_3d_best.pt"
             if ckpt.exists():
-                logger.info(f"Loaded {name} weights from {ckpt}")
-                m.load_state_dict(
-                    torch.load(ckpt, map_location=device)["model_state_dict"], strict=False
-                )
+                sd = torch.load(ckpt, map_location=device)
+                sd = sd.get("model_state_dict", sd)
+                missing, _unexpected = m.load_state_dict(sd, strict=False)
+                matched = [k for k in m.state_dict() if k not in missing]
+                logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             else:
                 logger.warning(
                     f"Checkpoint for {name} not found at {ckpt}. Evaluating initialized weights."
@@ -157,10 +139,11 @@ def main():
             m = BraTS3DUNet()
             ckpt = CHECKPOINTS_DIR / "unet_3d_best.pt"
             if ckpt.exists():
-                logger.info(f"Loaded {name} weights from {ckpt}")
-                m.load_state_dict(
-                    torch.load(ckpt, map_location=device)["model_state_dict"], strict=False
-                )
+                sd = torch.load(ckpt, map_location=device)
+                sd = sd.get("model_state_dict", sd)
+                missing, _unexpected = m.load_state_dict(sd, strict=False)
+                matched = [k for k in m.state_dict() if k not in missing]
+                logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             else:
                 logger.warning(
                     f"Checkpoint for {name} not found at {ckpt}. Evaluating initialized weights."

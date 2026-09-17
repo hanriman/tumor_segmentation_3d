@@ -27,6 +27,7 @@ from brats_jepa_3d.data import (
     jepa_masking_collate_fn_3d,
 )
 from brats_jepa_3d.losses import IJEPALoss, SigRegLoss, VisRegLoss
+from brats_jepa_3d.metrics import compute_representation_collapse_metrics
 from brats_jepa_3d.models import IJEPA3D, SigRegJEPA3D, VisRegJEPA3D
 from brats_jepa_3d.utils import (
     MetricTracker,
@@ -56,7 +57,7 @@ def parse_args():
     parser.add_argument("--weight_decay", type=float, default=0.05)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
-    parser.add_argument("--no_amp", action="store_false", dest="amp")
+    parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
     parser.add_argument("--clip_grad_norm", type=float, default=1.0)
     parser.add_argument(
         "--smoke_test", action="store_true", help="Run 1 epoch with 2 batches for fast verification"
@@ -220,6 +221,9 @@ def main():
         f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}"
     )
 
+    total_steps = epochs * len(loader)
+    global_step = 0
+
     for epoch in range(1, epochs + 1):
         model.train()
         epoch_loss = 0.0
@@ -260,10 +264,14 @@ def main():
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
                 optimizer.step()
 
-            # For I-JEPA: update target encoder via EMA
+            # For I-JEPA: update target encoder via EMA with cosine momentum annealing (0.996 -> 1.0)
             if args.model_type == "ijepa":
-                model.update_target_encoder()
+                m_0 = 0.996
+                progress = global_step / max(1, total_steps)
+                curr_momentum = 1.0 - (1.0 - m_0) * 0.5 * (1.0 + math.cos(math.pi * progress))
+                model.update_target_encoder(momentum=curr_momentum)
 
+            global_step += 1
             epoch_loss += loss.item()
             num_batches += 1
             pbar.set_postfix(
@@ -273,9 +281,25 @@ def main():
             if args.smoke_test and batch_idx >= 1:
                 break
 
+        # Compute representation quality metrics at checkpoint intervals
+        rep_metrics = {}
+        if epoch % 10 == 0 or epoch == epochs or args.smoke_test:
+            model.eval()
+            with torch.no_grad():
+                sample_tokens = model.context_encoder(images[:1])
+                rep_metrics = compute_representation_collapse_metrics(sample_tokens)
+            logger.info(
+                f"Representation Quality - EffRank: {rep_metrics['effective_rank']:.2f} | "
+                f"CenteredCosSim: {rep_metrics['avg_cosine_sim_centered']:.4f} | "
+                f"FeatureVar: {rep_metrics['feature_variance']:.4f}"
+            )
+            model.train()
+
         scheduler.step()
         avg_loss = epoch_loss / max(1, num_batches)
-        tracker.update({"epoch": epoch, "loss": avg_loss, "lr": scheduler.get_last_lr()[0]})
+        tracker.update(
+            {"epoch": epoch, "loss": avg_loss, "lr": scheduler.get_last_lr()[0], **rep_metrics}
+        )
         logger.info(f"Epoch {epoch}/{epochs} - Loss: {avg_loss:.4f}")
 
         # Save checkpoint

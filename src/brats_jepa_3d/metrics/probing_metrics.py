@@ -31,7 +31,8 @@ def compute_effective_rank(z: torch.Tensor) -> float:
     - Roy, O., & Vetterli, M. (2007). "The effective rank: A measure of effective dimensionality."
       15th European Signal Processing Conference (EUSIPCO 2007), pp. 606-610.
     """
-    z_centered = z - z.mean(dim=0, keepdim=True)
+    z_flat = z.reshape(-1, z.shape[-1])
+    z_centered = z_flat - z_flat.mean(dim=0, keepdim=True)
     try:
         _, S, _ = torch.linalg.svd(z_centered, full_matrices=False)
         eigenvalues = S**2
@@ -54,12 +55,11 @@ def compute_representation_collapse_metrics(z: torch.Tensor) -> dict[str, float]
 
     if N_total <= 1:
         eff_rank = compute_effective_rank(z_flat)
-        feature_var = z_flat.var(dim=0).mean().item() if N_total > 1 else 0.0
         return {
             "effective_rank": eff_rank,
             "avg_cosine_sim": 1.0 if N_total == 1 else 0.0,
             "avg_cosine_sim_centered": 0.0,
-            "feature_variance": feature_var,
+            "feature_variance": 0.0,
         }
 
     # Sample subset for pairwise similarity if token count is very large

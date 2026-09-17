@@ -34,7 +34,7 @@ class JEPAMaskingTransform3D:
         grid_size: tuple[int, int, int] = (8, 8, 8),
         num_target_cuboids: int = 4,
         target_cuboid_size: tuple[int, int, int] = (3, 3, 3),
-        max_target_overlap: float = 0.25,
+        max_target_overlap: float = 0.0,
         context_num_patches: int = 192,
         connectivity: int = 26,
     ):
@@ -62,11 +62,11 @@ class JEPAMaskingTransform3D:
         return offsets
 
     def _coord_to_idx(self, z: int, y: int, x: int) -> int:
-        gz, gy, gx = self.grid_size
+        _gz, gy, gx = self.grid_size
         return z * (gy * gx) + y * gx + x
 
     def _idx_to_coord(self, idx: int) -> tuple[int, int, int]:
-        gz, gy, gx = self.grid_size
+        _gz, gy, gx = self.grid_size
         z = idx // (gy * gx)
         rem = idx % (gy * gx)
         y = rem // gx
@@ -142,12 +142,18 @@ class JEPAMaskingTransform3D:
 
         # Fallback: if BFS cluster reached a dead-end, fill remaining from available candidates
         if len(visited) < self.context_num_patches:
+            import logging
+            logging.getLogger(__name__).debug(
+                f"BFS reached {len(visited)}/{self.context_num_patches} patches before dead-end; "
+                f"filling {self.context_num_patches - len(visited)} remaining with random available patches "
+                f"(spatial contiguity partially broken)"
+            )
             remaining = [c for c in candidates if c not in visited]
             random.shuffle(remaining)
             needed = self.context_num_patches - len(visited)
             visited.update(remaining[:needed])
 
-        return sorted(list(visited))
+        return sorted(visited)
 
     def __call__(self) -> dict[str, Any]:
         """Generates disjoint context and target patch index sets for one volume."""
@@ -160,7 +166,7 @@ class JEPAMaskingTransform3D:
 
         # Convert to PyTorch LongTensors
         context_tensor = torch.tensor(context_indices, dtype=torch.long)
-        target_tensors = [torch.tensor(sorted(list(c)), dtype=torch.long) for c in target_cuboids]
+        target_tensors = [torch.tensor(sorted(c), dtype=torch.long) for c in target_cuboids]
 
         return {
             "context_indices": context_tensor,

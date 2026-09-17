@@ -43,7 +43,7 @@ def parse_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default=str(PROCESSED_DATA_DIR / "brats_gli_3d"),
+        default=str(PROCESSED_DATA_DIR),
         help="Path to save processed 3D .npz volumes",
     )
     parser.add_argument(
@@ -182,7 +182,10 @@ def process_patient(
 
     num_voxels_brain = int(
         np.sum(
-            (image_4ch[0] != 0) | (image_4ch[1] != 0) | (image_4ch[2] != 0) | (image_4ch[3] != 0)
+            (t1n_resampled > 0)
+            | (t1c_resampled > 0)
+            | (t2w_resampled > 0)
+            | (t2f_resampled > 0)
         )
     )
     num_voxels_tumor = int(np.sum(mask_1ch > 0))
@@ -190,7 +193,7 @@ def process_patient(
 
     try:
         rel_path = str(out_file.relative_to(output_dir.parent.parent))
-    except (ValueError, Exception):
+    except ValueError:
         rel_path = f"{output_dir.name}/{out_file.name}"
 
     return {
@@ -264,18 +267,43 @@ def main():
     df = pd.DataFrame(records)
 
     # Patient-stratified split: 70% Train, 15% Val, 15% Test
+    # Stratified by tumor volume quartiles to ensure invariant volume distributions (Roy et al., 2024)
     pids = df["patient_id"].unique()
-    if len(pids) >= 6:
+    split_map = None
+    if len(pids) >= 20:
+        try:
+            # Categorize into quartiles (dropping duplicates if many zero/identical tumor volumes exist)
+            df["tumor_quartile"] = pd.qcut(
+                df["num_voxels_tumor"], q=4, labels=False, duplicates="drop"
+            )
+            q_counts = df["tumor_quartile"].value_counts()
+            if q_counts.min() >= 3:
+                train_df, temp_df = train_test_split(
+                    df, test_size=0.30, random_state=args.seed, stratify=df["tumor_quartile"]
+                )
+                val_df, test_df = train_test_split(
+                    temp_df,
+                    test_size=0.50,
+                    random_state=args.seed,
+                    stratify=temp_df["tumor_quartile"],
+                )
+                split_map = {pid: "train" for pid in train_df["patient_id"]}
+                split_map.update({pid: "val" for pid in val_df["patient_id"]})
+                split_map.update({pid: "test" for pid in test_df["patient_id"]})
+        except (ValueError, KeyError, TypeError):
+            split_map = None
+
+    if split_map is None and len(pids) >= 6:
         train_pids, temp_pids = train_test_split(pids, test_size=0.30, random_state=args.seed)
         val_pids, test_pids = train_test_split(temp_pids, test_size=0.50, random_state=args.seed)
         split_map = {pid: "train" for pid in train_pids}
         split_map.update({pid: "val" for pid in val_pids})
         split_map.update({pid: "test" for pid in test_pids})
-    elif len(pids) >= 3:
+    elif split_map is None and len(pids) >= 3:
         split_map = {pids[0]: "train", pids[1]: "val", pids[2]: "test"}
         for pid in pids[3:]:
             split_map[pid] = "train"
-    else:
+    elif split_map is None:
         # Very small subset (e.g. limit=1 or 2 for debugging/smoke test)
         split_map = {pid: "train" for pid in pids}
         # Duplicate rows for val and test so loaders find records

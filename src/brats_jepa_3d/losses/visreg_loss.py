@@ -98,27 +98,25 @@ class VisRegLoss(nn.Module):
         std = torch.sqrt(z.var(dim=0, unbiased=False, keepdim=True) + 1e-6)
         z_norm = (z - mu) / (std.detach() + 1e-6)
 
-        # Sample random projection vectors on unit hypersphere
-        u = torch.randn(D, self.num_projections, device=z.device, dtype=z.dtype)
+        # Sample random projection vectors on unit hypersphere in float32
+        u = torch.randn(D, self.num_projections, device=z.device, dtype=torch.float32)
         u = F.normalize(u, p=2, dim=0)  # [D, M]
 
-        # 1D projected slices: [N, M] (no autograd per-slice re-standardization)
-        proj = z_norm @ u
+        # 1D projected slices: [N, M] in float32 to prevent FP16 underflow under AMP
+        proj = z_norm.float() @ u
         sorted_proj, _ = torch.sort(proj, dim=0)  # [N, M]
 
         # Analytical standard normal N(0, 1) quantiles: Phi^{-1}((i - 0.5) / N)
         # Evaluated strictly in float32 to prevent float16 erfinv tail saturation under AMP
         probs = (torch.arange(1, N + 1, device=z.device, dtype=torch.float32) - 0.5) / N
-        gaussian_quantiles = (torch.erfinv(2.0 * probs - 1.0) * math.sqrt(2.0)).to(
-            dtype=z.dtype
-        )  # [N]
+        gaussian_quantiles = torch.erfinv(2.0 * probs - 1.0) * math.sqrt(2.0)  # [N] in float32
         target_quantiles = gaussian_quantiles.unsqueeze(-1).expand_as(sorted_proj)
 
         if self.swd_metric == "mse":
             swd = F.mse_loss(sorted_proj, target_quantiles)
         else:
             swd = F.l1_loss(sorted_proj, target_quantiles)
-        return swd
+        return swd.to(dtype=z.dtype)
 
     def forward(
         self,

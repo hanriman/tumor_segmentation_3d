@@ -37,6 +37,11 @@ dev = [
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint]
+ignore = [
+    "EXE001",  # Shebang on non-executable scripts
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

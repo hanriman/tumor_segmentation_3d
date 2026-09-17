@@ -22,6 +22,7 @@ class DeepSupervisionLoss3D(nn.Module):
         weights: list[float] | None = None,
         dice_weight: float = 1.0,
         bce_weight: float = 1.0,
+        squared_pred: bool = True,
     ):
         super().__init__()
         if weights is None:
@@ -30,7 +31,9 @@ class DeepSupervisionLoss3D(nn.Module):
             total = sum(raw)
             weights = [w / total for w in raw]
         self.weights = weights
-        self.base_loss = CombinedDiceBCELoss3D(dice_weight=dice_weight, bce_weight=bce_weight)
+        self.base_loss = CombinedDiceBCELoss3D(
+            dice_weight=dice_weight, bce_weight=bce_weight, squared_pred=squared_pred
+        )
 
     def forward(
         self,
@@ -39,6 +42,9 @@ class DeepSupervisionLoss3D(nn.Module):
     ) -> dict[str, torch.Tensor]:
         if not isinstance(multi_scale_logits, (list, tuple)):
             return self.base_loss(multi_scale_logits, targets)
+
+        if targets.dim() == 4:
+            targets = targets.unsqueeze(1)
 
         total_loss = torch.tensor(0.0, device=targets.device, dtype=targets.dtype)
         total_dice = torch.tensor(0.0, device=targets.device, dtype=targets.dtype)

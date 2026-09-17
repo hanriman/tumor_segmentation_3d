@@ -31,7 +31,7 @@ Gliomas (glioblastomas and astrocytomas) are intrinsically **three-dimensional, 
 | Component | Mathematical / Algorithmic Formulation | Theoretical Reference & Justification |
 | :--- | :--- | :--- |
 | **Volumetric Continuity** | $\mathbf{X} \in \mathbb{R}^{4 \times 128 \times 128 \times 128}$, $1.0\text{ mm}^3$ isotropic grid. | **Menze et al. (2014)**; **Milletari et al. (2016)**. Preserves 3D spatial continuity across white matter tracts. |
-| **Grid Resampling** | Non-zero brain bounding box $\to$ aspect-preserving trilinear resampling to $128^3$. | **Isensee et al. (2021)** (*Nature Methods*). Prevents anatomical truncation of peripheral cortex. |
+| **Grid Resampling** | Non-zero brain bounding box $\to$ trilinear resampling to canonical $128^3$ isotropic grid. | **Isensee et al. (2021)** (*Nature Methods*). Prevents anatomical truncation of peripheral cortex. |
 | **Parenchyma Normalization** | $X_{c, \text{norm}}(v) = \frac{X_c(v) - \mu_{c,\text{nz}}}{\sigma_{c,\text{nz}} + \epsilon}$ for non-zero voxels. | **Isensee et al. (2021)**. Harmonizes scanner-dependent intensity drift across institutions. |
 | **Random Modality Dropout** | $m_c \sim \text{Bernoulli}(1 - p_{\text{drop}})$, $p_{\text{drop}}=0.25$, fallback $\sum_c m_c \ge 1$. | **Havaei et al. (2017)**; **Dorent et al. (2019)**. Simulates missing MRI sequences, enforcing representation independence. |
 | **3D Context / Target Masking** | 4 Target cuboids ($3 \times 3 \times 3$, $N_{\text{tgt}} \approx 108$) + 3D Connected BFS Context ($N_{\text{ctx}} = 192$). | **Assran et al. (2023)** (*CVPR*). Prevents spatial interpolation shortcuts; constant $N_{\text{ctx}}$ maximizes Tensor Core throughput. |
@@ -61,10 +61,15 @@ thesis_3d/
 ├── agents.md                     # Scientific writing & research guidelines
 │
 ├── docs/
+│   ├── audit_and_remediation_plan.md # Formal mathematical audit & verification report
 │   └── kaggle_guide.md           # End-to-end Kaggle GPU execution guide
 │
 ├── notebooks/
-│   └── kaggle_runner_3d.ipynb    # 1-Click Kaggle GPU runner notebook
+│   ├── 01_train_visreg_3d.ipynb  # Primary method: 3D VisReg pre-training & fine-tuning
+│   ├── 02_train_nnunet_3d.ipynb  # SOTA baseline: 3D DynUNet with deep supervision
+│   ├── 03_train_unet_3d.ipynb    # Classical baseline: 3D Residual UNet
+│   ├── 04_evaluation_and_figures_3d.ipynb # Master benchmark & paper figure generator
+│   └── kaggle_runner_3d.ipynb    # Interactive all-in-one runner with toggles
 │
 ├── configs/                      # Modular YAML configuration hierarchy
 │   ├── base.yaml                 # System paths, seed, device, AMP configs
@@ -85,12 +90,12 @@ thesis_3d/
 │       ├── __init__.py
 │       ├── config.py             # Cloud/Kaggle/Colab/Local dynamic resolver
 │       ├── data/
-│       │   ├── dataset.py        # BraTS3DDataset with RAM caching & fraction subsampling
-│       │   ├── transforms.py     # RandomModalityDropout3D & 3D spatial transforms
-│       │   └── masking.py        # JEPAMaskingTransform3D (3D cuboids + 3D BFS)
+│       │   ├── dataset.py        # BraTS3DDataset with bounded RAM caching & fraction sampling
+│       │   ├── transforms.py     # RandomModalityDropout3D, Rician noise, B1 bias field
+│       │   └── masking.py        # JEPAMaskingTransform3D (3D cuboids + 3D BFS context)
 │       ├── models/
 │       │   ├── vision_transformer_3d.py # PatchEmbed3D + 3D Sincos Pos + ViTEncoder3D
-│       │   ├── predictor_3d.py          # JEPAPredictor3D (4 layers, cross-attention)
+│       │   ├── predictor_3d.py          # JEPAPredictor3D (4 layers, self-attention)
 │       │   ├── ijepa_3d.py              # Dual-encoder with EMA teacher
 │       │   ├── sigreg_jepa_3d.py        # Single-encoder + Projector MLP (384 -> 1024 -> 128)
 │       │   ├── visreg_jepa_3d.py        # Single-encoder + Projector MLP
@@ -98,18 +103,18 @@ thesis_3d/
 │       │   ├── unet_3d.py               # 3D Residual UNet (MONAI)
 │       │   └── nnunet_3d.py             # 3D DynUNet with Deep Supervision (MONAI)
 │       ├── losses/
-│       │   ├── ijepa_loss.py            # Latent Smooth L1 on LayerNormed targets
-│       │   ├── sigreg_loss.py           # Epps-Pulley Gaussianity test (scale factor N)
+│       │   ├── ijepa_loss.py            # Latent Smooth L1 on LayerNormed detached targets
+│       │   ├── sigreg_loss.py           # Epps-Pulley Gaussianity test (scale factor N, raw 1D rays)
 │       │   ├── visreg_loss.py           # Decoupled Center, Scale, Shape (SWD, stop-grad sigma)
-│       │   ├── dice_bce_loss_3d.py      # 3D Combined Volumetric Dice + BCE
-│       │   └── deep_supervision_loss_3d.py # Multi-scale exponential decay supervision
+│       │   ├── dice_bce_loss_3d.py      # Combined Volumetric 3D Dice + Cross-Entropy (multi-class & binary)
+│       │   └── deep_supervision_loss_3d.py # Multi-scale exponential decay supervision (5D & 4D targets)
 │       ├── metrics/
 │       │   ├── volumetric_metrics.py    # Guarded 3D Dice, IoU, cKDTree 3D HD95 (Powers 2011)
 │       │   └── probing_metrics.py       # Effective Rank (S^2), Centered Cosine Sim
 │       └── utils/
 │           ├── seed.py                  # Deterministic PRNG seeding
-│           ├── device.py                # CUDA / MPS / CPU device detection & AMP
-│           └── logging.py               # Structured MetricTracker & file logger
+│           ├── device.py                # CUDA / MPS / CPU device detection & AMP context
+│           └── logging.py               # MetricTracker, setup_logger & numeric checkpoint sorting
 │
 ├── scripts/
 │   ├── prepare_data_3d.py        # NIfTI bounding-box cropping, resampling to 128^3 & .npz export
@@ -124,12 +129,13 @@ thesis_3d/
 │   ├── package_for_kaggle.py     # Packages processed 3D dataset into dist_kaggle/ archive
 │   └── run_full_pipeline_3d.py   # Master automation orchestrator
 │
-├── tests/                        # Pytest automated test suite (22/22 unit tests)
+├── tests/                        # Pytest automated test suite (35/35 unit tests)
 │   ├── conftest.py               # Synthetic 3D volume fixtures
 │   ├── test_data_3d.py           # Dataset, 3D masking collision & BFS verification
 │   ├── test_models_3d.py         # Forward/backward graphs & parameter isolation
-│   ├── test_losses_3d.py         # Epps-Pulley, Sliced-Wasserstein, 3D Dice+BCE
-│   └── test_metrics_3d.py        # 3D Dice, cKDTree 3D HD95, Effective Rank S^2
+│   ├── test_losses_3d.py         # Epps-Pulley, Sliced-Wasserstein, multi-class Dice+CE
+│   ├── test_metrics_3d.py        # 3D Dice, cKDTree 3D HD95, Effective Rank S^2, collapse suite
+│   └── test_fixes_3d.py          # Architectural regressions, prefix stripping, Rician physics
 │
 └── outputs/                      # Checkpoints (.pt), metrics (.csv, .md), figures (.png, .pdf)
     ├── checkpoints/
@@ -153,15 +159,19 @@ uv pip install -e ".[dev]"
 ### Step 2: Run Unit Tests
 ```bash
 pytest tests/ -v
-# Verified: 22 passed in ~13s
+# Verified: 35 passed in ~18s
 ```
 
 ---
 
 ## 5. End-to-End Workflow & CLI Reference
 
+> [!TIP]
+> **Hardware & Precision Support**:
+> All scripts support Automatic Mixed Precision (`--amp`, default for CUDA/Tensor Cores) and non-AMP execution (`--no-amp` or `--no_amp`) for CPU and Apple Silicon MPS debugging. Append `--smoke_test` to any script for fast 1-epoch verification.
+
 ### 1. 3D Data Preprocessing
-Extracts non-zero brain bounding boxes, applies aspect-preserving trilinear resampling to canonical $128^3$ isotropic grids, executes parenchyma Z-score normalization, and exports compressed `.npz` files with stratified `metadata.csv`:
+Extracts non-zero brain bounding boxes, applies trilinear resampling to canonical $128^3$ isotropic grids, executes parenchyma Z-score normalization, and exports compressed `.npz` files with stratified `metadata.csv`:
 ```bash
 # Process raw BraTS volumes
 python scripts/prepare_data_3d.py \
@@ -228,12 +238,12 @@ python scripts/run_full_pipeline_3d.py
 ```
 
 ### 7. Running on Kaggle GPU
-For zero-setup 1-click cloud execution:
-1. Package preprocessed data: `python scripts/package_for_kaggle.py` -> upload `dist_kaggle/brats_3d_datasets.zip` as a Kaggle dataset `brats-3d-datasets`.
-2. Import `notebooks/kaggle_runner_3d.ipynb` into a new Kaggle notebook.
-3. Select **GPU T4 x1** or **GPU T4 x2**, turn **Internet ON**, and attach the dataset.
-4. Run all notebook cells to execute pre-training, fine-tuning, benchmarks, and 1-click output download (`outputs.zip`).
-5. For complete instructions, see [docs/kaggle_guide.md](docs/kaggle_guide.md).
+For zero-setup cloud execution on free NVIDIA Tesla T4 GPUs (16 GB):
+1. **Package Data**: Run `python scripts/package_for_kaggle.py` and upload `dist_kaggle/brats_3d_datasets.zip` to Kaggle as a dataset named `brats-3d-datasets`.
+2. **Choose Your Runner**:
+   - **Modular Suite (Recommended for Full Runs)**: Run `notebooks/01_train_visreg_3d.ipynb` and `notebooks/02_train_nnunet_3d.ipynb` in parallel across two concurrent GPU sessions (~3.5 hrs total, zero timeout risk). Chain outputs into `notebooks/04_evaluation_and_figures_3d.ipynb`.
+   - **All-in-One Runner (Fast Smoke Testing)**: Import `notebooks/kaggle_runner_3d.ipynb` for 1-click interactive execution and pipeline debugging.
+3. For comprehensive step-by-step instructions, hardware budgeting, and output chaining, see [docs/kaggle_guide.md](docs/kaggle_guide.md).
 
 ---
 

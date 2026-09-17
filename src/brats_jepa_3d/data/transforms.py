@@ -38,7 +38,7 @@ class RandomModalityDropout3D(nn.Module):
         if not is_batched:
             image = image.unsqueeze(0)
 
-        B, C, D, H, W = image.shape
+        B, C = image.shape[0], image.shape[1]
         out = image.clone()
 
         for b in range(B):
@@ -105,3 +105,47 @@ class VolumetricAugmentations3D:
         image = self.modality_dropout(image)
 
         return image, mask
+
+
+def apply_rician_noise_3d(image: torch.Tensor, sigma: float = 0.10) -> torch.Tensor:
+    r"""
+    Simulates 3D MRI quadrature Rician noise while preserving tissue contrast
+    on Z-score normalized volumetric MRI scans.
+
+    Mathematical Formulation (Gudbjartsson & Patz, 1995):
+        M = \sqrt{(X + \eta_1)^2 + \eta_2^2}, \quad \eta_1, \eta_2 \sim \mathcal{N}(0, \sigma^2)
+    """
+    brain_mask = image != 0
+    if not brain_mask.any():
+        return image
+
+    min_val = image[brain_mask].min()
+    # Shift non-zero brain parenchyma so min intensity is non-negative
+    shifted = image - min_val if min_val < 0 else image
+    eta1 = torch.randn_like(image) * sigma
+    eta2 = torch.randn_like(image) * sigma
+    noisy_shifted = torch.sqrt((shifted + eta1) ** 2 + eta2**2)
+    noisy = noisy_shifted + min_val if min_val < 0 else noisy_shifted
+    return torch.where(brain_mask, noisy, torch.zeros_like(image))
+
+
+def apply_b1_bias_field_3d(image: torch.Tensor, strength: float = 0.3) -> torch.Tensor:
+    r"""
+    Applies smooth multiplicative 3D B1 radiofrequency transmit/receive bias field.
+
+    Mathematical Formulation (Sled et al., 1998; Lebrun et al., 2021):
+        X_{corrupt} = X \cdot (1 + \sum_{i+j+k \le 2} c_{ijk} z^i y^j x^k)
+    """
+    D, H, W = image.shape[-3], image.shape[-2], image.shape[-1]
+    z = torch.linspace(-1, 1, D, device=image.device)
+    y = torch.linspace(-1, 1, H, device=image.device)
+    x = torch.linspace(-1, 1, W, device=image.device)
+    grid_z, grid_y, grid_x = torch.meshgrid(z, y, x, indexing="ij")
+
+    # Smooth 2nd-order polynomial field
+    bias = 1.0 + strength * (
+        0.5 * grid_z + 0.3 * grid_y - 0.4 * grid_x + 0.2 * (grid_z**2 + grid_y**2 + grid_x**2)
+    )
+    if image.dim() == 5:
+        return image * bias.unsqueeze(0).unsqueeze(0)
+    return image * bias.unsqueeze(0)

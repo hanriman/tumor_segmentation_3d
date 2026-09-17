@@ -28,7 +28,13 @@ from brats_jepa_3d.models import (
     BraTS3DUNet,
     JEPASegmentationModel3D,
 )
-from brats_jepa_3d.utils import get_autocast_context, get_device, set_seed, setup_logger
+from brats_jepa_3d.utils import (
+    get_autocast_context,
+    get_device,
+    set_seed,
+    setup_logger,
+    sort_checkpoints_by_epoch,
+)
 
 
 def parse_args():
@@ -36,6 +42,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
+    parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     parser.add_argument(
         "--model_type",
@@ -209,19 +216,27 @@ def main():
         elif model_type == "nnunet_3d":
             ckpt_file = CHECKPOINTS_DIR / "nnunet_3d_best.pt"
         else:
-            ckpt_file = CHECKPOINTS_DIR / f"{model_type}_{decoder_type}_best.pt"
-            if not ckpt_file.exists():
-                candidates = sorted(CHECKPOINTS_DIR.glob(f"{model_type}*.pt"))
-                if candidates:
-                    ckpt_file = candidates[-1]
+            downstream_ckpts = sorted(CHECKPOINTS_DIR.glob(f"{model_type}_{decoder_type}_best.pt")) or sorted(
+                CHECKPOINTS_DIR.glob(f"{model_type}*best.pt")
+            )
+            pretrain_ckpts = sort_checkpoints_by_epoch(
+                list(CHECKPOINTS_DIR.glob(f"{model_type}*epoch*.pt"))
+            )
+            if downstream_ckpts:
+                ckpt_file = downstream_ckpts[-1]
+            elif pretrain_ckpts:
+                ckpt_file = pretrain_ckpts[-1]
+            else:
+                ckpt_file = CHECKPOINTS_DIR / f"{model_type}_{decoder_type}_best.pt"
 
         if model_type == "unet_3d":
             model = BraTS3DUNet(in_channels=4, out_channels=1).to(device)
             if ckpt_file.exists():
-                logger.info(f"Loading weights from {ckpt_file}")
-                model.load_state_dict(
-                    torch.load(ckpt_file, map_location=device)["model_state_dict"], strict=False
-                )
+                sd = torch.load(ckpt_file, map_location=device)
+                sd = sd.get("model_state_dict", sd)
+                missing, _unexpected = model.load_state_dict(sd, strict=False)
+                matched = [k for k in model.state_dict() if k not in missing]
+                logger.info(f"Loaded {label} weights from {ckpt_file.name} ({len(matched)} matched keys)")
             else:
                 logger.warning(
                     f"Checkpoint for {label} not found at {ckpt_file}. Evaluating initialized weights."
@@ -229,12 +244,13 @@ def main():
             erank, cossim = "-", "-"
 
         elif model_type == "nnunet_3d":
-            model = BraTS3DnnUNet(in_channels=4, out_channels=1).to(device)
+            model = BraTS3DnnUNet(in_channels=4, out_channels=1, deep_supervision=True).to(device)
             if ckpt_file.exists():
-                logger.info(f"Loading weights from {ckpt_file}")
-                model.load_state_dict(
-                    torch.load(ckpt_file, map_location=device)["model_state_dict"], strict=False
-                )
+                sd = torch.load(ckpt_file, map_location=device)
+                sd = sd.get("model_state_dict", sd)
+                missing, _unexpected = model.load_state_dict(sd, strict=False)
+                matched = [k for k in model.state_dict() if k not in missing]
+                logger.info(f"Loaded {label} weights from {ckpt_file.name} ({len(matched)} matched keys)")
             else:
                 logger.warning(
                     f"Checkpoint for {label} not found at {ckpt_file}. Evaluating initialized weights."
@@ -248,11 +264,25 @@ def main():
                 out_channels=1,
                 decoder_type=decoder_type or "multiscale",
             ).to(device)
-            if ckpt_file.exists():
-                logger.info(f"Loading weights from {ckpt_file}")
-                model.load_state_dict(
-                    torch.load(ckpt_file, map_location=device)["model_state_dict"], strict=False
-                )
+            if ckpt_file and ckpt_file.exists():
+                sd = torch.load(ckpt_file, map_location=device)
+                sd = sd.get("model_state_dict", sd)
+                has_downstream = any(k.startswith("encoder.") for k in sd) or any(k.startswith("decoder.") for k in sd)
+                has_pretrain = any(k.startswith("context_encoder.") for k in sd)
+                if has_downstream:
+                    missing, _unexpected = model.load_state_dict(sd, strict=False)
+                    matched = [k for k in model.state_dict() if k not in missing]
+                    logger.info(f"Loaded downstream fine-tuned weights from {ckpt_file.name} ({len(matched)} matched keys)")
+                elif has_pretrain:
+                    res = model.load_pretrained_encoder(sd)
+                    logger.warning(
+                        f"Loaded pre-trained encoder weights from {ckpt_file.name} ({res['loaded_keys']} keys), "
+                        f"but decoder is randomly initialized."
+                    )
+                else:
+                    missing, _unexpected = model.load_state_dict(sd, strict=False)
+                    matched = [k for k in model.state_dict() if k not in missing]
+                    logger.info(f"Loaded weights from {ckpt_file.name} ({len(matched)} matched keys)")
             else:
                 logger.warning(
                     f"Checkpoint for {label} not found at {ckpt_file}. Evaluating initialized weights."
@@ -298,7 +328,7 @@ def main():
                 else:
                     df_old = pd.concat([df_old, pd.DataFrame([row])], ignore_index=True)
             df = df_old
-        except Exception:
+        except (ValueError, KeyError, OSError, pd.errors.EmptyDataError):
             df = df_new
     else:
         df = df_new

@@ -131,7 +131,7 @@ where $\mu_{c, p}$ and $\sigma_{c, p}$ are the empirical mean and standard devia
 In clinical neuro-oncology, complete four-sequence protocols are frequently compromised by patient motion, acquisition time limits, or contraindications to gadolinium contrast. To instill intrinsic robustness to missing sequences, volumes undergo Random Modality Dropout during training: each sequence channel is independently zeroed out with probability $p_{\text{drop}} = 0.25$. A deterministic fallback ensures that if all four channels are dropped, one channel is randomly preserved, preventing completely empty inputs~\citep{havaei2017brain}.
 
 \paragraph{Patient-Level Stratified Partitioning}
-To guarantee zero data contamination, dataset partitioning is enforced strictly at the \textbf{patient volume level}: $\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{val}} = \emptyset$ and $\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{test}} = \emptyset$. Patients are stratified into tumor volume quartiles before split assignment ($70\%$ train, $10\%$ val, $20\%$ test), ensuring that tumor size distributions are strictly invariant across splits.
+To guarantee zero data contamination, dataset partitioning is enforced strictly at the \textbf{patient volume level}: $\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{val}} = \emptyset$ and $\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{test}} = \emptyset$. Patients are stratified into tumor volume quartiles before split assignment ($70\%$ train, $15\%$ val, $15\%$ test), ensuring that tumor size distributions are strictly invariant across splits.
 
 \subsection{3D VisReg JEPA Formulation}
 \label{sec:visreg_formulation}
@@ -163,10 +163,11 @@ The prediction loss is computed via Smooth $L_1$ (Huber) loss against asymmetric
 \paragraph{Decoupled Center-Scale-Shape Regularization}
 To isolate non-collapse regularization from spatial representations, context tokens are mapped through a 2-layer Projector MLP: $g_\psi: \mathbb{R}^{384} \to \mathbb{R}^{1024} \to \mathbb{R}^{d_p}$ ($d_p = 128$). The projected tokens $\mathbf{Z} \in \mathbb{R}^{T \times d_p}$ ($T = B \cdot N_{\text{ctx}}$) undergo decoupled optimal transport regularization:
 \begin{enumerate}
-    \item \textbf{Batch Centering}: Features are centered per channel across all tokens in the mini-batch:
+    \item \textbf{Center Regularization ($\mathcal{L}_{\text{center}}$)}: Mean feature vectors $\boldsymbol{\mu}_z = \frac{1}{T}\sum_{j=1}^T \mathbf{z}_j$ are penalized to enforce zero-centered representations:
     \begin{equation}
-        \mathbf{z}_{c, i} = \mathbf{z}_i - \frac{1}{T}\sum_{j=1}^T \mathbf{z}_j
+        \mathcal{L}_{\text{center}}(\mathbf{Z}) = \frac{1}{d_p} \|\boldsymbol{\mu}_z\|_2^2
     \end{equation}
+    Centered features are then defined as $\mathbf{z}_{c, i} = \mathbf{z}_i - \boldsymbol{\mu}_z$.
     \item \textbf{Coordinate Scale Regularization ($\mathcal{L}_{\text{scale}}$)}: Channel standard deviations $\sigma_d = \sqrt{\frac{1}{T}\sum_i z_{c, i, d}^2 + \epsilon}$ are anchored to unit variance via a two-sided squared penalty:
     \begin{equation}
         \mathcal{L}_{\text{scale}}(\mathbf{Z}) = \frac{1}{d_p} \sum_{d=1}^{d_p} (1.0 - \sigma_d)^2
@@ -183,7 +184,7 @@ To isolate non-collapse regularization from spatial representations, context tok
 \end{enumerate}
 The total 3D VisReg pre-training objective is:
 \begin{equation}
-    \mathcal{L}_{\text{VisReg}} = \mathcal{L}_{\text{pred}} + \lambda_{\text{scale}} \mathcal{L}_{\text{scale}} + \lambda_{\text{shape}} \mathcal{L}_{\text{shape}}, \qquad \lambda_{\text{scale}} = 1.0, \, \lambda_{\text{shape}} = 1.0
+    \mathcal{L}_{\text{VisReg}} = \mathcal{L}_{\text{pred}} + \lambda_{\text{center}} \mathcal{L}_{\text{center}} + \lambda_{\text{scale}} \mathcal{L}_{\text{scale}} + \lambda_{\text{shape}} \mathcal{L}_{\text{shape}}, \qquad \lambda_{\text{center}} = 1.0, \, \lambda_{\text{scale}} = 1.0, \, \lambda_{\text{shape}} = 1.0
 \end{equation}
 Following pre-training, the Projector MLP $g_\psi$ is discarded, and the ViT backbone is transferred to downstream volumetric segmentation.
 
@@ -262,7 +263,7 @@ Table~\ref{tab:benchmark_results} presents the full-data evaluation on the held-
 
 \begin{table}[ht]
 \centering
-\caption{Full-data empirical benchmark comparison of throughput, forward latency, and downstream volumetric segmentation metrics on 3D multi-modal BraTS Glioma MRI under Random Modality Dropout ($p_{\text{drop}} = 0.25$). Evaluated on the held-out test split ($N=362$ volumes) following full GPU training with AMP. Best per column is in \textbf{bold}.}
+\caption{Full-data empirical benchmark comparison of throughput, forward latency, and downstream volumetric segmentation metrics on 3D multi-modal BraTS Glioma MRI under Random Modality Dropout ($p_{\text{drop}} = 0.25$). Evaluated on the held-out test split ($N=362$ volumes) following full GPU training with AMP. Effective Spectral Rank ($\text{erank}$) is evaluated on the $128$-dimensional pre-training projector representation ($D_{\text{proj}} = 128$). Best per column is in \textbf{bold}.}
 \label{tab:benchmark_results}
 \vspace{0.5em}
 \resizebox{\textwidth}{!}{%

@@ -42,7 +42,6 @@ class PatchEmbed3D(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: [B, C, D, H, W] -> proj: [B, embed_dim, G_d, G_h, G_w] -> [B, N, embed_dim]
-        B, C, D, H, W = x.shape
         feat = self.proj(x)
         tokens = feat.flatten(2).transpose(1, 2)
         return tokens

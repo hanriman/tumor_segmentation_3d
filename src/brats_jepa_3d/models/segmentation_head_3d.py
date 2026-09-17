@@ -55,7 +55,7 @@ class ViTSegmentationDecoder3D(nn.Module):
 
     def forward(self, patch_tokens: torch.Tensor) -> torch.Tensor:
         # patch_tokens: [B, N=512, D=384] -> [B, D, 8, 8, 8]
-        B, N, D = patch_tokens.shape
+        B, _N, D = patch_tokens.shape
         gz, gy, gx = self.grid_size
         x = patch_tokens.permute(0, 2, 1).reshape(B, D, gz, gy, gx)
         return self.decoder(x)
@@ -132,9 +132,12 @@ class MultiScaleViTSegmentationDecoder3D(nn.Module):
             nn.GroupNorm(4, 48),
             nn.GELU(),
         )
-        # Skip connection from L2 (8^3 -> 64^3 via 8x transpose conv)
+        # Skip connection from L2 (8^3 -> 32^3 -> 64^3 via progressive transpose convs)
         self.skip_l2 = nn.Sequential(
-            nn.ConvTranspose3d(in_dim, 48, kernel_size=8, stride=8),
+            nn.ConvTranspose3d(in_dim, 96, kernel_size=4, stride=4),
+            nn.GroupNorm(8, 96),
+            nn.GELU(),
+            nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
             nn.GroupNorm(4, 48),
             nn.GELU(),
         )
@@ -161,7 +164,7 @@ class MultiScaleViTSegmentationDecoder3D(nn.Module):
 
     def _tokens_to_spatial(self, tokens: torch.Tensor) -> torch.Tensor:
         """Converts [B, N=512, D] patch tokens to [B, D, 8, 8, 8] spatial feature map."""
-        B, N, D = tokens.shape
+        B, _N, D = tokens.shape
         gz, gy, gx = self.grid_size
         return tokens.permute(0, 2, 1).reshape(B, D, gz, gy, gx)
 
@@ -260,9 +263,44 @@ class JEPASegmentationModel3D(nn.Module):
             for p in self.encoder.parameters():
                 p.requires_grad = False
 
-    def load_pretrained_encoder(self, encoder_state_dict: dict):
-        """Loads pre-trained SSL JEPA encoder weights."""
-        self.encoder.load_state_dict(encoder_state_dict, strict=False)
+    def load_pretrained_encoder(self, state_dict: dict):
+        r"""
+        Loads pre-trained SSL JEPA encoder weights with robust prefix stripping and validation.
+        Accepts full checkpoint dicts (with 'encoder_state_dict' or 'model_state_dict') or state dicts.
+        Strips common prefixes ('context_encoder.', 'encoder.', 'backbone.', 'module.').
+        Raises RuntimeError if no matching keys are found.
+        """
+        if "encoder_state_dict" in state_dict:
+            raw_dict = state_dict["encoder_state_dict"]
+        elif "model_state_dict" in state_dict:
+            raw_dict = state_dict["model_state_dict"]
+        else:
+            raw_dict = state_dict
+
+        target_keys = set(self.encoder.state_dict().keys())
+        clean_dict = {}
+        prefixes = ("context_encoder.", "encoder.", "backbone.", "module.", "_orig_mod.")
+        for k, v in raw_dict.items():
+            new_k = k
+            changed = True
+            while changed:
+                changed = False
+                for prefix in prefixes:
+                    if new_k.startswith(prefix):
+                        new_k = new_k[len(prefix):]
+                        changed = True
+            if new_k in target_keys:
+                clean_dict[new_k] = v
+
+        if len(clean_dict) == 0:
+            raise RuntimeError(
+                f"No matching encoder weights found in provided state dict. "
+                f"Available keys sample: {list(raw_dict.keys())[:5]}, "
+                f"expected encoder keys sample: {list(target_keys)[:5]}"
+            )
+
+        missing, unexpected = self.encoder.load_state_dict(clean_dict, strict=False)
+        return {"loaded_keys": len(clean_dict), "missing_keys": missing, "unexpected_keys": unexpected}
 
     def train(self, mode: bool = True):
         """Override to keep frozen encoder in eval mode (freezing LayerNorm stats and dropout)."""

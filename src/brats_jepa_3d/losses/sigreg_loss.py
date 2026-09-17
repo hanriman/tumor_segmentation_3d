@@ -64,18 +64,21 @@ class EppsPulleyGaussianityTest(nn.Module):
         """
         proj: [N, K] where N is number of sample tokens, K is number of random 1D projections.
         """
-        t = self.t.to(device=proj.device, dtype=proj.dtype)
-        phi = self.phi.to(device=proj.device, dtype=proj.dtype)
-        weights = self.weights.to(device=proj.device, dtype=proj.dtype)
+        # Ensure calculations run in float32 to prevent numerical underflow under FP16/AMP
+        orig_dtype = proj.dtype
+        proj_f32 = proj.float()
+        t = self.t.to(device=proj.device, dtype=torch.float32)
+        phi = self.phi.to(device=proj.device, dtype=torch.float32)
+        weights = self.weights.to(device=proj.device, dtype=torch.float32)
 
-        x_t = proj.unsqueeze(-1) * t  # [N, K, Q]
+        x_t = proj_f32.unsqueeze(-1) * t  # [N, K, Q]
         ecf_real = x_t.cos().mean(dim=0)  # [K, Q]
         ecf_imag = x_t.sin().mean(dim=0)  # [K, Q]
         err = (ecf_real - phi).square() + ecf_imag.square()  # [K, Q]
 
         # Multiply by sample count N = proj.size(0) to cancel the 1/N factor in d(ecf)/dz
         statistic = (err @ weights) * proj.shape[0]  # [K]
-        return statistic.mean()
+        return statistic.mean().to(dtype=orig_dtype)
 
 
 class SigRegLoss(nn.Module):
@@ -124,15 +127,16 @@ class SigRegLoss(nn.Module):
         z = reg_tokens.reshape(-1, reg_tokens.shape[-1])
         _N, D = z.shape
 
-        # Sample M random projection directions on unit hypersphere
-        A = torch.randn(D, self.num_projections, device=z.device, dtype=z.dtype)
+        # Sample M random projection directions on unit hypersphere in float32
+        # to ensure isotropic distribution without half-precision artifacts
+        A = torch.randn(D, self.num_projections, device=z.device, dtype=torch.float32)
         A = F.normalize(A, p=2, dim=0)  # [D, M]
 
-        # 1D projections: [N, M]
-        proj = z @ A
+        # 1D projections: [N, M] in float32
+        proj = z.float() @ A
 
         sigreg_val = self.ep_test(proj)
-        total_loss = j_loss + self.sigreg_weight * sigreg_val
+        total_loss = j_loss + self.sigreg_weight * sigreg_val.to(dtype=j_loss.dtype)
 
         return {
             "loss": total_loss,

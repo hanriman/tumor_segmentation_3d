@@ -61,3 +61,17 @@ class MetricTracker:
         path.parent.mkdir(parents=True, exist_ok=True)
         df = pd.DataFrame(self.history)
         df.to_csv(path, index=False)
+
+
+def sort_checkpoints_by_epoch(checkpoint_paths: list[Path]) -> list[Path]:
+    r"""
+    Sorts checkpoint paths numerically by epoch number extracted from filename.
+    Avoids lexicographical sorting bugs where 'epoch_100.pt' sorts before 'epoch_50.pt'.
+    """
+    import re
+
+    def extract_epoch(p: Path) -> int:
+        match = re.search(r"epoch_(\d+)", p.stem)
+        return int(match.group(1)) if match else 0
+
+    return sorted(checkpoint_paths, key=extract_epoch)

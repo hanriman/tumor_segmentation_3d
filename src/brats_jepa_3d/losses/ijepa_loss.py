@@ -33,7 +33,7 @@ class IJEPALoss(nn.Module):
 
         for pred, tgt in zip(predictions, targets):
             # Apply LayerNorm to target representations to stabilize target scale
-            tgt_norm = F.layer_norm(tgt, (tgt.shape[-1],))
+            tgt_norm = F.layer_norm(tgt.detach(), (tgt.shape[-1],))
 
             if self.loss_type == "smooth_l1":
                 block_loss = F.smooth_l1_loss(pred, tgt_norm, beta=self.beta)

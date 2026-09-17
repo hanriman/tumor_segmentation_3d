@@ -28,6 +28,7 @@ class BraTS3DDataset(Dataset):
         masking_transform: Callable | None = None,
         augmentations: Callable | None = None,
         cache_in_ram: bool = False,
+        max_cache_size: int = 200,
         fraction: float = 1.0,
         seed: int = 42,
     ):
@@ -37,6 +38,7 @@ class BraTS3DDataset(Dataset):
         self.masking_transform = masking_transform
         self.augmentations = augmentations
         self.cache_in_ram = cache_in_ram
+        self.max_cache_size = max_cache_size
 
         metadata_file = self.data_dir / "metadata.csv"
         if not metadata_file.exists():
@@ -77,10 +79,10 @@ class BraTS3DDataset(Dataset):
                 raise FileNotFoundError(f"Volume file not found: {file_path}")
 
         with np.load(file_path, mmap_mode="r") as data:
-            image = torch.from_numpy(data["image"].astype(np.float32))  # [4, 128, 128, 128]
-            mask = torch.from_numpy(data["mask"].astype(np.float32))  # [1, 128, 128, 128]
+            image = torch.from_numpy(data["image"].astype(np.float32).copy())  # [4, 128, 128, 128]
+            mask = torch.from_numpy(data["mask"].astype(np.float32).copy())  # [1, 128, 128, 128]
 
-        if self.cache_in_ram:
+        if self.cache_in_ram and len(self.cache) < self.max_cache_size:
             self.cache[idx] = (image, mask)
 
         return image, mask

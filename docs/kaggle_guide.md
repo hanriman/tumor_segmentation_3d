@@ -100,7 +100,7 @@ Once Jobs 1, 2, and 3 are finished:
    - Evaluate Out-of-Distribution (OOD) shifts (3D Rician noise $\sigma=0.08$, $B_1$ field bias).
    - Evaluate Emergency Triage under missing pulse sequences (T1c-only, FLAIR-only).
    - Generate multi-planar orthogonal tumor visualizations (Axial, Coronal, Sagittal).
-   - Generate all publication-grade figures matching [`paper/latex_visreg/`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/paper/latex_visreg/) in both vector PDF and high-res PNG.
+   - Generate all publication-grade figures matching [`paper/latex/`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/paper/latex/) in both vector PDF and high-res PNG.
    - Package everything into **`paper_artifacts.zip`** for instant 1-click download.
 
 ---

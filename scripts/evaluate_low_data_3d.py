@@ -13,10 +13,16 @@ from torch.utils.data import DataLoader
 
 from brats_jepa_3d.config import CHECKPOINTS_DIR, METRICS_DIR, ensure_directories
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
-from brats_jepa_3d.losses import CombinedDiceBCELoss3D
+from brats_jepa_3d.losses import CombinedDiceBCELoss3D, DeepSupervisionLoss3D
 from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
 from brats_jepa_3d.models import BraTS3DnnUNet, BraTS3DUNet, JEPASegmentationModel3D
-from brats_jepa_3d.utils import get_autocast_context, get_device, set_seed, setup_logger
+from brats_jepa_3d.utils import (
+    get_autocast_context,
+    get_device,
+    set_seed,
+    setup_logger,
+    sort_checkpoints_by_epoch,
+)
 
 
 def parse_args():
@@ -28,6 +34,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
+    parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
 
@@ -41,8 +48,25 @@ def train_and_eval(
     amp: bool = True,
     smoke_test: bool = False,
 ) -> float:
-    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-4)
-    criterion = CombinedDiceBCELoss3D()
+    use_deep_supervision = getattr(model, "deep_supervision", False)
+    criterion = DeepSupervisionLoss3D() if use_deep_supervision else CombinedDiceBCELoss3D()
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(trainable_params, lr=3e-4, weight_decay=1e-4)
+
+    warmup_epochs = max(1, min(3, epochs // 5)) if epochs > 1 else 0
+    if epochs > 1 and warmup_epochs > 0:
+        warmup_sched = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=0.1, total_iters=warmup_epochs
+        )
+        cosine_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs - warmup_epochs, eta_min=1e-6
+        )
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer, schedulers=[warmup_sched, cosine_sched], milestones=[warmup_epochs]
+        )
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
+
     scaler = torch.amp.GradScaler(
         device="cuda" if device.type == "cuda" else "cpu", enabled=amp and device.type == "cuda"
     )
@@ -56,19 +80,23 @@ def train_and_eval(
             optimizer.zero_grad()
             with get_autocast_context(device, enabled=amp):
                 out = model(images)
-                logits = out[0] if isinstance(out, (list, tuple)) else out
-                loss = criterion(logits, masks)["loss"]
+                loss = criterion(out, masks)["loss"]
 
             if scaler.is_enabled():
                 scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
                 optimizer.step()
 
             if smoke_test and batch_idx >= 1:
                 break
+
+        scheduler.step()
         if smoke_test:
             break
 
@@ -118,21 +146,13 @@ def main():
     def build_model(name: str):
         if name == "3D VisReg JEPA (FPN)":
             m = JEPASegmentationModel3D(decoder_type="multiscale")
-            ckpts = sorted(CHECKPOINTS_DIR.glob("visreg_jepa*epoch*.pt")) + sorted(
-                CHECKPOINTS_DIR.glob("visreg_jepa*.pt")
-            )
+            ckpts = sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob("visreg_jepa*epoch*.pt")))
             if ckpts:
                 ckpt_path = ckpts[-1]
                 ckpt = torch.load(ckpt_path, map_location=device)
-                enc_dict = ckpt.get("encoder_state_dict", ckpt.get("model_state_dict"))
-                clean_dict = {
-                    k.replace("context_encoder.", ""): v
-                    for k, v in enc_dict.items()
-                    if "context_encoder" in k or k in m.encoder.state_dict()
-                }
-                m.load_pretrained_encoder(clean_dict if clean_dict else enc_dict)
+                res = m.load_pretrained_encoder(ckpt)
                 logger.info(
-                    f"Initialized {name} with pre-trained encoder weights from: {ckpt_path.name}"
+                    f"Initialized {name} with pre-trained encoder weights from: {ckpt_path.name} ({res['loaded_keys']} keys)"
                 )
             else:
                 logger.warning(
@@ -142,21 +162,13 @@ def main():
 
         elif name == "3D SigReg JEPA (FPN)":
             m = JEPASegmentationModel3D(decoder_type="multiscale")
-            ckpts = sorted(CHECKPOINTS_DIR.glob("sigreg_jepa*epoch*.pt")) + sorted(
-                CHECKPOINTS_DIR.glob("sigreg_jepa*.pt")
-            )
+            ckpts = sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob("sigreg_jepa*epoch*.pt")))
             if ckpts:
                 ckpt_path = ckpts[-1]
                 ckpt = torch.load(ckpt_path, map_location=device)
-                enc_dict = ckpt.get("encoder_state_dict", ckpt.get("model_state_dict"))
-                clean_dict = {
-                    k.replace("context_encoder.", ""): v
-                    for k, v in enc_dict.items()
-                    if "context_encoder" in k or k in m.encoder.state_dict()
-                }
-                m.load_pretrained_encoder(clean_dict if clean_dict else enc_dict)
+                res = m.load_pretrained_encoder(ckpt)
                 logger.info(
-                    f"Initialized {name} with pre-trained encoder weights from: {ckpt_path.name}"
+                    f"Initialized {name} with pre-trained encoder weights from: {ckpt_path.name} ({res['loaded_keys']} keys)"
                 )
             else:
                 logger.warning(
@@ -165,7 +177,7 @@ def main():
             return m.to(device)
 
         elif name == "3D nnU-Net":
-            return BraTS3DnnUNet(deep_supervision=False).to(device)
+            return BraTS3DnnUNet(deep_supervision=True).to(device)
 
         elif name == "3D UNet":
             return BraTS3DUNet().to(device)

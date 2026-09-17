@@ -27,6 +27,7 @@ from brats_jepa_3d.utils import (
     get_device,
     set_seed,
     setup_logger,
+    sort_checkpoints_by_epoch,
 )
 
 
@@ -54,6 +55,7 @@ def parse_args():
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
+    parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
 
@@ -149,32 +151,49 @@ def main():
         deep_supervision=args.deep_supervision,
     ).to(device)
 
-    # Load pre-trained encoder checkpoint if specified
+    # Load pre-trained encoder checkpoint if specified or auto-discover
+    ckpt_path = None
     if args.pretrained_checkpoint:
         ckpt_path = Path(args.pretrained_checkpoint)
-        if ckpt_path.exists():
-            ckpt = torch.load(ckpt_path, map_location=device)
-            enc_dict = ckpt.get("encoder_state_dict", ckpt.get("model_state_dict"))
-            # Filter encoder keys if necessary
-            clean_dict = {
-                k.replace("context_encoder.", ""): v
-                for k, v in enc_dict.items()
-                if "context_encoder" in k or k in model.encoder.state_dict()
-            }
-            model.load_pretrained_encoder(clean_dict if clean_dict else enc_dict)
-            logger.info(f"Loaded pre-trained encoder weights from: {ckpt_path}")
-        else:
-            logger.warning(
-                f"Pretrained checkpoint not found at: {ckpt_path}. Training from random initialization."
-            )
+    else:
+        candidates = sort_checkpoints_by_epoch(
+            list(CHECKPOINTS_DIR.glob(f"{args.model_type}_3d_epoch_*.pt"))
+        )
+        if candidates:
+            ckpt_path = candidates[-1]
+
+    if ckpt_path and ckpt_path.exists():
+        ckpt = torch.load(ckpt_path, map_location=device)
+        res = model.load_pretrained_encoder(ckpt)
+        logger.info(
+            f"Loaded pre-trained encoder weights from {ckpt_path} ({res['loaded_keys']} keys matched)"
+        )
+    else:
+        logger.info("No pre-trained checkpoint specified or found. Training encoder from random initialization.")
 
     criterion = DeepSupervisionLoss3D() if args.deep_supervision else CombinedDiceBCELoss3D()
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(
-        [p for p in model.parameters() if p.requires_grad],
+        trainable_params,
         lr=args.learning_rate,
         weight_decay=args.weight_decay,
     )
     epochs = 1 if args.smoke_test else args.epochs
+
+    warmup_epochs = max(1, min(5, epochs // 5)) if epochs > 1 else 0
+    if epochs > 1 and warmup_epochs > 0:
+        warmup_sched = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=0.1, total_iters=warmup_epochs
+        )
+        cosine_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs - warmup_epochs, eta_min=1e-6
+        )
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer, schedulers=[warmup_sched, cosine_sched], milestones=[warmup_epochs]
+        )
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
+
     scaler = torch.amp.GradScaler(
         device="cuda" if device.type == "cuda" else "cpu",
         enabled=args.amp and device.type == "cuda",
@@ -201,10 +220,13 @@ def main():
 
             if scaler.is_enabled():
                 scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
                 optimizer.step()
 
             train_loss += loss.item()
@@ -214,16 +236,19 @@ def main():
             if args.smoke_test and batch_idx >= 1:
                 break
 
+        scheduler.step()
         val_metrics = evaluate(model, val_loader, device, amp=args.amp, smoke_test=args.smoke_test)
         avg_train_loss = train_loss / max(1, num_batches)
+        current_lr = scheduler.get_last_lr()[0]
         logger.info(
-            f"Epoch {epoch}/{epochs} - Train Loss: {avg_train_loss:.4f} | "
+            f"Epoch {epoch}/{epochs} - LR: {current_lr:.6f} | Train Loss: {avg_train_loss:.4f} | "
             f"Val Dice: {val_metrics['val_dice']:.4f} | Val HD95: {val_metrics['val_hd95']:.2f} mm"
         )
 
         tracker.update(
             {
                 "epoch": epoch,
+                "lr": current_lr,
                 "train_loss": avg_train_loss,
                 **val_metrics,
             }

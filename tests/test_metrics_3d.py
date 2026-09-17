@@ -90,3 +90,69 @@ def test_compute_volumetric_metrics_3d():
     assert "iou" in res
     assert "hd95" in res
     assert len(res["dice_per_sample"]) == 2
+
+
+def test_effective_rank_identity_covariance():
+    """Effective rank of N(0, I_D) should approach D."""
+    torch.manual_seed(0)
+    D = 32
+    z = torch.randn(2000, D)  # Large sample from N(0, I_D)
+    erank = compute_effective_rank(z)
+    assert erank >= 0.85 * D, f"Expected erank >= {0.85 * D} for identity cov, got {erank}"
+
+
+def test_effective_rank_known_rank():
+    """Effective rank of a rank-k matrix should be close to k."""
+    torch.manual_seed(0)
+    N, D, k = 500, 64, 5
+    # Create rank-k data: N samples in a k-dimensional subspace
+    U = torch.randn(N, k)
+    V = torch.randn(k, D)
+    z = U @ V
+    erank = compute_effective_rank(z)
+    assert erank <= k + 1.5, f"Expected erank close to {k}, got {erank}"
+    assert erank >= k - 1.5, f"Expected erank close to {k}, got {erank}"
+
+
+def test_representation_collapse_detection():
+    """Collapsed representations should show high uncentered cosine similarity and low effective rank."""
+    torch.manual_seed(42)
+    u = torch.randn(1, 32)
+    u = u / torch.norm(u)
+
+    # 1. Directional collapse: representations lie along a single 1D ray
+    scalars = torch.randn(100, 1) + 10.0
+    z_directional = scalars @ u
+    metrics_dir = compute_representation_collapse_metrics(z_directional)
+    assert metrics_dir["avg_cosine_sim"] > 0.95, (
+        f"Expected high uncentered cosine sim for directional collapse, got {metrics_dir['avg_cosine_sim']}"
+    )
+    assert metrics_dir["effective_rank"] <= 1.5, (
+        f"Expected effective rank <= 1.5 for 1D collapse, got {metrics_dir['effective_rank']}"
+    )
+
+    # 2. Point collapse: all representations identical
+    z_point = u.repeat(100, 1)
+    metrics_pt = compute_representation_collapse_metrics(z_point)
+    assert metrics_pt["feature_variance"] < 1e-6
+    assert metrics_pt["effective_rank"] <= 1.5
+
+
+def test_effective_rank_3d_tensor_bound():
+    """Effective rank of a 3D batched token tensor must respect erank <= D."""
+    torch.manual_seed(42)
+    B, T, D = 2, 512, 384
+    z_3d = torch.randn(B, T, D)
+
+    erank_3d = compute_effective_rank(z_3d)
+    erank_2d = compute_effective_rank(z_3d.reshape(-1, D))
+
+    # 1. Theoretical bound: erank <= min(N, D) = 384
+    assert erank_3d <= D, f"Effective rank {erank_3d} exceeds feature dimension D={D}!"
+
+    # 2. Consistency: 3D input should equal flattened 2D input
+    assert abs(erank_3d - erank_2d) < 1e-4, f"Mismatch: {erank_3d} vs {erank_2d}"
+
+    # 3. For standard normal isotropic tokens, erank should be large (>= 0.80 * D for D/N=0.375)
+    assert erank_3d >= 0.80 * D, f"Expected isotropic tokens to have erank >= {0.80 * D}, got {erank_3d}"
+

@@ -9,11 +9,12 @@ import subprocess
 import sys
 
 from brats_jepa_3d.config import PROJECT_ROOT
+from brats_jepa_3d.utils import sort_checkpoints_by_epoch
 
 
 def run_cmd(cmd_list: list[str]):
     print(f"\n[RUNNING]: {' '.join(cmd_list)}")
-    res = subprocess.run(cmd_list, cwd=str(PROJECT_ROOT))
+    res = subprocess.run(cmd_list, cwd=str(PROJECT_ROOT), check=False)
     if res.returncode != 0:
         print(f"[ERROR]: Command failed with exit code {res.returncode}")
         sys.exit(res.returncode)
@@ -40,7 +41,9 @@ def main():
     run_cmd([py, "scripts/train_jepa_3d.py", "--model_type", "sigreg_jepa"] + smoke_flag)
 
     # 3. Downstream Fine-tuning
-    sigreg_ckpts = sorted((PROJECT_ROOT / "outputs/checkpoints").glob("sigreg_jepa_3d_epoch_*.pt"))
+    sigreg_ckpts = sort_checkpoints_by_epoch(
+        list((PROJECT_ROOT / "outputs/checkpoints").glob("sigreg_jepa_3d_epoch_*.pt"))
+    )
     pretrained_arg = ["--pretrained_checkpoint", str(sigreg_ckpts[-1])] if sigreg_ckpts else []
     run_cmd(
         [

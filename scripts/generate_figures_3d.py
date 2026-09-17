@@ -127,7 +127,7 @@ def plot_benchmark_metrics(metrics_csv: Path, out_dir: Path):
     hd95s = [float(str(v).split("±")[0].strip()) for v in df["HD95 (mm)"]]
     latencies = [float(v) for v in df["Latency (ms)"]]
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    _fig, axes = plt.subplots(1, 3, figsize=(18, 5))
     colors = ["#2A9D8F", "#E76F51", "#F4A261", "#457B9D", "#1D3557"]
 
     # 1. 3D Dice Score
@@ -210,7 +210,7 @@ def plot_ood_robustness(ood_csv: Path, out_dir: Path):
     width = 0.8 / len(models)
     colors = ["#2A9D8F", "#E76F51", "#1D3557", "#457B9D"]
 
-    fig, ax = plt.subplots(figsize=(12, 6))
+    _fig, ax = plt.subplots(figsize=(12, 6))
     for i, model_col in enumerate(models):
         vals = [float(str(v).replace("%", "")) for v in df[model_col]]
         ax.bar(x + i * width, vals, width, label=model_col, color=colors[i % len(colors)])
