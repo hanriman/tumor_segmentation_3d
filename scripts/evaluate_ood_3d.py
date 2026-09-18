@@ -51,6 +51,7 @@ from brats_jepa_3d.utils import (
 def parse_args():
     parser = argparse.ArgumentParser(description="3D OOD Scanner Shift Benchmark")
     parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
     parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
@@ -112,7 +113,12 @@ def main():
             }
             for _ in range(2)
         ]
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+    )
 
     all_models = [
         ("3D VisReg JEPA (FPN)", "visreg_jepa"),

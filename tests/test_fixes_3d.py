@@ -807,6 +807,47 @@ def test_incremental_csv_merging(tmp_path):
     assert existing_df.loc[existing_df["Fraction"] == "1.0%", "3D VisReg JEPA (FPN)"].values[0] == "6.79%"
 
 
+def test_seed_and_num_workers_environment_overrides(monkeypatch):
+    """Verify that BRATS3D_SEED and BRATS3D_NUM_WORKERS env vars correctly propagate to configs and PRNG."""
+    from brats_jepa_3d.config import load_yaml_config
+    from brats_jepa_3d.utils.seed import set_seed
+    import argparse
+    import torch
+
+    # Test set_seed with BRATS3D_SEED env var
+    monkeypatch.setenv("BRATS3D_SEED", "99")
+    set_seed()
+    val1 = torch.randn(5)
+    set_seed(99)
+    val2 = torch.randn(5)
+    assert torch.allclose(val1, val2), "BRATS3D_SEED env var should match explicit set_seed(99)"
+
+    # Test merge_config_with_args env var override
+    from brats_jepa_3d.config import merge_config_with_args
+    monkeypatch.setenv("BRATS3D_NUM_WORKERS", "4")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--num_workers", type=int, default=2)
+    args = parser.parse_args([])
+    config = {"seed": 42, "num_workers": 2}
+    merged_args = merge_config_with_args(config, args, cli_args=[])
+    assert merged_args.seed == 99
+    assert merged_args.num_workers == 4
+
+    # Verify evaluate_ood_3d CLI parser supports --num_workers
+    import sys
+    from brats_jepa_3d.config import PROJECT_ROOT
+    scripts_dir = str(PROJECT_ROOT / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from evaluate_ood_3d import parse_args
+    monkeypatch.setattr("sys.argv", ["evaluate_ood_3d.py", "--num_workers", "4", "--seed", "77"])
+    ood_args = parse_args()
+    assert ood_args.num_workers == 4
+    assert ood_args.seed == 77
+
+
+
 
 
 

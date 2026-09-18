@@ -12,7 +12,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 IN_KAGGLE = Path("/kaggle/working").exists() or Path("/kaggle/input").exists()
 IN_COLAB = "google.colab" in sys.modules or (Path("/content").exists() and not IN_KAGGLE)
 
-DEFAULT_NUM_WORKERS = 2 if not sys.platform.startswith("darwin") else 0
+DEFAULT_NUM_WORKERS = int(
+    os.environ.get(
+        "BRATS3D_NUM_WORKERS", 2 if not sys.platform.startswith("darwin") else 0
+    )
+)
+DEFAULT_SEED = int(os.environ.get("BRATS3D_SEED", 42))
 
 # Standard directory locations
 DATA_DIR = PROJECT_ROOT / "data"
@@ -168,5 +173,11 @@ def merge_config_with_args(
             setattr(args, k, v)
         else:
             apply_kv(k, v)
+
+    if "BRATS3D_SEED" in os.environ and "seed" not in explicit_cli_flags:
+        apply_kv("seed", int(os.environ["BRATS3D_SEED"]))
+
+    if "BRATS3D_NUM_WORKERS" in os.environ and "num_workers" not in explicit_cli_flags:
+        apply_kv("num_workers", int(os.environ["BRATS3D_NUM_WORKERS"]))
 
     return args

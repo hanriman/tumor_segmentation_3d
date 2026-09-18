@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 
-def set_seed(seed: int = 42, deterministic: bool = True) -> None:
+def set_seed(seed: int | None = None, deterministic: bool = True) -> None:
     r"""
     Enforces deterministic reproducibility across Python, NumPy, PyTorch CPU, CUDA, and MPS.
 
@@ -18,6 +18,11 @@ def set_seed(seed: int = 42, deterministic: bool = True) -> None:
     Seeds 42, 43, 44 guarantees that all comparative benchmarks operate on statistically identical
     stochastic sequences, ensuring reproducible findings across diverse hardware platforms.
     """
+    if seed is None:
+        seed = int(os.environ.get("BRATS3D_SEED", 42))
+    elif seed == 42 and "BRATS3D_SEED" in os.environ:
+        seed = int(os.environ["BRATS3D_SEED"])
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
