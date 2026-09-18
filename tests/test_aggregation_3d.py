@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 from brats_jepa_3d.utils.aggregation import (
@@ -96,7 +95,7 @@ def mock_experiment_dirs(tmp_path: Path):
 
 
 def test_discover_experiment_directories(mock_experiment_dirs):
-    exp_dirs, tmp_path = mock_experiment_dirs
+    _exp_dirs, tmp_path = mock_experiment_dirs
     discovered = discover_experiment_directories(tmp_path)
     assert len(discovered) == 3
     names = [d.name for d in discovered]

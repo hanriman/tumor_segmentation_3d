@@ -14,10 +14,10 @@ IN_COLAB = "google.colab" in sys.modules or (Path("/content").exists() and not I
 
 DEFAULT_NUM_WORKERS = int(
     os.environ.get(
-        "BRATS3D_NUM_WORKERS", 2 if not sys.platform.startswith("darwin") else 0
+        "BRATS3D_NUM_WORKERS", "2" if not sys.platform.startswith("darwin") else "0"
     )
 )
-DEFAULT_SEED = int(os.environ.get("BRATS3D_SEED", 42))
+DEFAULT_SEED = int(os.environ.get("BRATS3D_SEED", "42"))
 
 # Standard directory locations
 DATA_DIR = PROJECT_ROOT / "data"

@@ -19,7 +19,7 @@ def set_seed(seed: int | None = None, deterministic: bool = True) -> None:
     stochastic sequences, ensuring reproducible findings across diverse hardware platforms.
     """
     if seed is None:
-        seed = int(os.environ.get("BRATS3D_SEED", 42))
+        seed = int(os.environ.get("BRATS3D_SEED", "42"))
     elif seed == 42 and "BRATS3D_SEED" in os.environ:
         seed = int(os.environ["BRATS3D_SEED"])
 

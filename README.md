@@ -67,6 +67,7 @@ thesis_3d/
 │   ├── audit_and_remediation_plan.md    # Formal mathematical audit & verification report
 │   ├── audit_and_remediation_plan_3d.md # Forensic root-cause analysis & code remediation
 │   ├── audit_report_2026-09-18.md       # Exhaustive forensic audit & verification sign-off
+│   ├── audit_findings_2026-09-18_21-15.md # Intermediate implementation and memory hazard findings
 │   ├── downstream_freezing_vs_finetuning.md # Research rationale: full fine-tuning vs frozen probe
 │   ├── implementation_audit_2026-09-17_1458.md # Reference alignment checklist
 │   └── kaggle_guide.md                  # End-to-end Kaggle GPU execution guide
@@ -138,7 +139,7 @@ thesis_3d/
 │   ├── combine_and_generate_paper_artifacts.py # 1-Click master multi-experiment aggregator & LaTeX exporter
 │   └── run_full_pipeline_3d.py   # Master automation orchestrator
 │
-├── tests/                        # Pytest automated test suite (68 unit tests)
+├── tests/                        # Pytest automated test suite (79 unit tests)
 │   ├── conftest.py               # Synthetic 3D volume fixtures
 │   ├── test_data_3d.py           # Dataset, 3D masking collision & BFS verification
 │   ├── test_models_3d.py         # Forward/backward graphs & parameter isolation
@@ -146,7 +147,7 @@ thesis_3d/
 │   ├── test_metrics_3d.py        # 3D Dice, cKDTree 3D HD95, Effective Rank S^2, collapse suite
 │   ├── test_export_3d.py         # Kaggle artifact staging, zip packaging, and input unzipping
 │   ├── test_aggregation_3d.py    # Multi-experiment result merging and LaTeX table export
-│   └── test_fixes_3d.py          # Regression tests: dynamic deep supervision, cosine EMA momentum, VisReg SWD
+│   └── test_fixes_3d.py          # Regression tests: dynamic deep supervision, cosine EMA momentum, VisReg SWD, axis indexing, zero-match guards
 │
 └── outputs/                      # Experiment-stratified outputs & benchmarks
     ├── <experiment_name>/        # e.g., kaggle_visreg_5_epoch, kaggle_nnunet_5_epoch, kaggle_unet_5_epoch
@@ -178,7 +179,7 @@ uv pip install -e ".[dev]"
 ### Step 2: Run Unit Tests
 ```bash
 pytest tests/ -v
-# Verified: 68 passed in ~14s
+# Verified: 79 passed in ~15s
 ```
 
 ---

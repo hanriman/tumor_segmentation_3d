@@ -40,6 +40,7 @@ target-version = "py312"
 [tool.ruff.lint]
 ignore = [
     "EXE001",  # Shebang on non-executable scripts
+    "BLE001",  # Blind exception catching in I/O resilience and aggregation fallbacks
 ]
 
 [tool.pytest.ini_options]

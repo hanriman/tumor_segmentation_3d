@@ -1,8 +1,9 @@
 import os
 import shutil
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from brats_jepa_3d.config import (
     IN_KAGGLE,

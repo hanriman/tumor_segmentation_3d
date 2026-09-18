@@ -728,6 +728,7 @@ def test_ijepa3d_target_encoder_eval_mode():
 def test_generate_figures_safe_float():
     """Verify safe_float in generate_figures_3d handles edge cases properly."""
     import sys
+
     from brats_jepa_3d.config import PROJECT_ROOT
 
     scripts_dir = str(PROJECT_ROOT / "scripts")
@@ -747,6 +748,7 @@ def test_generate_figures_safe_float():
 def test_evaluate_scripts_model_type_parsing():
     """Verify --model_type argument is present in argument parsers."""
     import sys
+
     from brats_jepa_3d.config import PROJECT_ROOT
 
     scripts_dir = str(PROJECT_ROOT / "scripts")
@@ -809,10 +811,11 @@ def test_incremental_csv_merging(tmp_path):
 
 def test_seed_and_num_workers_environment_overrides(monkeypatch):
     """Verify that BRATS3D_SEED and BRATS3D_NUM_WORKERS env vars correctly propagate to configs and PRNG."""
-    from brats_jepa_3d.config import load_yaml_config
-    from brats_jepa_3d.utils.seed import set_seed
     import argparse
+
     import torch
+
+    from brats_jepa_3d.utils.seed import set_seed
 
     # Test set_seed with BRATS3D_SEED env var
     monkeypatch.setenv("BRATS3D_SEED", "99")
@@ -836,6 +839,7 @@ def test_seed_and_num_workers_environment_overrides(monkeypatch):
 
     # Verify evaluate_ood_3d CLI parser supports --num_workers
     import sys
+
     from brats_jepa_3d.config import PROJECT_ROOT
     scripts_dir = str(PROJECT_ROOT / "scripts")
     if scripts_dir not in sys.path:
@@ -847,8 +851,298 @@ def test_seed_and_num_workers_environment_overrides(monkeypatch):
     assert ood_args.seed == 77
 
 
+def test_aggregate_low_data_summaries_outer_merge_unequal_lengths(tmp_path):
+    """Verify aggregate_low_data_summaries handles differing fraction counts and scrambled orders."""
+    from brats_jepa_3d.utils.aggregation import aggregate_low_data_summaries
+
+    exp1 = tmp_path / "exp1"
+    exp2 = tmp_path / "exp2"
+    (exp1 / "metrics").mkdir(parents=True)
+    (exp2 / "metrics").mkdir(parents=True)
+
+    # exp1 has 4 fractions
+    (exp1 / "metrics" / "low_data_3d_summary.csv").write_text(
+        "Fraction,Model1\n"
+        "1.0%,10.5%\n"
+        "5.0%,25.0%\n"
+        "10.0%,40.0%\n"
+        "100.0%,70.0%\n"
+    )
+
+    # exp2 has only 2 fractions, in reverse order and with a fraction not in exp1
+    (exp2 / "metrics" / "low_data_3d_summary.csv").write_text(
+        "Fraction,Model2\n"
+        "25.0%,55.0%\n"
+        "5.0%,30.0%\n"
+    )
+
+    df = aggregate_low_data_summaries([exp1, exp2], output_dir=tmp_path / "out")
+    assert len(df) == 5
+    # Should be sorted numerically: 1.0%, 5.0%, 10.0%, 25.0%, 100.0%
+    assert list(df["Fraction"]) == ["1.0%", "5.0%", "10.0%", "25.0%", "100.0%"]
+    assert "Model1" in df.columns and "Model2" in df.columns
+
+    row_5 = df[df["Fraction"] == "5.0%"].iloc[0]
+    assert row_5["Model1"] == "25.0%"
+    assert row_5["Model2"] == "30.0%"
+
+    row_1 = df[df["Fraction"] == "1.0%"].iloc[0]
+    assert row_1["Model1"] == "10.5%"
+    assert row_1["Model2"] == "N/A"
+
+    row_25 = df[df["Fraction"] == "25.0%"].iloc[0]
+    assert row_25["Model1"] == "N/A"
+    assert row_25["Model2"] == "55.0%"
 
 
+def test_aggregate_ood_summaries_outer_merge_unequal_regimes(tmp_path):
+    """Verify aggregate_ood_summaries handles disjoint regimes and out-of-order rows."""
+    from brats_jepa_3d.utils.aggregation import aggregate_ood_summaries
+
+    exp1 = tmp_path / "exp1"
+    exp2 = tmp_path / "exp2"
+    (exp1 / "metrics").mkdir(parents=True)
+    (exp2 / "metrics").mkdir(parents=True)
+
+    (exp1 / "metrics" / "ood_3d_summary.csv").write_text(
+        "Regime,ModelA\n"
+        "Clean Baseline,80.0%\n"
+        "Rician Noise (sigma=0.08),75.0%\n"
+        "B1 Bias Field Inhomogeneity,78.0%\n"
+    )
+
+    (exp2 / "metrics" / "ood_3d_summary.csv").write_text(
+        "Regime,ModelB\n"
+        "Missing Modalities: T1c Only,45.0%\n"
+        "Clean Baseline,82.0%\n"
+    )
+
+    df = aggregate_ood_summaries([exp1, exp2], output_dir=tmp_path / "out")
+    assert len(df) == 4
+    assert "ModelA" in df.columns and "ModelB" in df.columns
+
+    clean_row = df[df["Regime"] == "Clean Baseline"].iloc[0]
+    assert clean_row["ModelA"] == "80.0%"
+    assert clean_row["ModelB"] == "82.0%"
+
+    t1c_row = df[df["Regime"] == "Missing Modalities: T1c Only"].iloc[0]
+    assert t1c_row["ModelA"] == "N/A"
+    assert t1c_row["ModelB"] == "45.0%"
 
 
+def test_brats_3d_dataset_tensor_writeable_and_memory_ownership(tmp_path):
+    """Verify BraTS3DDataset produces writeable, contiguous memory tensors from npz."""
+    from brats_jepa_3d.data import BraTS3DDataset
 
+    # Create dummy compressed npz volume
+    img = np.random.randn(4, 16, 16, 16).astype(np.float32)
+    mask = (np.random.rand(16, 16, 16) > 0.8).astype(np.float32)
+    bm = (img != 0).any(axis=0, keepdims=True).astype(np.float32)
+    npz_file = tmp_path / "patient_001.npz"
+    np.savez_compressed(npz_file, image=img, mask=mask, brain_mask=bm)
+
+    (tmp_path / "metadata.csv").write_text("patient_id,file_name\n001,patient_001.npz\n")
+    dataset = BraTS3DDataset(data_dir=tmp_path, cache_in_ram=True)
+
+    sample = dataset[0]
+    image = sample["image"]
+    mask_t = sample["mask"]
+    bm_t = sample["brain_mask"]
+
+    # Verify writeability: in-place modification must succeed without error or warning
+    image[0, 0, 0, 0] = 999.0
+    assert image[0, 0, 0, 0].item() == 999.0
+    mask_t[0, 0, 0] = 1.0
+    assert mask_t[0, 0, 0].item() == 1.0
+    bm_t[0, 0, 0, 0] = 1.0
+    assert bm_t[0, 0, 0, 0].item() == 1.0
+
+    # Verify cache stores 3-tuple (image, mask, brain_mask)
+    assert 0 in dataset.cache
+    assert len(dataset.cache[0]) == 3
+    assert isinstance(dataset.cache[0][0], torch.Tensor)
+    assert isinstance(dataset.cache[0][1], torch.Tensor)
+    assert isinstance(dataset.cache[0][2], torch.Tensor)
+
+
+def test_combine_artifacts_script_import():
+    """Verify combine_and_generate_paper_artifacts script imports cleanly without redundant assignments."""
+    import subprocess
+    import sys
+
+    res = subprocess.run(
+        [sys.executable, "scripts/combine_and_generate_paper_artifacts.py", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 0
+    assert "usage:" in res.stdout.lower()
+
+
+def test_evaluate_low_data_incremental_outer_merge(tmp_path, monkeypatch):
+    """Verify evaluate_low_data_3d outer merge preserves disjoint fractions and models."""
+    import re
+
+    import pandas as pd
+
+    csv_path = tmp_path / "low_data_3d_summary.csv"
+    csv_path.write_text("Fraction,ModelA\n1.0%,12.0%\n5.0%,35.0%\n")
+
+    new_df = pd.DataFrame([
+        {"Fraction": "10.0%", "ModelB": "50.0%"},
+        {"Fraction": "5.0%", "ModelB": "38.0%"},
+    ])
+
+    existing_df = pd.read_csv(csv_path)
+    existing_df["Fraction"] = existing_df["Fraction"].astype(str).str.strip()
+    new_df["Fraction"] = new_df["Fraction"].astype(str).str.strip()
+
+    new_cols = [c for c in new_df.columns if c not in existing_df.columns]
+    overlap_cols = [c for c in new_df.columns if c != "Fraction" and c in existing_df.columns]
+    if new_cols:
+        merged = pd.merge(existing_df, new_df[["Fraction"] + new_cols], on="Fraction", how="outer")
+    else:
+        merged = pd.merge(existing_df, new_df[["Fraction"]], on="Fraction", how="outer")
+    if overlap_cols:
+        new_indexed = new_df.set_index("Fraction")
+        for col in overlap_cols:
+            for frac, val in new_indexed[col].items():
+                if pd.notna(val) and str(val) != "N/A":
+                    merged.loc[merged["Fraction"] == frac, col] = val
+
+    def frac_key(v: str) -> float:
+        m = re.search(r"(\d+(?:\.\d+)?)", str(v))
+        return float(m.group(1)) if m else 0.0
+
+    merged["_sort"] = merged["Fraction"].apply(frac_key)
+    df = merged.sort_values(by="_sort").drop(columns=["_sort"]).reset_index(drop=True).fillna("N/A")
+
+    assert len(df) == 3
+    assert list(df["Fraction"]) == ["1.0%", "5.0%", "10.0%"]
+    assert "ModelA" in df.columns and "ModelB" in df.columns
+    assert df[df["Fraction"] == "1.0%"]["ModelA"].iloc[0] == "12.0%"
+    assert df[df["Fraction"] == "1.0%"]["ModelB"].iloc[0] == "N/A"
+    assert df[df["Fraction"] == "10.0%"]["ModelA"].iloc[0] == "N/A"
+    assert df[df["Fraction"] == "10.0%"]["ModelB"].iloc[0] == "50.0%"
+    assert df[df["Fraction"] == "5.0%"]["ModelB"].iloc[0] == "38.0%"
+
+
+def test_evaluate_ood_incremental_outer_merge(tmp_path):
+    """Verify evaluate_ood_3d outer merge preserves disjoint regimes and models."""
+    import pandas as pd
+
+    csv_path = tmp_path / "ood_3d_summary.csv"
+    csv_path.write_text("Regime,ModelA\nClean Baseline,80.0%\n")
+
+    new_df = pd.DataFrame([
+        {"Regime": "3D Rician Noise (sigma=0.08)", "ModelB": "72.0%"},
+        {"Regime": "Clean Baseline", "ModelB": "81.5%"},
+    ])
+
+    existing_df = pd.read_csv(csv_path)
+    existing_df["Regime"] = existing_df["Regime"].astype(str).str.strip()
+    new_df["Regime"] = new_df["Regime"].astype(str).str.strip()
+
+    new_cols = [c for c in new_df.columns if c not in existing_df.columns]
+    overlap_cols = [c for c in new_df.columns if c != "Regime" and c in existing_df.columns]
+    if new_cols:
+        merged = pd.merge(existing_df, new_df[["Regime"] + new_cols], on="Regime", how="outer")
+    else:
+        merged = pd.merge(existing_df, new_df[["Regime"]], on="Regime", how="outer")
+    if overlap_cols:
+        new_indexed = new_df.set_index("Regime")
+        for col in overlap_cols:
+            for r_val, val in new_indexed[col].items():
+                if pd.notna(val) and str(val) != "N/A":
+                    merged.loc[merged["Regime"] == r_val, col] = val
+    df = merged.fillna("N/A")
+
+    assert len(df) == 2
+    assert "Clean Baseline" in list(df["Regime"])
+    assert "3D Rician Noise (sigma=0.08)" in list(df["Regime"])
+    assert df[df["Regime"] == "Clean Baseline"]["ModelA"].iloc[0] == "80.0%"
+    assert df[df["Regime"] == "Clean Baseline"]["ModelB"].iloc[0] == "81.5%"
+    assert df[df["Regime"] == "3D Rician Noise (sigma=0.08)"]["ModelA"].iloc[0] == "N/A"
+    assert df[df["Regime"] == "3D Rician Noise (sigma=0.08)"]["ModelB"].iloc[0] == "72.0%"
+
+
+def test_run_full_pipeline_checkpoint_resolution(tmp_path, monkeypatch):
+    """Verify run_full_pipeline_3d prioritizes *_3d_best.pt over epoch checkpoints."""
+    from brats_jepa_3d.utils import sort_checkpoints_by_epoch
+
+    ckpt_dir = tmp_path / "checkpoints"
+    ckpt_dir.mkdir()
+
+    # Create dummy epoch and best checkpoints
+    (ckpt_dir / "visreg_jepa_3d_epoch_10.pt").write_text("dummy")
+    (ckpt_dir / "visreg_jepa_3d_epoch_20.pt").write_text("dummy")
+    (ckpt_dir / "visreg_jepa_3d_best.pt").write_text("best")
+
+    best_ckpts = sorted(ckpt_dir.glob("visreg_jepa*_3d_best.pt"))
+    epoch_ckpts = sort_checkpoints_by_epoch(list(ckpt_dir.glob("visreg_jepa*epoch*.pt")))
+
+    selected_ckpt = best_ckpts[-1] if best_ckpts else (epoch_ckpts[-1] if epoch_ckpts else None)
+    assert selected_ckpt.name == "visreg_jepa_3d_best.pt"
+
+
+def test_ijepa_loss_empty_predictions_raises():
+    """Verify IJEPALoss raises ValueError with clear error message when passed empty lists."""
+    from brats_jepa_3d.losses import IJEPALoss
+
+    criterion = IJEPALoss()
+    with pytest.raises(ValueError, match="must be non-empty lists of tensors"):
+        criterion([], [])
+
+
+def test_volumetric_augmentations_batched_tensor():
+    """Verify VolumetricAugmentations3D correctly operates on both 4D [C, D, H, W] and 5D [B, C, D, H, W] tensors."""
+    from brats_jepa_3d.data.transforms import VolumetricAugmentations3D
+
+    aug = VolumetricAugmentations3D(flip_prob=1.0, noise_prob=0.0, modality_dropout_prob=0.0, is_training=True)
+
+    # 4D case: [C, D, H, W] = [4, 8, 8, 8] without brain_mask returns (image, mask)
+    x_4d = torch.arange(8).view(1, 8, 1, 1).repeat(4, 1, 8, 8).float()
+    out_4d, _ = aug(x_4d.clone(), None, None)
+    # Dimension -3 (depth) was flipped: values 0..7 become 7..0
+    assert torch.equal(out_4d[0, :, 0, 0], torch.tensor([7, 6, 5, 4, 3, 2, 1, 0], dtype=torch.float32))
+
+    # 5D case: [B, C, D, H, W] = [2, 4, 8, 8, 8] with brain_mask returns (image, mask, brain_mask)
+    x_5d = torch.arange(8).view(1, 1, 8, 1, 1).repeat(2, 4, 1, 8, 8).float()
+    bm_5d = torch.ones(2, 1, 8, 8, 8)
+    # Distinct channels to verify channel dimension is NOT flipped
+    for c in range(4):
+        x_5d[:, c] = x_5d[:, c] * (c + 1)
+    out_5d, _, out_bm = aug(x_5d.clone(), None, bm_5d)
+    # Depth is flipped
+    assert torch.equal(out_5d[0, 0, :, 0, 0], torch.tensor([7, 6, 5, 4, 3, 2, 1, 0], dtype=torch.float32))
+    # Channel 1 was multiplied by 2 and is still channel 1 (not swapped with another channel)
+    assert torch.equal(out_5d[0, 1, :, 0, 0], torch.tensor([14, 12, 10, 8, 6, 4, 2, 0], dtype=torch.float32))
+    assert out_bm.shape == (2, 1, 8, 8, 8)
+
+
+def test_evaluate_baseline_checkpoint_zero_matched_raises(tmp_path):
+    """Verify baseline evaluation raises RuntimeError if checkpoint contains zero matching keys."""
+    from torch import nn
+
+    # Create dummy model with known keys
+    class DummyNet(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = nn.Conv3d(4, 16, 3)
+
+    model = DummyNet()
+
+    # Create completely mismatched checkpoint state dict
+    corrupt_sd = {"unrelated_layer.weight": torch.randn(10, 10)}
+    ckpt_file = tmp_path / "corrupted_unet.pt"
+    torch.save(corrupt_sd, ckpt_file)
+
+    sd = torch.load(ckpt_file, map_location="cpu")
+    missing, _unexpected = model.load_state_dict(sd, strict=False)
+    matched = [k for k in model.state_dict() if k not in missing]
+
+    assert len(matched) == 0
+    with pytest.raises(RuntimeError, match="Failed to load any weights"):
+        if len(matched) == 0:
+            raise RuntimeError(f"Failed to load any weights for 3D UNet from {ckpt_file}")

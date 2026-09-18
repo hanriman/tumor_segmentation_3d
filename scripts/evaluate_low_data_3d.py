@@ -365,19 +365,30 @@ def main():
     if csv_path.exists():
         try:
             existing_df = pd.read_csv(csv_path)
-            existing_df["Fraction"] = existing_df["Fraction"].astype(str)
-            new_df["Fraction"] = new_df["Fraction"].astype(str)
-            for col in new_df.columns:
-                if col == "Fraction":
-                    continue
-                new_vals = new_df.set_index("Fraction")[col]
-                if not (new_vals == "N/A").all():
-                    if col not in existing_df.columns:
-                        existing_df[col] = "N/A"
-                    for f_val, val in new_vals.items():
-                        if val != "N/A":
-                            existing_df.loc[existing_df["Fraction"] == f_val, col] = val
-            df = existing_df
+            existing_df["Fraction"] = existing_df["Fraction"].astype(str).str.strip()
+            new_df["Fraction"] = new_df["Fraction"].astype(str).str.strip()
+
+            new_cols = [c for c in new_df.columns if c not in existing_df.columns]
+            overlap_cols = [c for c in new_df.columns if c != "Fraction" and c in existing_df.columns]
+            if new_cols:
+                merged = pd.merge(existing_df, new_df[["Fraction"] + new_cols], on="Fraction", how="outer")
+            else:
+                merged = pd.merge(existing_df, new_df[["Fraction"]], on="Fraction", how="outer")
+            if overlap_cols:
+                new_indexed = new_df.set_index("Fraction")
+                for col in overlap_cols:
+                    for frac, val in new_indexed[col].items():
+                        if pd.notna(val) and str(val) != "N/A":
+                            merged.loc[merged["Fraction"] == frac, col] = val
+
+            import re
+
+            def frac_key(v: str) -> float:
+                m = re.search(r"(\d+(?:\.\d+)?)", str(v))
+                return float(m.group(1)) if m else 0.0
+
+            merged["_sort"] = merged["Fraction"].apply(frac_key)
+            df = merged.sort_values(by="_sort").drop(columns=["_sort"]).reset_index(drop=True).fillna("N/A")
         except Exception as e:
             logger.warning(f"Could not merge with existing CSV: {e}. Writing new CSV.")
             df = new_df

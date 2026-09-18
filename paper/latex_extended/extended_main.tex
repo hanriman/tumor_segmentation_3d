@@ -327,7 +327,7 @@ Group Normalization computes statistics per sample across spatial dimensions, el
     \end{equation}
     For $S=4$, this yields $[w_0, w_1, w_2, w_3] \approx [0.533, 0.267, 0.133, 0.067]$, rigorously prioritizing fine-grained native-resolution predictions while providing auxiliary gradient flow to deeper bottleneck representations.
 \end{enumerate}
-In combined segmentation objectives (Dice + Cross-Entropy), when background is excluded ($\text{include\_background}=\text{False}$), Cross-Entropy identically masks out class 0 ($\text{ignore\_index}=0$), guaranteeing mutually consistent foreground-only supervision without multi-task gradient conflict.
+In combined segmentation objectives (Dice + Cross-Entropy), when background is excluded from foreground Dice ($\text{include\_background}=\text{False}$), Cross-Entropy loss continues to supervise all voxels including background ($\text{ignore\_index}=-100$), providing essential dense negative supervision that penalizes false-positive foreground predictions on healthy brain parenchyma \citep{isensee2021nnunet}.
 
 \subsection{Volumetric Evaluation Metrics and Latent Representation Diagnostics}
 

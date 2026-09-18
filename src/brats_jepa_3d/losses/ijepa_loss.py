@@ -28,6 +28,8 @@ class IJEPALoss(nn.Module):
     ) -> torch.Tensor:
         if len(predictions) != len(targets):
             raise ValueError(f"Mismatch: {len(predictions)} predictions vs {len(targets)} targets")
+        if len(predictions) == 0:
+            raise ValueError("predictions and targets must be non-empty lists of tensors")
 
         total_loss = torch.tensor(0.0, device=predictions[0].device, dtype=predictions[0].dtype)
 

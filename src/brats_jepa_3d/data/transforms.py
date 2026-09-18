@@ -95,7 +95,7 @@ class VolumetricAugmentations3D:
             return (image, mask, brain_mask) if brain_mask is not None else (image, mask)
 
         # 1. 3D Random Axis Flips (Left-Right, Anterior-Posterior, Superior-Inferior)
-        for axis in (1, 2, 3):  # D=1, H=2, W=3
+        for axis in (-3, -2, -1):  # Spatial dimensions (D, H, W) regardless of leading batch dimension
             if random.random() < self.flip_prob:
                 image = torch.flip(image, dims=[axis])
                 if mask is not None:

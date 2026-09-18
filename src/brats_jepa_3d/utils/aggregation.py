@@ -1,11 +1,10 @@
-import os
 import re
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from brats_jepa_3d.config import OUTPUTS_DIR, PROJECT_ROOT
+from brats_jepa_3d.config import PROJECT_ROOT
 
 
 def discover_experiment_directories(base_dir: Path | str | None = None) -> list[Path]:
@@ -139,9 +138,18 @@ def aggregate_low_data_summaries(
             if merged_df is None:
                 merged_df = df
             else:
-                for col in df.columns:
-                    if col != "Fraction":
-                        merged_df[col] = df[col]
+                new_cols = [c for c in df.columns if c not in merged_df.columns]
+                overlap_cols = [c for c in df.columns if c != "Fraction" and c in merged_df.columns]
+                if new_cols:
+                    merged_df = pd.merge(merged_df, df[["Fraction"] + new_cols], on="Fraction", how="outer")
+                else:
+                    merged_df = pd.merge(merged_df, df[["Fraction"]], on="Fraction", how="outer")
+                if overlap_cols:
+                    df_indexed = df.set_index("Fraction")
+                    for col in overlap_cols:
+                        for frac, val in df_indexed[col].items():
+                            if pd.notna(val) and str(val) != "N/A":
+                                merged_df.loc[merged_df["Fraction"] == frac, col] = val
         except Exception as e:
             print(f"⚠️ Warning: Could not read {csv_path}: {e}")
 
@@ -155,6 +163,7 @@ def aggregate_low_data_summaries(
 
     merged_df["_sort_frac"] = merged_df["Fraction"].apply(frac_key)
     merged_df = merged_df.sort_values(by="_sort_frac").drop(columns=["_sort_frac"]).reset_index(drop=True)
+    merged_df = merged_df.fillna("N/A")
 
     if output_dir:
         out_path = Path(output_dir).resolve()
@@ -194,19 +203,25 @@ def aggregate_ood_summaries(
             if merged_df is None:
                 merged_df = df
             else:
-                for col in df.columns:
-                    if col != "Regime":
-                        if col not in merged_df.columns:
-                            merged_df[col] = df[col]
-                        else:
-                            for r_name, val in df.set_index("Regime")[col].items():
-                                if pd.notna(val) and str(val) != "N/A":
-                                    merged_df.loc[merged_df["Regime"] == r_name, col] = val
+                new_cols = [c for c in df.columns if c not in merged_df.columns]
+                overlap_cols = [c for c in df.columns if c != "Regime" and c in merged_df.columns]
+                if new_cols:
+                    merged_df = pd.merge(merged_df, df[["Regime"] + new_cols], on="Regime", how="outer")
+                else:
+                    merged_df = pd.merge(merged_df, df[["Regime"]], on="Regime", how="outer")
+                if overlap_cols:
+                    df_indexed = df.set_index("Regime")
+                    for col in overlap_cols:
+                        for r_name, val in df_indexed[col].items():
+                            if pd.notna(val) and str(val) != "N/A":
+                                merged_df.loc[merged_df["Regime"] == r_name, col] = val
         except Exception as e:
             print(f"⚠️ Warning: Could not read {csv_path}: {e}")
 
     if merged_df is None:
         return pd.DataFrame()
+
+    merged_df = merged_df.fillna("N/A")
 
     if output_dir:
         out_path = Path(output_dir).resolve()

@@ -7,8 +7,8 @@ Supports 3D I-JEPA, 3D SigReg JEPA, and 3D VisReg JEPA.
 import argparse
 import gc
 import math
-from pathlib import Path
 import time
+from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader

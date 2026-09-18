@@ -55,10 +55,12 @@ def main():
     for m_type in models_to_run:
         run_cmd([py, "scripts/train_jepa_3d.py", "--model_type", m_type] + smoke_flag)
 
-        ckpts = sort_checkpoints_by_epoch(
+        best_ckpts = sorted(CHECKPOINTS_DIR.glob(f"{m_type}*_3d_best.pt"))
+        epoch_ckpts = sort_checkpoints_by_epoch(
             list(CHECKPOINTS_DIR.glob(f"{m_type}*epoch*.pt"))
         )
-        pretrained_arg = ["--pretrained_checkpoint", str(ckpts[-1])] if ckpts else []
+        selected_ckpt = best_ckpts[-1] if best_ckpts else (epoch_ckpts[-1] if epoch_ckpts else None)
+        pretrained_arg = ["--pretrained_checkpoint", str(selected_ckpt)] if selected_ckpt else []
         run_cmd(
             [
                 py,

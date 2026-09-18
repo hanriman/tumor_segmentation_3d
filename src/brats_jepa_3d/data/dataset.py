@@ -78,7 +78,7 @@ class BraTS3DDataset(Dataset):
                 df = df.sample(n=min(len(df), n_samples), random_state=seed).reset_index(drop=True)
 
         self.df = df
-        self.cache: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
+        self.cache: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
 
     def __len__(self) -> int:
         return len(self.df)
@@ -105,11 +105,11 @@ class BraTS3DDataset(Dataset):
             has_bm = "brain_mask" in data
             brain_mask_arr = data["brain_mask"] if has_bm else None
 
-            # Convert directly to PyTorch tensors and cast to float32
-            image = torch.from_numpy(image_arr.astype(np.float32, copy=False))
-            mask = torch.from_numpy(mask_arr.astype(np.float32, copy=False))
+            # Convert directly to PyTorch tensors and cast to float32 with contiguous memory
+            image = torch.from_numpy(np.ascontiguousarray(image_arr, dtype=np.float32).copy())
+            mask = torch.from_numpy(np.ascontiguousarray(mask_arr, dtype=np.float32).copy())
             if brain_mask_arr is not None:
-                brain_mask = torch.from_numpy(brain_mask_arr.astype(np.float32, copy=False))
+                brain_mask = torch.from_numpy(np.ascontiguousarray(brain_mask_arr, dtype=np.float32).copy())
             else:
                 brain_mask = (image != 0).any(dim=0, keepdim=True).float()
 

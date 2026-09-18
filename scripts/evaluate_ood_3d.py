@@ -241,6 +241,8 @@ def main():
                 sd = sd.get("model_state_dict", sd)
                 missing, _unexpected = m.load_state_dict(sd, strict=False)
                 matched = [k for k in m.state_dict() if k not in missing]
+                if len(matched) == 0:
+                    raise RuntimeError(f"Failed to load any weights for {name} from {ckpt}")
                 logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             else:
                 logger.warning(
@@ -266,6 +268,8 @@ def main():
                 sd = sd.get("model_state_dict", sd)
                 missing, _unexpected = m.load_state_dict(sd, strict=False)
                 matched = [k for k in m.state_dict() if k not in missing]
+                if len(matched) == 0:
+                    raise RuntimeError(f"Failed to load any weights for {name} from {ckpt}")
                 logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             else:
                 logger.warning(
@@ -325,19 +329,22 @@ def main():
     if csv_path.exists():
         try:
             existing_df = pd.read_csv(csv_path)
-            existing_df["Regime"] = existing_df["Regime"].astype(str)
-            new_df["Regime"] = new_df["Regime"].astype(str)
-            for col in new_df.columns:
-                if col == "Regime":
-                    continue
-                new_vals = new_df.set_index("Regime")[col]
-                if not (new_vals == "N/A").all():
-                    if col not in existing_df.columns:
-                        existing_df[col] = "N/A"
-                    for r_val, val in new_vals.items():
-                        if val != "N/A":
-                            existing_df.loc[existing_df["Regime"] == r_val, col] = val
-            df = existing_df
+            existing_df["Regime"] = existing_df["Regime"].astype(str).str.strip()
+            new_df["Regime"] = new_df["Regime"].astype(str).str.strip()
+
+            new_cols = [c for c in new_df.columns if c not in existing_df.columns]
+            overlap_cols = [c for c in new_df.columns if c != "Regime" and c in existing_df.columns]
+            if new_cols:
+                merged = pd.merge(existing_df, new_df[["Regime"] + new_cols], on="Regime", how="outer")
+            else:
+                merged = pd.merge(existing_df, new_df[["Regime"]], on="Regime", how="outer")
+            if overlap_cols:
+                new_indexed = new_df.set_index("Regime")
+                for col in overlap_cols:
+                    for r_val, val in new_indexed[col].items():
+                        if pd.notna(val) and str(val) != "N/A":
+                            merged.loc[merged["Regime"] == r_val, col] = val
+            df = merged.fillna("N/A")
         except Exception as e:
             logger.warning(f"Could not merge with existing CSV: {e}. Writing new CSV.")
             df = new_df

@@ -30,8 +30,6 @@ def setup_logger(name: str = "brats_jepa_3d", log_file: str | Path | None = None
     return logger
 
 
-
-
 class MetricTracker:
     """Accumulates epoch metrics and serializes to JSON and CSV."""
 

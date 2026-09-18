@@ -109,6 +109,8 @@ def benchmark_model(
 
             if device.type == "cuda":
                 torch.cuda.synchronize()
+            elif hasattr(torch, "mps") and device.type == "mps":
+                torch.mps.synchronize()
             t0 = time.perf_counter()
 
             with get_autocast_context(device, enabled=amp):
@@ -117,6 +119,8 @@ def benchmark_model(
 
             if device.type == "cuda":
                 torch.cuda.synchronize()
+            elif hasattr(torch, "mps") and device.type == "mps":
+                torch.mps.synchronize()
             t1 = time.perf_counter()
             latencies.append((t1 - t0) * 1000.0)  # ms per volume
 
@@ -288,6 +292,8 @@ def main():
             sd = sd.get("model_state_dict", sd)
             missing, _unexpected = model.load_state_dict(sd, strict=False)
             matched = [k for k in model.state_dict() if k not in missing]
+            if len(matched) == 0:
+                raise RuntimeError(f"Failed to load any weights for {label} from {ckpt_file}")
             logger.info(f"Loaded {label} weights from {ckpt_file.name} ({len(matched)} matched keys)")
             erank, cossim = "-", "-"
 
@@ -310,6 +316,8 @@ def main():
             sd = sd.get("model_state_dict", sd)
             missing, _unexpected = model.load_state_dict(sd, strict=False)
             matched = [k for k in model.state_dict() if k not in missing]
+            if len(matched) == 0:
+                raise RuntimeError(f"Failed to load any weights for {label} from {ckpt_file}")
             logger.info(f"Loaded {label} weights from {ckpt_file.name} ({len(matched)} matched keys)")
             erank, cossim = "-", "-"
 
