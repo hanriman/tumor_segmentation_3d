@@ -27,4 +27,4 @@ deep_supervision: true
 deep_supr_num: 3
 res_block: true
 learning_rate: 0.0003
-weight_decay: 0.00001
+weight_decay: 0.0001

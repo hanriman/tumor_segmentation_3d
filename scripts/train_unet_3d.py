@@ -45,9 +45,9 @@ def parse_args():
         "--exp_config", type=str, default=None, help="Path to experiment YAML config"
     )
     parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
-    parser.add_argument("--weight_decay", type=float, default=1e-5)
+    parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
     parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
