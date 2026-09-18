@@ -370,3 +370,26 @@ All planned remediations have been implemented and systematically verified:
    .venv/bin/python scripts/run_full_pipeline_3d.py --smoke_test --skip_data_prep
    ```
    - **Result**: Pre-trained 3D SigReg JEPA, fine-tuned Multiscale ViT FPN decoder, trained 3D Residual UNet and 3D nnU-Net with deep supervision, computed benchmark metrics, and generated publication figures. Exit code: 0.
+
+---
+
+## 8. Final Comprehensive Mathematical Audit & Verification (2026-09-18)
+
+A follow-up exhaustive forensic audit was completed on 2026-09-18. All identified issues were fully remediated and validated:
+
+1. **BUG-1 (OOD Transform Indexing & Broadcasting)**:
+   - Fixed `IndexError` on single-channel `float32` brain masks in `apply_rician_noise_3d` and `apply_b1_bias_field_3d` via `(brain_mask > 0).expand_as(image)`.
+2. **BUG-2 (Low-Data Checkpoint Discovery)**:
+   - Prevented accidental loading of 100% fine-tuned downstream weights during low-data evaluation by strictly filtering for SSL pre-trained weights (`*_3d_best.pt`) in `evaluate_low_data_3d.py` and `train_downstream_3d.py`.
+3. **BUG-3 (OOD Horizontal Merging)**:
+   - Resolved deduplication bug in `aggregate_ood_summaries` by merging horizontally on `"Regime"`, ensuring all models across independent runs are preserved.
+4. **Cut Corner 1 (Table 3 LaTeX Export)**:
+   - Added automated export of Table 3 (`\label{tab:ood_robustness}`) in `export_latex_tables`.
+5. **Manuscript Alignments**:
+   - Aligned Cross-Entropy background supervision to `ignore_index=-100` (Isensee et al., 2021) in `main.tex`.
+   - Clarified effective rank $\text{erank} = 82.85 / 128$ evaluating the 128-D projector manifold ($64.7\%$ capacity utilization) in `main.tex` and `extended_main.tex`.
+   - Updated loss equation (12) to match squared prediction terms (`squared_pred=True`).
+6. **Full Test Suite Status**:
+   - Pytest suite expanded to **68 unit tests**, all passing in **~14s** with 0 failures.
+   - See [docs/audit_report_2026-09-18.md](audit_report_2026-09-18.md) for the full report.
+

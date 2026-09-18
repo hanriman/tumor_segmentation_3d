@@ -223,22 +223,31 @@ def main():
             jepa_cfg_path = CONFIGS_DIR / "model" / f"{prefix}_3d.yaml"
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
-            ckpts = sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{prefix}*epoch*.pt")))
-            if not ckpts:
-                best_ckpts = sorted(CHECKPOINTS_DIR.glob(f"{prefix}*best.pt"))
-                if best_ckpts:
-                    ckpts = [best_ckpts[-1]]
+            # Prioritize pre-trained SSL checkpoints (*_3d_best.pt or *_3d_epoch_*.pt), excluding downstream fine-tuned checkpoints
+            ssl_best_ckpts = sorted(CHECKPOINTS_DIR.glob(f"{prefix}*_3d_best.pt"))
+            ssl_epoch_ckpts = sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{prefix}*_epoch_*.pt")))
+            if ssl_best_ckpts:
+                ckpt_path = ssl_best_ckpts[-1]
+            elif ssl_epoch_ckpts:
+                ckpt_path = ssl_epoch_ckpts[-1]
+            else:
+                fallback_ckpts = [
+                    p
+                    for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*.pt"))
+                    if not any(dec in p.name for dec in ("multiscale", "bottleneck", "downstream"))
+                ]
+                ckpt_path = fallback_ckpts[-1] if fallback_ckpts else None
 
-            if not ckpts:
+            if not ckpt_path or not ckpt_path.exists():
                 logger.warning(
-                    f"No pre-trained weights found for {name} ({prefix}*.pt). "
+                    f"No pre-trained SSL weights found for {name} ({prefix}_3d_best.pt / {prefix}*_epoch_*.pt). "
                     f"Skipping evaluation (will not train random uninitialized encoder on low data)."
                 )
                 return None
 
             ds_flag = False
             try:
-                sd_peek = torch.load(ckpts[-1], map_location="cpu")
+                sd_peek = torch.load(ckpt_path, map_location="cpu")
                 sd_peek = sd_peek.get("model_state_dict", sd_peek)
                 if any(k.startswith("decoder.ds") for k in sd_peek):
                     ds_flag = True
@@ -256,7 +265,6 @@ def main():
                 decoder_type="multiscale",
                 deep_supervision=ds_flag,
             )
-            ckpt_path = ckpts[-1]
             ckpt = torch.load(ckpt_path, map_location=device)
             res = m.load_pretrained_encoder(ckpt)
             logger.info(

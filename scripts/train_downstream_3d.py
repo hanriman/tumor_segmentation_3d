@@ -228,11 +228,20 @@ def main():
     if args.pretrained_checkpoint:
         ckpt_path = Path(args.pretrained_checkpoint)
     else:
-        candidates = sort_checkpoints_by_epoch(
-            list(CHECKPOINTS_DIR.glob(f"{args.model_type}*epoch*.pt"))
-        ) or sorted(CHECKPOINTS_DIR.glob(f"{args.model_type}*best.pt"))
-        if candidates:
-            ckpt_path = candidates[-1]
+        ssl_best = sorted(CHECKPOINTS_DIR.glob(f"{args.model_type}*_3d_best.pt"))
+        ssl_epochs = sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{args.model_type}*_epoch_*.pt")))
+        if ssl_best:
+            ckpt_path = ssl_best[-1]
+        elif ssl_epochs:
+            ckpt_path = ssl_epochs[-1]
+        else:
+            candidates = [
+                p
+                for p in sorted(CHECKPOINTS_DIR.glob(f"{args.model_type}*.pt"))
+                if not any(dec in p.name for dec in ("multiscale", "bottleneck", "downstream"))
+            ]
+            if candidates:
+                ckpt_path = candidates[-1]
 
     if ckpt_path and ckpt_path.exists():
         ckpt = torch.load(ckpt_path, map_location=device)

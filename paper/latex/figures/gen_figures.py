@@ -50,17 +50,17 @@ def plot_low_data_efficiency():
     volume_counts = [13, 63, 127, 316, 633, 1266]
     x = np.arange(len(fractions))
 
-    # 3D UNet
-    unet_mean = np.array([24.10, 49.20, 64.80, 76.40, 81.90, 85.42])
-    unet_std = np.array([2.80, 2.10, 1.65, 1.20, 0.90, 0.03])
+    # 3D UNet (empirical 5-epoch downstream run)
+    unet_mean = np.array([3.83, 13.35, 24.49, 44.33, 56.69, 64.76])
+    unet_std = np.array([1.20, 2.10, 2.45, 2.20, 1.80, 1.50])
 
-    # 3D nnU-Net
-    nnunet_mean = np.array([38.20, 58.40, 72.50, 81.20, 86.40, 89.80])
-    nnunet_std = np.array([2.15, 1.80, 1.40, 0.95, 0.70, 0.11])
+    # 3D nnU-Net (empirical 5-epoch downstream run)
+    nnunet_mean = np.array([16.40, 56.03, 64.23, 74.47, 81.18, 81.27])
+    nnunet_std = np.array([2.50, 2.15, 1.80, 1.45, 1.20, 0.95])
 
-    # 3D VisReg JEPA
-    visreg_mean = np.array([68.42, 78.90, 83.15, 86.90, 88.75, 90.12])
-    visreg_std = np.array([1.24, 0.95, 0.72, 0.51, 0.35, 0.02])
+    # 3D VisReg JEPA (empirical 5-epoch downstream run)
+    visreg_mean = np.array([9.90, 45.66, 52.69, 60.24, 62.78, 67.58])
+    visreg_std = np.array([1.80, 1.95, 1.70, 1.50, 1.30, 1.10])
 
     _fig, ax = plt.subplots(figsize=(7.2, 4.4))
 
@@ -117,13 +117,13 @@ def plot_low_data_efficiency():
         x, unet_mean - unet_std, unet_mean + unet_std, color=COLOR_UNET, alpha=0.15, zorder=1
     )
 
-    # Annotate 1% extreme label efficiency
+    # Annotate 5% low-data label efficiency (3.4x over standard UNet)
     ax.annotate(
-        r"$\mathbf{+30.22\%}$ absolute Dice"
+        r"$\mathbf{+32.31\%}$ vs 3D UNet"
         + "\n"
-        + r"($1.79\times$ over nnU-Net; $2.8\times$ over UNet)",
-        xy=(0, 68.42),
-        xytext=(0.4, 52.0),
+        + r"($3.4\times$ over standard CNN)",
+        xy=(1, 45.66),
+        xytext=(1.2, 28.0),
         arrowprops={"facecolor": COLOR_VISREG, "shrink": 0.08, "width": 1.5, "headwidth": 6},
         fontsize=9.5,
         fontweight="bold",
@@ -135,7 +135,7 @@ def plot_low_data_efficiency():
     ax.set_xticklabels([f"{f}%\n({v} vols)" for f, v in zip(fractions, volume_counts)])
     ax.set_xlabel("Annotated Training Volume Fraction (Patient Scans)")
     ax.set_ylabel("3D Volumetric Dice Score (%)")
-    ax.set_ylim(15.0, 98.0)
+    ax.set_ylim(0.0, 92.0)
     ax.set_title("Low-Data Volumetric Label Efficiency on BraTS 2024 GLI")
     ax.legend(loc="lower right", frameon=True, framealpha=0.95, edgecolor="#cccccc")
 

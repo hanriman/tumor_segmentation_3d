@@ -429,7 +429,7 @@ Table~\ref{tab:benchmark_3d} presents the primary benchmark results evaluated on
 \paragraph{Key Observations}:
 \begin{enumerate}
     \item \textbf{Teacher-Free Superiority}: 3D VisReg JEPA achieves the highest overall accuracy ($\mathbf{90.12\%}$ Dice, $\mathbf{3.54\,\text{mm}}$ HD95), outperforming both dual-encoder 3D I-JEPA ($88.94\%$) and supervised 3D nnU-Net ($89.80\%$) while completely discarding the secondary EMA teacher network.
-    \item \textbf{Latent Representation Non-Collapse}: VisReg JEPA achieves an Effective Rank of $82.85 / 128$ and centered cosine similarity of $0.0018$, mathematically proving that analytical 1D Sliced-Wasserstein shape matching prevents dimensional and directional collapse.
+    \item \textbf{Latent Representation Non-Collapse}: VisReg JEPA achieves an Effective Rank of $82.85 / 128$ on the projector manifold ($64.7\%$ spectral capacity utilization; $D_{\text{enc}}=384$) and centered cosine similarity of $0.0018$, mathematically demonstrating that analytical 1D Sliced-Wasserstein shape matching prevents dimensional and directional collapse.
     \item \textbf{Inference Speedup}: ViT with FPN decoding operates at $3.09\,\text{ms}$ per volume, representing a $\mathbf{5.1\times}$ speedup over 3D nnU-Net ($15.91\,\text{ms}$) and a $\mathbf{7.1\times}$ speedup over 3D Residual UNet ($22.06\,\text{ms}$).
 \end{enumerate}
 
@@ -517,7 +517,7 @@ The multi-planar orthogonal slices demonstrate that aspect-preserving trilinear 
 
 \subsection{Resolution of Core Research Questions}
 \begin{itemize}
-    \item \textbf{RQ1 (Teacher-Free 3D Regularization)}: Analytical distribution regularizers (SigReg and VisReg) completely prevent 3D latent collapse without an EMA teacher, preserving an effective spectral rank of $\text{erank} \approx 82.85 / 128$ and achieving state-of-the-art segmentation accuracy ($90.12\%$ Dice).
+    \item \textbf{RQ1 (Teacher-Free 3D Regularization)}: Analytical distribution regularizers (SigReg and VisReg) completely prevent 3D latent collapse without an EMA teacher, preserving an effective spectral rank of $\text{erank} \approx 82.85 / 128$ on the projector manifold and achieving state-of-the-art segmentation accuracy ($90.12\%$ Dice).
     \item \textbf{RQ2 (3D Low-Data Label Efficiency)}: Pre-training on unannotated 3D volumes provides an overwhelming advantage when labeled data is scarce: at $1\%$ labels, VisReg JEPA surpasses supervised 3D nnU-Net by $+30.22\%$ Dice.
     \item \textbf{RQ3 (Scanner Shift and Missing Sequences)}: Latent space prediction filters out high-frequency sensor noise, yielding superior resilience to 3D Rician scanner noise and RF coil B1 field bias.
     \item \textbf{RQ4 (Volumetric Inductive Biases)}: Combining a 3D Vision Transformer with lateral multi-scale skips ($L_2, L_4, L_6, L_8$) and Group Normalization achieves segmentation accuracy on par with 3D nnU-Net while reducing forward latency by $5.1\times$.

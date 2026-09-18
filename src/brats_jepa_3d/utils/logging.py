@@ -30,9 +30,6 @@ def setup_logger(name: str = "brats_jepa_3d", log_file: str | Path | None = None
     return logger
 
 
-def get_logger(name: str = "brats_jepa_3d", log_file: str | Path | None = None) -> logging.Logger:
-    """Compatibility alias for setup_logger."""
-    return setup_logger(name, log_file)
 
 
 class MetricTracker:

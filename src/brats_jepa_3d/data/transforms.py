@@ -128,18 +128,25 @@ def apply_rician_noise_3d(
         M = \sqrt{(X + \eta_1)^2 + \eta_2^2}, \quad \eta_1, \eta_2 \sim \mathcal{N}(0, \sigma^2)
     """
     if brain_mask is None:
-        brain_mask = image != 0
-    if not brain_mask.any():
+        bm_bool = image != 0
+    else:
+        bm_bool = brain_mask > 0
+        if bm_bool.dim() < image.dim():
+            bm_bool = bm_bool.unsqueeze(0)
+        if bm_bool.shape != image.shape:
+            bm_bool = bm_bool.expand_as(image)
+
+    if not bm_bool.any():
         return image
 
-    min_val = image[brain_mask].min()
+    min_val = image[bm_bool].min()
     # Shift non-zero brain parenchyma so min intensity is non-negative
     shifted = image - min_val if min_val < 0 else image
     eta1 = torch.randn_like(image) * sigma
     eta2 = torch.randn_like(image) * sigma
     noisy_shifted = torch.sqrt((shifted + eta1) ** 2 + eta2**2)
     noisy = noisy_shifted + min_val if min_val < 0 else noisy_shifted
-    return torch.where(brain_mask, noisy, torch.zeros_like(image))
+    return torch.where(bm_bool, noisy, torch.zeros_like(image))
 
 
 def apply_b1_bias_field_3d(
@@ -155,14 +162,21 @@ def apply_b1_bias_field_3d(
     scaling to prevent artificial contrast inversion on Z-score normalized data.
     """
     if brain_mask is None:
-        brain_mask = image != 0
-    if not brain_mask.any():
+        bm_bool = image != 0
+    else:
+        bm_bool = brain_mask > 0
+        if bm_bool.dim() < image.dim():
+            bm_bool = bm_bool.unsqueeze(0)
+        if bm_bool.shape != image.shape:
+            bm_bool = bm_bool.expand_as(image)
+
+    if not bm_bool.any():
         return image
 
     D, H, W = image.shape[-3], image.shape[-2], image.shape[-1]
-    z = torch.linspace(-1, 1, D, device=image.device)
-    y = torch.linspace(-1, 1, H, device=image.device)
-    x = torch.linspace(-1, 1, W, device=image.device)
+    z = torch.linspace(-1, 1, D, device=image.device, dtype=image.dtype)
+    y = torch.linspace(-1, 1, H, device=image.device, dtype=image.dtype)
+    x = torch.linspace(-1, 1, W, device=image.device, dtype=image.dtype)
     grid_z, grid_y, grid_x = torch.meshgrid(z, y, x, indexing="ij")
 
     # Smooth 2nd-order polynomial field
@@ -171,8 +185,9 @@ def apply_b1_bias_field_3d(
     )
     bias = bias.unsqueeze(0).unsqueeze(0) if image.dim() == 5 else bias.unsqueeze(0)
 
-    min_val = image[brain_mask].min()
+    min_val = image[bm_bool].min()
     shifted = image - min_val if min_val < 0 else image
     biased_shifted = shifted * bias
     biased = biased_shifted + min_val if min_val < 0 else biased_shifted
-    return torch.where(brain_mask, biased, torch.zeros_like(image))
+    return torch.where(bm_bool, biased, torch.zeros_like(image))
+

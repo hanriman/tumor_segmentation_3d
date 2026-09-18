@@ -391,6 +391,46 @@ def test_ood_perturbations_3d():
     assert not torch.allclose(biased, img)
 
 
+def test_ood_perturbations_explicit_brain_mask_3d():
+    """Verify 3D Rician noise and B1 bias field work with explicit float32 single-channel brain_mask (4D and 5D)."""
+    torch.manual_seed(42)
+    # 4D case: [C=4, D=16, H=16, W=16] with float32 brain_mask [1, D, H, W]
+    img_4d = torch.zeros(4, 16, 16, 16, dtype=torch.float32)
+    img_4d[:, 4:12, 4:12, 4:12] = torch.rand(4, 8, 8, 8) + 0.5
+    mask_4d = torch.zeros(1, 16, 16, 16, dtype=torch.float32)
+    mask_4d[:, 4:12, 4:12, 4:12] = 1.0
+
+    noisy_4d = apply_rician_noise_3d(img_4d, sigma=0.05, brain_mask=mask_4d)
+    assert noisy_4d.shape == img_4d.shape
+    assert (noisy_4d[:, 0:3, 0:3, 0:3] == 0).all()
+    assert not torch.allclose(noisy_4d[:, 4:12, 4:12, 4:12], img_4d[:, 4:12, 4:12, 4:12])
+
+    biased_4d = apply_b1_bias_field_3d(img_4d, strength=0.3, brain_mask=mask_4d)
+    assert biased_4d.shape == img_4d.shape
+    assert (biased_4d[:, 0:3, 0:3, 0:3] == 0).all()
+    assert not torch.allclose(biased_4d[:, 4:12, 4:12, 4:12], img_4d[:, 4:12, 4:12, 4:12])
+
+    # 5D case: [B=2, C=4, D=16, H=16, W=16] with float32 brain_mask [B=2, 1, D, H, W]
+    img_5d = torch.zeros(2, 4, 16, 16, 16, dtype=torch.float32)
+    img_5d[:, :, 4:12, 4:12, 4:12] = torch.rand(2, 4, 8, 8, 8) + 0.5
+    mask_5d = torch.zeros(2, 1, 16, 16, 16, dtype=torch.float32)
+    mask_5d[:, :, 4:12, 4:12, 4:12] = 1.0
+
+    noisy_5d = apply_rician_noise_3d(img_5d, sigma=0.05, brain_mask=mask_5d)
+    assert noisy_5d.shape == img_5d.shape
+    assert (noisy_5d[:, :, 0:3, 0:3, 0:3] == 0).all()
+
+    biased_5d = apply_b1_bias_field_3d(img_5d, strength=0.3, brain_mask=mask_5d)
+    assert biased_5d.shape == img_5d.shape
+    assert (biased_5d[:, :, 0:3, 0:3, 0:3] == 0).all()
+
+    # Un-unsqueezed 3D mask for 4D image: [D, H, W]
+    mask_3d = mask_4d.squeeze(0)
+    noisy_3d_mask = apply_rician_noise_3d(img_4d, sigma=0.05, brain_mask=mask_3d)
+    assert noisy_3d_mask.shape == img_4d.shape
+
+
+
 def test_model_config_consistency_and_deep_supervision_detection():
     """Verify UNet and nnUNet initialize cleanly with configs, and JEPA detects deep supervision."""
     # Test UNet config
