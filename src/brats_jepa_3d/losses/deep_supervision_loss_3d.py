@@ -35,14 +35,21 @@ class DeepSupervisionLoss3D(nn.Module):
         bce_weight: float = 1.0,
         squared_pred: bool = True,
         include_background: bool = True,
+        base_loss: nn.Module | None = None,
     ):
         super().__init__()
         self.weights = weights
-        self.base_loss = CombinedDiceBCELoss3D(
-            dice_weight=dice_weight,
-            bce_weight=bce_weight,
-            squared_pred=squared_pred,
-            include_background=include_background,
+        # Custom overlap loss (e.g. CombinedTverskyBCEWithLogitsLoss3D) must honor
+        # the {"loss", "dice_loss", "bce_loss"} return-key contract.
+        self.base_loss = (
+            base_loss
+            if base_loss is not None
+            else CombinedDiceBCELoss3D(
+                dice_weight=dice_weight,
+                bce_weight=bce_weight,
+                squared_pred=squared_pred,
+                include_background=include_background,
+            )
         )
 
     def get_weights(self, num_heads: int) -> list[float]:

@@ -38,6 +38,7 @@ from brats_jepa_3d.models import (
 from brats_jepa_3d.utils import (
     get_autocast_context,
     get_device,
+    predict_with_tta_3d,
     set_seed,
     setup_logger,
     sort_checkpoints_by_epoch,
@@ -61,7 +62,7 @@ def parse_args():
         "--decoder_type",
         type=str,
         default="multiscale",
-        choices=["multiscale", "bottleneck"],
+        choices=["multiscale", "bottleneck", "unetr_hybrid"],
         help="Decoder type for JEPA models",
     )
     parser.add_argument(
@@ -95,6 +96,12 @@ def parse_args():
         help="Enable pinned memory for faster host-to-device transfers (default: True)",
     )
     parser.add_argument("--no_pin_memory", action="store_false", dest="pin_memory")
+    parser.add_argument(
+        "--tta",
+        action="store_true",
+        default=False,
+        help="4-fold orthogonal-reflection test-time augmentation (original + flip X/Y/Z)",
+    )
     return parser.parse_args()
 
 
@@ -104,6 +111,7 @@ def benchmark_model(
     device: torch.device,
     amp: bool = True,
     smoke_test: bool = False,
+    tta: bool = False,
 ) -> dict[str, float]:
     model.eval()
     dices, ious, hd95s, latencies = [], [], [], []
@@ -120,8 +128,11 @@ def benchmark_model(
             t0 = time.perf_counter()
 
             with get_autocast_context(device, enabled=amp):
-                out = model(images)
-                logits = out[0] if isinstance(out, (list, tuple)) else out
+                if tta:
+                    logits = predict_with_tta_3d(model, images)
+                else:
+                    out = model(images)
+                    logits = out[0] if isinstance(out, (list, tuple)) else out
 
             if device.type == "cuda":
                 torch.cuda.synchronize()
@@ -186,6 +197,8 @@ def main():
     device = get_device()
     logger = setup_logger("evaluate_3d", METRICS_DIR / "benchmark_3d.log")
     logger.info("Initializing Master 3D Volumetric Benchmark...")
+    if args.tta:
+        logger.info("TTA enabled: 4-fold orthogonal-reflection averaging (4x forward passes per volume).")
 
     try:
         test_dataset = BraTS3DDataset(split="test", augmentations=None)
@@ -409,7 +422,8 @@ def main():
             cossim = f"{rep_stats['centered_cossim']:.4f}"
 
         seg_stats = benchmark_model(
-            model, test_loader, device, amp=args.amp, smoke_test=args.smoke_test
+            model, test_loader, device, amp=args.amp, smoke_test=args.smoke_test,
+            tta=args.tta,
         )
 
         results.append(

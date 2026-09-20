@@ -21,7 +21,7 @@ from brats_jepa_3d.config import (
     merge_config_with_args,
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
-from brats_jepa_3d.losses import DeepSupervisionLoss3D
+from brats_jepa_3d.losses import build_segmentation_criterion, resolve_seg_loss_type
 from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
 from brats_jepa_3d.models import BraTS3DnnUNet
 from brats_jepa_3d.utils import (
@@ -76,6 +76,12 @@ def parse_args():
         help="Path to checkpoint file to resume training from",
     )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
+    parser.add_argument(
+        "--loss_type", type=str, default="dice_bce", choices=["dice_bce", "tversky"],
+        help="Overlap loss: symmetric Dice+BCE (default) or asymmetric Tversky(beta=0.7)+BCE",
+    )
+    parser.add_argument("--tversky_alpha", type=float, default=0.3)
+    parser.add_argument("--tversky_beta", type=float, default=0.7)
     return parser.parse_args()
 
 
@@ -197,7 +203,12 @@ def main():
         res_block=getattr(args, "res_block", True),
     ).to(device)
 
-    criterion = DeepSupervisionLoss3D()
+    criterion = build_segmentation_criterion(
+        resolve_seg_loss_type(args),
+        deep_supervision=True,  # DeepSupervisionLoss3D degrades gracefully to base loss on single tensors
+        tversky_alpha=getattr(args, "tversky_alpha", 0.3),
+        tversky_beta=getattr(args, "tversky_beta", 0.7),
+    )
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )

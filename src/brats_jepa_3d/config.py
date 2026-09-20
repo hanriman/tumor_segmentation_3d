@@ -44,14 +44,24 @@ def get_dataset_dir(dataset_name: str = "brats_gli_3d") -> Path:
 
     # 2. Check Kaggle input mounts
     if Path("/kaggle/input").exists():
-        kaggle_matches = list(Path("/kaggle/input").glob(f"**/{dataset_name}"))
-        if kaggle_matches and kaggle_matches[0].is_dir():
-            return kaggle_matches[0].resolve()
-        for cand in Path("/kaggle/input").iterdir():
-            if cand.is_dir() and (cand / dataset_name).is_dir():
-                return (cand / dataset_name).resolve()
-            if cand.is_dir() and (cand / "metadata.csv").exists():
-                return cand.resolve()
+        # Known dataset directory variants, newest full pool first.
+        name_variants = [dataset_name]
+        for alias in ("brats_gli_3d_full", "brats_gli_3d"):
+            if alias not in name_variants:
+                name_variants.append(alias)
+        for variant in name_variants:
+            kaggle_matches = list(Path("/kaggle/input").glob(f"**/{variant}"))
+            for m in kaggle_matches:
+                if m.is_dir() and (m / "metadata.csv").exists():
+                    return m.resolve()
+            for cand in Path("/kaggle/input").iterdir():
+                if cand.is_dir() and (cand / variant).is_dir():
+                    sub = cand / variant
+                    if (sub / "metadata.csv").exists():
+                        return sub.resolve()
+                # Dataset root carrying metadata directly (flat layout).
+                if cand.is_dir() and (cand / "metadata.csv").exists():
+                    return cand.resolve()
 
     # 3. Check Google Colab local & Drive mounts
     if Path("/content").exists():

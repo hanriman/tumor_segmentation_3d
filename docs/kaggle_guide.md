@@ -50,19 +50,19 @@ You have two options depending on your preference:
    # Package into Kaggle-ready upload archive
    python scripts/package_for_kaggle.py
    ```
-   This creates `dist_kaggle/brats_3d_datasets.zip` (~9.1 GB for all 1,350 volumes; completed in ~2.5 mins).
+   This creates `dist_kaggle/brats_3d_full.zip` (~11 GB for all 1,621 volumes: train1_v2 + additional, grouped patient split; completed in ~3.5 mins).
    > **Note on `float16`**: Reduces disk and upload size by 50% (~6.7 MB per volume vs 13.8 MB) with negligible quantization error ($5.5 \times 10^{-5}$, two orders below MRI scanner noise). Arrays are automatically cast back to `float32` in RAM upon loading in `BraTS3DDataset`.
 2. Go to [kaggle.com/datasets](https://www.kaggle.com/datasets) -> Click **New Dataset**.
-3. Set the Title to: `brats-3d-datasets`.
-4. Drag and drop `dist_kaggle/brats_3d_datasets.zip` and click **Create**.
-5. The dataset will be mounted automatically at `/kaggle/input/brats-3d-datasets/`.
+3. Set the Title to: `brats-3d-full`.
+4. Drag and drop `dist_kaggle/brats_3d_full.zip` and click **Create**.
+5. The dataset will be mounted automatically at `/kaggle/input/brats-3d-full/` (archive prefix `brats_gli_3d_full/`).
 
 #### Option B: Preprocess directly on Kaggle
 Attach the raw BraTS 2024 GLI dataset on Kaggle, and the notebook will run:
 ```bash
 python scripts/prepare_data_3d.py --limit 100 --dtype float16 --num_workers 4
 ```
-This extracts non-zero bounding boxes and resamples volumes to canonical $128^3$ grids directly in `/kaggle/working/data/processed/brats_gli_3d`.
+This extracts non-zero bounding boxes and resamples volumes to canonical $128^3$ grids directly in `/kaggle/working/data/processed/brats_gli_3d_full` (or run `scripts/merge_and_resplit_3d.py` for the grouped patient split).
 
 ---
 
@@ -70,19 +70,19 @@ This extracts non-zero bounding boxes and resamples volumes to canonical $128^3$
 
 #### Job 1 (GPU Session A): Run 3D VisReg JEPA
 1. In Kaggle, click **Create** -> **New Notebook** -> **File** -> **Import Notebook** -> Upload [`notebooks/01_train_visreg_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/01_train_visreg_3d.ipynb).
-2. Attach dataset via **+ Add Input** -> `brats-3d-datasets`.
+2. Attach dataset via **+ Add Input** -> `brats-3d-full`.
 3. Set Accelerator to **GPU T4 x1** and turn **Internet ON**.
 4. Click **Run All** (or **Save Version** -> **Run all with Save** to execute in the background).
 5. Output: `visreg_outputs.zip` containing `visreg_jepa_best.pt`, downstream FPN weights, test split evaluations, low-data label efficiency curves, and OOD stress test metrics.
 
 #### Job 2 (GPU Session B): Run 3D nnU-Net Baseline (in Parallel!)
 1. Open a second Kaggle tab: **New Notebook** -> Import [`notebooks/02_train_nnunet_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/02_train_nnunet_3d.ipynb).
-2. Attach `brats-3d-datasets`, set **GPU T4 x1**, and click **Run All**.
+2. Attach `brats-3d-full`, set **GPU T4 x1**, and click **Run All**.
 3. Output: `nnunet_outputs.zip` containing DynUNet checkpoints, test metrics, and low-data curves.
 
 #### Job 3: Run 3D Residual UNet Baseline
 1. Import [`notebooks/03_train_unet_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/03_train_unet_3d.ipynb).
-2. Attach `brats-3d-datasets`, set **GPU T4 x1**, and click **Run All**.
+2. Attach `brats-3d-full`, set **GPU T4 x1**, and click **Run All**.
 3. Output: `unet_outputs.zip`.
 
 ---

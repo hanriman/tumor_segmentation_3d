@@ -94,3 +94,39 @@ def test_volumetric_augmentations_3d():
     aug_img, aug_mask = aug(img, mask)
     assert aug_img.shape == (4, 32, 32, 32)
     assert aug_mask.shape == (1, 32, 32, 32)
+
+
+def _proxy_brain_frac():
+    torch.manual_seed(0)
+    zz, yy, xx = torch.meshgrid(torch.arange(128), torch.arange(128), torch.arange(128), indexing="ij")
+    brain = (((zz - 64) / 48) ** 2 + ((yy - 64) / 58) ** 2 + ((xx - 64) / 48) ** 2) <= 1.0
+    return torch.nn.functional.avg_pool3d(
+        brain.float().unsqueeze(0).unsqueeze(0), kernel_size=16, stride=16
+    ).reshape(-1)
+
+
+def test_brain_aware_masking_varies_with_counter():
+    """Same (worker seed, idx) must yield different masks as the dataset call
+    counter advances — otherwise masks freeze across epochs (regression)."""
+    tf = JEPAMaskingTransform3D()
+    frac = _proxy_brain_frac()
+    base = 12345
+    seen = set()
+    for counter in (1, 2, 3):
+        g = torch.Generator()
+        g.manual_seed((base + 3 * 7919 + counter * 104729) % 2**32)
+        out = tf(token_brain_frac=frac, generator=g)
+        assert "context_tissue_mask" in out and len(out["context_tissue_mask"]) == 192
+        key = tuple(out["context_indices"].tolist())
+        assert key not in seen, "mask repeated across counter values (epoch-freeze bug)"
+        seen.add(key)
+        # Disjointness preserved under brain-aware sampling.
+        union = set().union(*[t.tolist() for t in out["target_indices_list"]])
+        assert not (set(out["context_indices"].tolist()) & union)
+
+
+def test_brain_aware_masking_legacy_compat():
+    tf = JEPAMaskingTransform3D()
+    out = tf()
+    assert "context_tissue_mask" not in out
+    assert out["context_indices"].shape == (192,)

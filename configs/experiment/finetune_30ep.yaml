@@ -3,6 +3,7 @@ epochs: 30
 warmup_epochs: 3
 batch_size: 2
 decoder_type: "multiscale"  # "multiscale" or "bottleneck"
+deep_supervision: true      # multi-scale gradient highways (disable via --no_deep_supervision)
 freeze_encoder: false       # false = full fine-tuning, true = frozen linear/decoder probe
 learning_rate: 0.0003
 min_lr: 0.000001

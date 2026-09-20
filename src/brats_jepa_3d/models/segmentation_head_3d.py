@@ -210,6 +210,189 @@ class MultiScaleViTSegmentationDecoder3D(nn.Module):
         return out
 
 
+class HybridUNETRDecoder3D(nn.Module):
+    r"""
+    UNETR-Style Hybrid Decoder: pre-trained ViT-FPN stream + native convolutional stem.
+
+    Mathematical Rationale & Defense Context (Hatamizadeh et al., WACV 2022):
+    -------------------------------------------------------------------------
+    Pure latent upsampling from the 8^3 token grid forces the final 64^3 -> 128^3
+    stage to hallucinate single-voxel boundaries by 16x interpolation from tokens
+    that each summarize 16^3 = 4,096 voxels. A lightweight convolutional stem
+    processes the raw 4-channel volume at native 128^3 (16 ch) and 64^3 (32 ch)
+    and fuses these high-frequency edge maps into decoder stages 3 and 4:
+
+        Input (4 x 128^3) -> stem_128 (16ch @128^3) - - - -> fuse4 (24+16 -> 24)
+                                -> stem_64 (32ch @64^3) - -> fuse3 (48+48+32 -> 48)
+
+    Stages 1-2, all ViT lateral skips, DS heads, and train/eval conventions are
+    identical to MultiScaleViTSegmentationDecoder3D, so pre-trained FPN weights
+    transfer with strict=False (only fuse3/up4/fuse4/head differ in shape and
+    re-initialize; the stem is always trained fresh during finetuning).
+    """
+
+    def __init__(
+        self,
+        in_dim: int = 384,
+        out_channels: int = 1,
+        in_channels: int = 4,
+        grid_size: tuple[int, int, int] = (8, 8, 8),
+        deep_supervision: bool = False,
+    ):
+        super().__init__()
+        self.in_dim = in_dim
+        self.grid_size = grid_size
+        self.deep_supervision = deep_supervision
+
+        # Native-resolution convolutional stem (trained fresh in finetuning).
+        self.stem_128 = nn.Sequential(
+            nn.Conv3d(in_channels, 16, kernel_size=3, padding=1),
+            nn.GroupNorm(4, 16),
+            nn.GELU(),
+            nn.Conv3d(16, 16, kernel_size=3, padding=1),
+            nn.GroupNorm(4, 16),
+            nn.GELU(),
+        )
+        self.stem_64 = nn.Sequential(
+            nn.Conv3d(16, 32, kernel_size=3, stride=2, padding=1),
+            nn.GroupNorm(4, 32),
+            nn.GELU(),
+        )
+
+        # Stage 1: Bottleneck 8^3 -> 16^3 (identical to multiscale FPN).
+        self.up1 = nn.Sequential(
+            nn.ConvTranspose3d(in_dim, 192, kernel_size=2, stride=2),
+            nn.GroupNorm(16, 192),
+            nn.GELU(),
+        )
+        self.skip_l6 = nn.Sequential(
+            nn.ConvTranspose3d(in_dim, 192, kernel_size=2, stride=2),
+            nn.GroupNorm(16, 192),
+            nn.GELU(),
+        )
+        self.fuse1 = nn.Sequential(
+            nn.Conv3d(192 + 192, 192, kernel_size=3, padding=1),
+            nn.GroupNorm(16, 192),
+            nn.GELU(),
+        )
+
+        # Stage 2: 16^3 -> 32^3 (identical to multiscale FPN).
+        self.up2 = nn.Sequential(
+            nn.ConvTranspose3d(192, 96, kernel_size=2, stride=2),
+            nn.GroupNorm(8, 96),
+            nn.GELU(),
+        )
+        self.skip_l4 = nn.Sequential(
+            nn.ConvTranspose3d(in_dim, 96, kernel_size=4, stride=4),
+            nn.GroupNorm(8, 96),
+            nn.GELU(),
+        )
+        self.fuse2 = nn.Sequential(
+            nn.Conv3d(96 + 96, 96, kernel_size=3, padding=1),
+            nn.GroupNorm(8, 96),
+            nn.GELU(),
+        )
+
+        # Stage 3: 32^3 -> 64^3 with stem_64 fusion (48 + 48 + 32 -> 48).
+        self.up3 = nn.Sequential(
+            nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
+            nn.GroupNorm(4, 48),
+            nn.GELU(),
+        )
+        self.skip_l2 = nn.Sequential(
+            nn.ConvTranspose3d(in_dim, 96, kernel_size=4, stride=4),
+            nn.GroupNorm(8, 96),
+            nn.GELU(),
+            nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
+            nn.GroupNorm(4, 48),
+            nn.GELU(),
+        )
+        self.fuse3 = nn.Sequential(
+            nn.Conv3d(48 + 48 + 32, 48, kernel_size=3, padding=1),
+            nn.GroupNorm(4, 48),
+            nn.GELU(),
+        )
+
+        # Stage 4: 64^3 -> 128^3 with stem_128 fusion (24 + 16 -> 24).
+        self.up4 = nn.Sequential(
+            nn.ConvTranspose3d(48, 24, kernel_size=2, stride=2),
+            nn.GroupNorm(4, 24),
+            nn.GELU(),
+        )
+        self.fuse4 = nn.Sequential(
+            nn.Conv3d(24 + 16, 24, kernel_size=3, padding=1),
+            nn.GroupNorm(4, 24),
+            nn.GELU(),
+        )
+
+        # Final projection to output logits
+        self.head = nn.Conv3d(24, out_channels, kernel_size=1)
+
+        if deep_supervision:
+            self.ds3 = nn.Conv3d(48, out_channels, kernel_size=1)
+            self.ds2 = nn.Conv3d(96, out_channels, kernel_size=1)
+            self.ds1 = nn.Conv3d(192, out_channels, kernel_size=1)
+
+    def _tokens_to_spatial(self, tokens: torch.Tensor) -> torch.Tensor:
+        """Converts [B, N=512, D] patch tokens to [B, D, 8, 8, 8] spatial feature map."""
+        B, _N, D = tokens.shape
+        gz, gy, gx = self.grid_size
+        return tokens.permute(0, 2, 1).reshape(B, D, gz, gy, gx)
+
+    def forward(
+        self,
+        intermediate_tokens: list[torch.Tensor] | tuple[torch.Tensor, ...] | torch.Tensor,
+        raw_volume: torch.Tensor | None = None,
+    ) -> torch.Tensor | list[torch.Tensor]:
+        if isinstance(intermediate_tokens, (list, tuple)):
+            n_layers = len(intermediate_tokens)
+            idx2 = max(0, n_layers // 4 - 1)
+            idx4 = max(0, n_layers // 2 - 1)
+            idx6 = max(0, 3 * n_layers // 4 - 1)
+            idx8 = n_layers - 1
+            z2 = self._tokens_to_spatial(intermediate_tokens[idx2])
+            z4 = self._tokens_to_spatial(intermediate_tokens[idx4])
+            z6 = self._tokens_to_spatial(intermediate_tokens[idx6])
+            z8 = self._tokens_to_spatial(intermediate_tokens[idx8])
+        else:
+            z = self._tokens_to_spatial(intermediate_tokens)
+            z2 = z4 = z6 = z8 = z
+
+        # Stage 1: 8^3 -> 16^3
+        x1 = self.up1(z8)
+        s1 = self.skip_l6(z6)
+        x1 = self.fuse1(torch.cat([x1, s1], dim=1))
+
+        # Stage 2: 16^3 -> 32^3
+        x2 = self.up2(x1)
+        s2 = self.skip_l4(z4)
+        x2 = self.fuse2(torch.cat([x2, s2], dim=1))
+
+        # Native stem features (zeros when raw volume is unavailable, e.g. probing).
+        if raw_volume is not None:
+            f128 = self.stem_128(raw_volume)
+            f64 = self.stem_64(f128)
+        else:
+            B = x2.shape[0]
+            dev, dt = x2.device, x2.dtype
+            f64 = torch.zeros(B, 32, 64, 64, 64, device=dev, dtype=dt)
+            f128 = torch.zeros(B, 16, 128, 128, 128, device=dev, dtype=dt)
+
+        # Stage 3: 32^3 -> 64^3 with stem fusion
+        x3 = self.up3(x2)
+        s3 = self.skip_l2(z2)
+        x3 = self.fuse3(torch.cat([x3, s3, f64], dim=1))
+
+        # Stage 4: 64^3 -> 128^3 with stem fusion
+        x4 = self.up4(x3)
+        x4 = self.fuse4(torch.cat([x4, f128], dim=1))
+        out = self.head(x4)
+
+        if self.deep_supervision and self.training:
+            return [out, self.ds3(x3), self.ds2(x2), self.ds1(x1)]
+        return out
+
+
 class JEPASegmentationModel3D(nn.Module):
     r"""
     Unified Downstream 3D Volumetric Segmentation Architecture.
@@ -248,6 +431,14 @@ class JEPASegmentationModel3D(nn.Module):
             self.decoder = MultiScaleViTSegmentationDecoder3D(
                 in_dim=embed_dim,
                 out_channels=out_channels,
+                grid_size=self.encoder.grid_size,
+                deep_supervision=deep_supervision,
+            )
+        elif decoder_type == "unetr_hybrid":
+            self.decoder = HybridUNETRDecoder3D(
+                in_dim=embed_dim,
+                out_channels=out_channels,
+                in_channels=in_channels,
                 grid_size=self.encoder.grid_size,
                 deep_supervision=deep_supervision,
             )
@@ -317,6 +508,13 @@ class JEPASegmentationModel3D(nn.Module):
             else:
                 _, intermediates = self.encoder(x, return_intermediate=True)
             return self.decoder(intermediates)
+        elif self.decoder_type == "unetr_hybrid":
+            if self.freeze_encoder:
+                with torch.no_grad():
+                    _, intermediates = self.encoder(x, return_intermediate=True)
+            else:
+                _, intermediates = self.encoder(x, return_intermediate=True)
+            return self.decoder(intermediates, raw_volume=x)
         else:
             if self.freeze_encoder:
                 with torch.no_grad():

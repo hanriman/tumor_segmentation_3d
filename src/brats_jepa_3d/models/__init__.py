@@ -2,6 +2,7 @@ from .ijepa_3d import IJEPA3D
 from .nnunet_3d import BraTS3DnnUNet
 from .predictor_3d import JEPAPredictor3D
 from .segmentation_head_3d import (
+    HybridUNETRDecoder3D,
     JEPASegmentationModel3D,
     MultiScaleViTSegmentationDecoder3D,
     ViTSegmentationDecoder3D,
@@ -15,6 +16,7 @@ __all__ = [
     "IJEPA3D",
     "BraTS3DUNet",
     "BraTS3DnnUNet",
+    "HybridUNETRDecoder3D",
     "JEPAPredictor3D",
     "JEPASegmentationModel3D",
     "MultiScaleViTSegmentationDecoder3D",

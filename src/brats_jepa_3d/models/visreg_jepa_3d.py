@@ -69,6 +69,7 @@ class VisRegJEPA3D(nn.Module):
         images: torch.Tensor,
         context_indices: torch.Tensor,
         target_indices_list: list[torch.Tensor],
+        context_tissue_mask: torch.Tensor | None = None,
     ) -> dict[str, Any]:
         # 1. Forward encoder on full image without gradients for target representations
         was_training = self.context_encoder.training
@@ -83,8 +84,25 @@ class VisRegJEPA3D(nn.Module):
             images, patch_indices=context_indices
         )  # [B, N_ctx, embed_dim]
 
-        # 3. Project context tokens through MLP for VisReg regularization
-        projected_tokens = self.projector(context_tokens)  # [B, N_ctx, proj_dim]
+        # 3. Project context tokens through MLP for VisReg regularization.
+        # Brain-aware filtering: regularize tissue tokens only so the Gaussian
+        # match fits the tissue manifold, not the air-padding spike.
+        # Falls back to all tokens when tissue is scarce (<32 tokens).
+        full_projected = self.projector(context_tokens)  # [B, N_ctx, proj_dim]
+        if context_tissue_mask is not None:
+            mask = context_tissue_mask.to(device=full_projected.device)
+            if mask.dim() == 2 and mask.shape == context_tokens.shape[:2]:
+                tissue_counts = mask.sum(dim=1)
+                if bool((tissue_counts >= 32).all()):
+                    projected_tokens = full_projected[mask]  # [N_tissue, proj_dim]
+                else:
+                    projected_tokens = full_projected.reshape(
+                        -1, full_projected.shape[-1]
+                    )
+            else:
+                projected_tokens = full_projected
+        else:
+            projected_tokens = full_projected
 
         predictions = []
         targets = []

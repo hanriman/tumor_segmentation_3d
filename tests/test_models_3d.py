@@ -153,8 +153,15 @@ def test_segmentation_decoders_3d():
 
 def test_supervised_baselines_3d(sample_volume_3d):
     unet = BraTS3DUNet(channels=(16, 32, 64, 128, 256), num_res_units=1)
+    unet.eval()
     out_unet = unet(sample_volume_3d)
     assert out_unet.shape == (2, 1, 128, 128, 128)
+
+    unet.train()
+    ds_out = unet(sample_volume_3d)
+    assert isinstance(ds_out, list) and len(ds_out) == 4
+    assert [tuple(o.shape[2:]) for o in ds_out] == [
+        (128, 128, 128), (64, 64, 64), (32, 32, 32), (16, 16, 16)]
 
     nnunet = BraTS3DnnUNet(filters=[16, 32, 64, 128, 256], deep_supervision=False)
     out_nnunet = nnunet(sample_volume_3d)

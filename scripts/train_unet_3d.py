@@ -22,7 +22,7 @@ from brats_jepa_3d.config import (
     merge_config_with_args,
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
-from brats_jepa_3d.losses import CombinedDiceBCELoss3D
+from brats_jepa_3d.losses import build_segmentation_criterion, resolve_seg_loss_type
 from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
 from brats_jepa_3d.models import BraTS3DUNet
 from brats_jepa_3d.utils import (
@@ -77,6 +77,14 @@ def parse_args():
         help="Path to checkpoint file to resume training from",
     )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
+    parser.add_argument("--deep_supervision", action="store_true", default=True)
+    parser.add_argument("--no_deep_supervision", "--no-deep-supervision", action="store_false", dest="deep_supervision")
+    parser.add_argument(
+        "--loss_type", type=str, default="dice_bce", choices=["dice_bce", "tversky"],
+        help="Overlap loss: symmetric Dice+BCE (default) or asymmetric Tversky(beta=0.7)+BCE",
+    )
+    parser.add_argument("--tversky_alpha", type=float, default=0.3)
+    parser.add_argument("--tversky_beta", type=float, default=0.7)
     return parser.parse_args()
 
 
@@ -130,6 +138,7 @@ def main():
     device = get_device()
     logger = setup_logger("train_unet_3d", LOGS_DIR / "unet_3d_train.log")
     logger.info(f"Starting 3D Residual UNet Training: Device={device}, AMP={args.amp}")
+    logger.info(f"Deep supervision: {getattr(args, 'deep_supervision', True)}")
 
     aug_tf = VolumetricAugmentations3D(
         flip_prob=getattr(args, "rand_flip_prob", getattr(args, "flip_prob", 0.5)),
@@ -194,9 +203,15 @@ def main():
         strides=tuple(getattr(args, "strides", (2, 2, 2, 2))),
         num_res_units=getattr(args, "num_res_units", 2),
         dropout=getattr(args, "dropout", 0.1),
+        deep_supervision=getattr(args, "deep_supervision", True),
     ).to(device)
 
-    criterion = CombinedDiceBCELoss3D()
+    criterion = build_segmentation_criterion(
+        resolve_seg_loss_type(args),
+        deep_supervision=getattr(args, "deep_supervision", True),
+        tversky_alpha=getattr(args, "tversky_alpha", 0.3),
+        tversky_beta=getattr(args, "tversky_beta", 0.7),
+    )
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )

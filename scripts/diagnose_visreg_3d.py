@@ -10,7 +10,6 @@ Usage:
 """
 import argparse
 import sys
-from collections import deque
 from pathlib import Path
 
 import torch
@@ -68,8 +67,20 @@ def main():
         ckpt = torch.load(args.checkpoint, map_location="cpu")
         model = VisRegJEPA3D()
         sd = ckpt.get("model_state_dict", ckpt)
-        pref = {k[len("context_encoder."):]: v for k, v in sd.items() if k.startswith("context_encoder.")}
-        model.context_encoder.load_state_dict(pref or sd, strict=False)
+        # Full SSL state dict (context_encoder + projector + predictor) when
+        # available: D3 probes projected tokens, so the trained projector matters.
+        # Falls back to encoder-only loading for encoder-only checkpoints.
+        missing, unexpected = model.load_state_dict(sd, strict=False)
+        n_matched = len(sd) - len([k for k in sd if k in missing])
+        if n_matched == 0:
+            pref = {k[len("context_encoder."):]: v for k, v in sd.items()
+                    if k.startswith("context_encoder.")}
+            model.context_encoder.load_state_dict(pref, strict=False)
+            n_matched = len(pref)
+            print(f"Loaded encoder-only weights ({n_matched} keys); projector/predictor random.")
+        else:
+            print(f"Loaded full SSL weights ({n_matched} keys matched, "
+                  f"{len(missing)} missing, {len(unexpected)} unexpected).")
         model.eval()
         crit = VisRegLoss()
         air_losses, tis_losses, s_all, s_tis, w_all, w_tis = [], [], [], [], [], []
@@ -82,10 +93,10 @@ def main():
                 ctx = out["context_indices"].unsqueeze(0)
                 tgt = [t.unsqueeze(0) for t in out["target_indices_list"]]
                 fwd = model(img, ctx, tgt)
-                for p, t in zip(fwd["predictions"], fwd["targets"]):
+                for p, t, tb in zip(fwd["predictions"], fwd["targets"], tgt):
                     tn = F.layer_norm(t.detach(), (t.shape[-1],))
                     l = F.smooth_l1_loss(p, tn, reduction="none").mean(-1)[0]
-                    is_air = torch.tensor([fr[x] < 0.10 for x in tgt[0][0].tolist()])
+                    is_air = torch.tensor([fr[x] < 0.10 for x in tb[0].tolist()])
                     air_losses.append(l[is_air].mean().item() if is_air.any() else float("nan"))
                     tis_losses.append(l[~is_air].mean().item() if (~is_air).any() else float("nan"))
                 z = fwd["projected_tokens"].reshape(-1, fwd["projected_tokens"].shape[-1])

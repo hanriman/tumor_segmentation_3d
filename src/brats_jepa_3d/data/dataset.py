@@ -79,6 +79,11 @@ class BraTS3DDataset(Dataset):
 
         self.df = df
         self.cache: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+        # Monotonic call counter mixed into the masking generator seed so that
+        # masks vary across epochs (same idx must NOT yield the same mask every
+        # epoch). Deterministic per (seed, access pattern); worker-local copies
+        # diverge across workers, which is intended.
+        self._mask_counter = 0
 
     def __len__(self) -> int:
         return len(self.df)
@@ -138,10 +143,41 @@ class BraTS3DDataset(Dataset):
             "index": idx,
         }
 
-        # Apply 3D JEPA multi-block masking
+        # Apply 3D JEPA multi-block masking (brain-aware when brain_mask is known).
+        # Token brain fractions are pooled AFTER augmentation so flips stay consistent.
         if self.masking_transform is not None:
-            mask_dict = self.masking_transform()
+            token_frac = None
+            try:
+                import torch.nn.functional as _F
+
+                bm = brain_mask.detach().float()
+                if bm.dim() == 4 and bm.shape[0] == 1:
+                    pooled = _F.avg_pool3d(bm.unsqueeze(0), kernel_size=16, stride=16)
+                    token_frac = pooled.reshape(-1)
+                elif bm.dim() == 3:
+                    pooled = _F.avg_pool3d(bm.unsqueeze(0).unsqueeze(0), kernel_size=16, stride=16)
+                    token_frac = pooled.reshape(-1)
+            except Exception:
+                token_frac = None
+            try:
+                _gen = torch.Generator()
+                # Monotonic counter: same idx yields different masks across epochs.
+                self._mask_counter += 1
+                _gen.manual_seed(
+                    (torch.initial_seed() + idx * 7919 + self._mask_counter * 104729) % 2**32
+                )
+            except Exception:
+                _gen = None
+            try:
+                mask_dict = self.masking_transform(
+                    token_brain_frac=token_frac, generator=_gen
+                )
+            except TypeError:
+                # Backward compat: legacy masking callables without new kwargs.
+                mask_dict = self.masking_transform()
             sample["context_indices"] = mask_dict["context_indices"]
             sample["target_indices_list"] = mask_dict["target_indices_list"]
+            if "context_tissue_mask" in mask_dict:
+                sample["context_tissue_mask"] = mask_dict["context_tissue_mask"]
 
         return sample

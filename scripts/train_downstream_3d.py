@@ -22,7 +22,7 @@ from brats_jepa_3d.config import (
     merge_config_with_args,
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
-from brats_jepa_3d.losses import CombinedDiceBCELoss3D, DeepSupervisionLoss3D
+from brats_jepa_3d.losses import build_segmentation_criterion, resolve_seg_loss_type
 from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
 from brats_jepa_3d.models import JEPASegmentationModel3D
 from brats_jepa_3d.utils import (
@@ -39,7 +39,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Downstream 3D Volumetric Fine-Tuning")
     parser.add_argument("--model_type", type=str, default="sigreg_jepa")
     parser.add_argument(
-        "--decoder_type", type=str, default="multiscale", choices=["multiscale", "bottleneck"]
+        "--decoder_type", type=str, default="multiscale", choices=["multiscale", "bottleneck", "unetr_hybrid"]
     )
     parser.add_argument(
         "--pretrained_checkpoint",
@@ -52,7 +52,14 @@ def parse_args():
         action="store_true",
         help="Linear/decoder probing: freeze encoder weights",
     )
-    parser.add_argument("--deep_supervision", action="store_true", default=False)
+    parser.add_argument("--deep_supervision", action="store_true", default=True)
+    parser.add_argument("--no_deep_supervision", "--no-deep-supervision", action="store_false", dest="deep_supervision")
+    parser.add_argument(
+        "--loss_type", type=str, default="dice_bce", choices=["dice_bce", "tversky"],
+        help="Overlap loss: symmetric Dice+BCE (default) or asymmetric Tversky(beta=0.7)+BCE",
+    )
+    parser.add_argument("--tversky_alpha", type=float, default=0.3)
+    parser.add_argument("--tversky_beta", type=float, default=0.7)
     parser.add_argument("--config", type=str, default=None, help="Path to base YAML config")
     parser.add_argument("--model_config", type=str, default=None, help="Path to model YAML config")
     parser.add_argument(
@@ -260,7 +267,7 @@ def main():
             candidates = [
                 p
                 for p in sorted(CHECKPOINTS_DIR.glob(f"{args.model_type}*.pt"))
-                if not any(dec in p.name for dec in ("multiscale", "bottleneck", "downstream"))
+                if not any(dec in p.name for dec in ("multiscale", "bottleneck", "unetr_hybrid", "hybrid", "downstream"))
             ]
             if candidates:
                 ckpt_path = candidates[-1]
@@ -281,7 +288,12 @@ def main():
             "No pre-trained checkpoint specified or found. Training encoder from random initialization."
         )
 
-    criterion = DeepSupervisionLoss3D() if args.deep_supervision else CombinedDiceBCELoss3D()
+    criterion = build_segmentation_criterion(
+        resolve_seg_loss_type(args),
+        deep_supervision=args.deep_supervision,
+        tversky_alpha=getattr(args, "tversky_alpha", 0.3),
+        tversky_beta=getattr(args, "tversky_beta", 0.7),
+    )
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(
         trainable_params,

@@ -34,14 +34,14 @@ Gliomas (glioblastomas and astrocytomas) are intrinsically **three-dimensional, 
 | **Grid Resampling** | Non-zero brain bounding box $\to$ trilinear resampling to canonical $128^3$ isotropic grid. | **Isensee et al. (2021)** (*Nature Methods*). Prevents anatomical truncation of peripheral cortex. |
 | **Parenchyma Normalization** | $X_{c, \text{norm}}(v) = \frac{X_c(v) - \mu_{c,\text{nz}}}{\sigma_{c,\text{nz}} + \epsilon}$ for non-zero voxels. | **Isensee et al. (2021)**. Harmonizes scanner-dependent intensity drift across institutions. |
 | **Random Modality Dropout** | $m_c \sim \text{Bernoulli}(1 - p_{\text{drop}})$, $p_{\text{drop}}=0.25$, fallback $\sum_c m_c \ge 1$. | **Havaei et al. (2017)**; **Dorent et al. (2019)**. Simulates missing MRI sequences, enforcing representation independence. |
-| **3D Context / Target Masking** | 4 Target cuboids ($3 \times 3 \times 3$, $N_{\text{tgt}} \approx 108$) + 3D Connected BFS Context ($N_{\text{ctx}} = 192$). | **Assran et al. (2023)** (*CVPR*). Prevents spatial interpolation shortcuts; constant $N_{\text{ctx}}$ maximizes Tensor Core throughput. |
+| **3D Context / Target Masking** | 4 Target cuboids ($3 \times 3 \times 3$, $N_{\text{tgt}} \approx 108$) + 3D Connected BFS Context ($N_{\text{ctx}} = 192$), **brain-aware**: sampling steered to tissue tokens via `brain_mask`, tissue-only VisReg regularization. | **Assran et al. (2023)** (*CVPR*). Prevents spatial interpolation shortcuts; constant $N_{\text{ctx}}$ maximizes Tensor Core throughput; air-dilution fix (roadmap Phase 8). |
 | **3D Positional Embeddings** | Separable 3D Sinusoidal Coordinate Embeddings $[\text{PE}(z) \,\|\, \text{PE}(y) \,\|\, \text{PE}(x)]$. | **Vaswani et al. (2017)**; **Feichtenhofer et al. (2022)**. Imparts immediate 3D metric spatial topology from step 0. |
 | **Context Gather (Zero Leakage)** | $\mathbf{Z}_{\text{ctx}} = \text{Encoder}(\text{gather}(\mathbf{Z}_0, \text{idx}_{\text{ctx}})) \in \mathbb{R}^{B \times 192 \times 384}$. | **Assran et al. (2023)**. Evaluates strictly visible tokens; reduces self-attention FLOPs by $85.9\%$ ($192^2 / 512^2$). |
 | **Projector MLP** | $z = W_2(\text{GELU}(\text{LN}(W_1 h + b_1))) + b_2: 384 \to 1024 \to 128$. | **Tishby et al. (2000)**; **Balestriero & LeCun (2025)**. Information Bottleneck decouples task representations from Gaussian forces. |
 | **SigReg Gaussianity Test** | $\mathcal{T}_{\text{EP}} = N \int |\hat{\phi}_N(t) - \phi_0(t)|^2 d\mu(t)$ over $M=256$ 1D rays. | **Balestriero & LeCun (2025)**; **Epps & Pulley (1983)**. Sample factor $N$ cancels $1/N$ ECF derivative, yielding $O(1)$ per-sample gradients. |
 | **VisReg Decoupled Moments** | $\mathcal{L}_{\text{VisReg}} = \mathcal{L}_{\text{JEPA}} + \lambda_{\text{c}} \frac{\|\mu\|_2^2}{D} + \lambda_{\text{sc}} \frac{\sum (1-\sigma_d)^2}{D} + \lambda_{\text{sh}} W_2^2$. | **Wu, Balestriero, & Levine (2026)**; **Villani (2009)**. Stop-gradient on $\sigma$ prevents dimensional collapse; closed-form 1D sort in $O(N \log N)$. |
 | **Hierarchical 3D FPN Decoder** | Lateral skips from $L_2, L_4, L_6, L_8$ with progressive ConvTranspose3d and `GroupNorm`. | **Lin et al. (2017)**; **Hatamizadeh et al. (2022)**; **Wu & He (2018)**. Restores high-frequency boundary gradients; GroupNorm stabilizes small 3D batches ($B \le 4$). |
-| **Supervised 3D Baselines** | MONAI 3D Residual UNet and MONAI 3D DynUNet with deep supervision ($w_s = 2^{-s}/\sum 2^{-j}$). | **Ronneberger et al. (2015)**; **Isensee et al. (2021)**; **Lee et al. (2015)**. Establishes state-of-the-art supervised benchmark parity. |
+| **Supervised 3D Baselines** | MONAI 3D Residual UNet (+ ds1/ds2/ds3 heads) and MONAI 3D DynUNet, both with deep supervision default-ON ($w_s = 2^{-s}/\sum 2^{-j}$); asymmetric Tversky opt-in; 4-fold TTA at eval. | **Ronneberger et al. (2015)**; **Isensee et al. (2021)**; **Lee et al. (2015)**; **Salehi et al. (2017)**. Establishes state-of-the-art supervised benchmark parity. |
 | **Exact 3D HD95 Metric** | $d_{\text{HD95}}^{3\text{D}}$ via 3D 26-connectivity morphological erosion and `cKDTree` in physical mm ($1.0\text{ mm}^3$). | **Huttenlocher et al. (1993)**; **Taha & Hanbury (2015)**; **Powers (2011)**. Guarded zero-division prevents artificial epsilon score inflation. |
 | **Effective Rank ($S_k^2$)** | $\text{erank}(Z) = \exp\left(-\sum p_k \ln p_k\right)$, $p_k = S_k^2 / \sum S_j^2$. | **Roy & Vetterli (2007)**. Strictly uses covariance eigenvalues $S_k^2$, preventing linear $S_k$ from masking dimensional collapse. |
 | **Centered Cosine Sim** | $\bar{S}_{\text{centered}} = \frac{1}{N(N-1)} \sum_{i \neq j} \frac{(z_i - \bar{z})^\top (z_j - \bar{z})}{\|z_i - \bar{z}\|_2 \|z_j - \bar{z}\|_2}$. | **Wang & Isola (2020)**. Decouples centroid translation from angular dispersion, diagnosing directional collapse. |
@@ -64,6 +64,10 @@ thesis_3d/
 ├── agents.md                     # Scientific writing & research guidelines
 │
 ├── docs/
+│   ├── roadmap_improvements_ablation_dataset.md # Phased engineering roadmap (v2.5: DS/TTA/Tversky/hybrid/brain-aware/full-pool)
+│   ├── improving_3d_jepa_segmentation_performance.md # Root-cause analysis: 79.7% vs 87.6% gap + 7 fixes
+│   ├── training_validation_bottleneck_and_hd95_optimization.md # 18.7x validation speedup
+│   ├── vit_from_scratch_ablation.md   # From-scratch ViT baseline rationale
 │   ├── audit_and_remediation_plan.md    # Formal mathematical audit & verification report
 │   ├── audit_and_remediation_plan_3d.md # Forensic root-cause analysis & code remediation
 │   ├── audit_report_2026-09-18.md       # Exhaustive forensic audit & verification sign-off
@@ -73,9 +77,10 @@ thesis_3d/
 │   └── kaggle_guide.md                  # End-to-end Kaggle GPU execution guide
 │
 ├── notebooks/
-│   ├── 01_train_visreg_3d.ipynb  # Primary method: 3D VisReg pre-training & fine-tuning
+│   ├── 01_train_visreg_3d.ipynb  # Primary method: VisReg pre-training, diagnose cell, FPN + hybrid finetune
 │   ├── 02_train_nnunet_3d.ipynb  # SOTA baseline: 3D DynUNet with deep supervision
 │   ├── 03_train_unet_3d.ipynb    # Classical baseline: 3D Residual UNet
+│   ├── 04_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT ablation
 │   └── kaggle_runner_3d.ipynb    # Interactive all-in-one runner with toggles
 │
 ├── configs/                      # Modular YAML configuration hierarchy
@@ -99,28 +104,30 @@ thesis_3d/
 │       ├── data/
 │       │   ├── dataset.py        # BraTS3DDataset with bounded RAM caching & fraction sampling
 │       │   ├── transforms.py     # RandomModalityDropout3D, Rician noise, B1 bias field
-│       │   └── masking.py        # JEPAMaskingTransform3D (3D cuboids + 3D BFS context)
+│       │   └── masking.py        # JEPAMaskingTransform3D (brain-aware 3D cuboids + 3D BFS context, worker-safe RNG)
 │       ├── models/
 │       │   ├── vision_transformer_3d.py # PatchEmbed3D + 3D Sincos Pos + ViTEncoder3D
 │       │   ├── predictor_3d.py          # JEPAPredictor3D (4 layers, self-attention)
 │       │   ├── ijepa_3d.py              # Dual-encoder with EMA teacher
 │       │   ├── sigreg_jepa_3d.py        # Single-encoder + Projector MLP (384 -> 1024 -> 128)
 │       │   ├── visreg_jepa_3d.py        # Single-encoder + Projector MLP
-│       │   ├── segmentation_head_3d.py  # 3D Bottleneck & Multi-Scale FPN Decoders
-│       │   ├── unet_3d.py               # 3D Residual UNet (MONAI)
+│       │   ├── segmentation_head_3d.py  # Bottleneck, Multi-Scale FPN & Hybrid UNETR Decoders (native 128³/64³ stem)
+│       │   ├── unet_3d.py               # 3D Residual UNet (MONAI) + ds1/ds2/ds3 deep-supervision heads
 │       │   └── nnunet_3d.py             # 3D DynUNet with Deep Supervision (MONAI)
 │       ├── losses/
 │       │   ├── ijepa_loss.py            # Latent Smooth L1 on LayerNormed detached targets
 │       │   ├── sigreg_loss.py           # Epps-Pulley Gaussianity test (scale factor N, raw 1D rays)
 │       │   ├── visreg_loss.py           # Decoupled Center, Scale, Shape (SWD, stop-grad sigma)
 │       │   ├── dice_bce_loss_3d.py      # Combined Volumetric 3D Dice + Cross-Entropy (multi-class & binary)
-│       │   └── deep_supervision_loss_3d.py # Multi-scale exponential decay supervision (5D & 4D targets)
+│   │   │   ├── tversky_loss_3d.py       # Asymmetric Tversky (α=0.3, β=0.7) + BCE opt-in + criterion factory
+│       │   └── deep_supervision_loss_3d.py # Multi-scale exponential decay supervision (custom base_loss, 5D & 4D targets)
 │       ├── metrics/
 │       │   ├── volumetric_metrics.py    # Guarded 3D Dice, IoU, cKDTree 3D HD95 (Powers 2011)
 │       │   └── probing_metrics.py       # Effective Rank (S^2), Centered Cosine Sim
 │       └── utils/
 │           ├── aggregation.py           # Multi-experiment merging & LaTeX table generation
 │           ├── device.py                # CUDA / MPS / CPU device detection & AMP context
+│   │       ├── tta.py                    # 4-fold orthogonal-reflection TTA (eval, all models)
 │           ├── export.py                # Kaggle artifact staging, zip packaging, and input resolution
 │           ├── logging.py               # MetricTracker, setup_logger & numeric checkpoint sorting
 │           └── seed.py                  # Deterministic PRNG seeding
@@ -129,9 +136,11 @@ thesis_3d/
 │   ├── prepare_data_3d.py        # NIfTI bounding-box cropping, resampling to 128^3 & .npz export
 │   ├── train_jepa_3d.py          # 3D SSL Pre-training runner (50 epochs)
 │   ├── train_downstream_3d.py    # Downstream 3D fine-tuning & linear probing runner
-│   ├── train_unet_3d.py          # Supervised 3D UNet baseline runner
+│   ├── train_unet_3d.py          # Supervised 3D UNet baseline runner (--deep_supervision default-ON)
 │   ├── train_nnunet_3d.py        # Supervised 3D nnU-Net baseline runner
-│   ├── evaluate_3d.py            # Master benchmark evaluator (Dice, HD95, Rank, Latency)
+│   ├── evaluate_3d.py            # Master benchmark evaluator (Dice, HD95, Rank, Latency, --tta)
+│   ├── diagnose_visreg_3d.py       # Real-data D1–D3 masking/regularization probe (Kaggle)
+│   ├── merge_and_resplit_3d.py       # Merge staged pools + grouped patient split (leakage fix)
 │   ├── evaluate_low_data_3d.py   # Label efficiency runner (1% to 100% 3D labels)
 │   ├── evaluate_ood_3d.py        # 3D Scanner shift runner (Rician noise, B1 bias field)
 │   ├── generate_figures_3d.py    # Multi-planar orthogonal & publication figures
@@ -139,7 +148,7 @@ thesis_3d/
 │   ├── combine_and_generate_paper_artifacts.py # 1-Click master multi-experiment aggregator & LaTeX exporter
 │   └── run_full_pipeline_3d.py   # Master automation orchestrator
 │
-├── tests/                        # Pytest automated test suite (79 unit tests)
+├── tests/                        # Pytest automated test suite (116 unit tests)
 │   ├── conftest.py               # Synthetic 3D volume fixtures
 │   ├── test_data_3d.py           # Dataset, 3D masking collision & BFS verification
 │   ├── test_models_3d.py         # Forward/backward graphs & parameter isolation
@@ -179,7 +188,7 @@ uv pip install -e ".[dev]"
 ### Step 2: Run Unit Tests
 ```bash
 pytest tests/ -v
-# Verified: 79 passed in ~15s
+# Verified: 116 passed (see roadmap Phase 7)
 ```
 
 ---
@@ -216,7 +225,7 @@ python scripts/train_jepa_3d.py --model_type ijepa --epochs 50 --batch_size 4 --
 
 ```bash
 # End-to-end full fine-tuning with Hierarchical Multi-Scale 3D FPN Decoder (Default & Primary Benchmark)
-python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type multiscale --epochs 30 --amp
+python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type multiscale --epochs 30 --amp  # + --decoder_type unetr_hybrid, --loss_type tversky, --no_deep_supervision opt-outs
 python scripts/train_downstream_3d.py --model_type sigreg_jepa --decoder_type multiscale --epochs 30 --amp
 
 # Linear / Decoder probing (frozen encoder weights, mechanistic ablation)
@@ -241,7 +250,7 @@ python scripts/train_nnunet_3d.py --epochs 30 --batch_size 2 --amp
 ### 5. Full Evaluation Suite
 ```bash
 # Master volumetric benchmark across models (supports --model_type or --all_models)
-python scripts/evaluate_3d.py --batch_size 2 --amp
+python scripts/evaluate_3d.py --batch_size 2 --amp --tta  # 4-fold TTA, all models
 
 # Low-data label efficiency benchmark (pass --model_type to evaluate a single model, or omit to run all available)
 python scripts/evaluate_low_data_3d.py --model_type visreg_jepa --fractions 0.01 0.05 0.10 0.25 0.50 1.00 --amp
@@ -268,7 +277,7 @@ python scripts/run_full_pipeline_3d.py --model_type all
 
 ### 7. Running on Kaggle GPU & Streamlined Local Aggregation
 For zero-setup cloud execution on free NVIDIA Tesla T4 GPUs (16 GB):
-1. **Package Data**: Run `python scripts/package_for_kaggle.py` and upload `dist_kaggle/brats_3d_datasets.zip` to Kaggle as a dataset named `brats-3d-datasets`.
+1. **Package Data**: Run `python scripts/package_for_kaggle.py` and upload `dist_kaggle/brats_3d_full.zip` to Kaggle as a dataset named `brats-3d-full` (1,621 scans, grouped split: train 1,144 / val 235 / test 242).
 2. **Train Models in Parallel**:
    - Run `notebooks/01_train_visreg_3d.ipynb` and `notebooks/02_train_nnunet_3d.ipynb` (and `03_train_unet_3d.ipynb`) across concurrent GPU sessions.
    - Each model notebook evaluates its own test split performance, low-data label efficiency, and OOD robustness self-contained on the GPU before exporting.
@@ -286,7 +295,9 @@ For zero-setup cloud execution on free NVIDIA Tesla T4 GPUs (16 GB):
 ## 6. Empirical Benchmarks & Diagnostic Protocols
 
 ### 6.1 Empirical Kaggle Benchmark Results (5-Epoch Verification Runs)
-Measured on the independent BraTS 2024 GLI held-out test split ($N=271$ volumes) using NVIDIA Tesla T4 GPU (16 GB VRAM) with Automatic Mixed Precision (`--amp`):
+> [!NOTE]
+> Historical runs below used the legacy pool/test split ($N=271$). The current pool is 1,621 scans with a grouped patient split (test $N=242$); re-benchmark on the consolidated Kaggle run before citing.
+Measured on NVIDIA Tesla T4 GPU (16 GB VRAM) with Automatic Mixed Precision (`--amp`):
 
 | Model Architecture | 3D Dice (%) | 3D IoU (%) | HD95 (mm) | Latency (ms / vol) | EffRank ($S^2$) | Centered CosSim |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |

@@ -42,6 +42,7 @@ from brats_jepa_3d.models import (
 from brats_jepa_3d.utils import (
     get_autocast_context,
     get_device,
+    predict_with_tta_3d,
     set_seed,
     setup_logger,
     sort_checkpoints_by_epoch,
@@ -68,11 +69,20 @@ def parse_args():
         help="Evaluate 3D ViT-FPN trained from random initialization (no pre-trained checkpoint)",
     )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
+    parser.add_argument(
+        "--decoder_type", type=str, default="multiscale",
+        choices=["multiscale", "bottleneck", "unetr_hybrid"],
+    )
+    parser.add_argument(
+        "--tta", action="store_true", default=False,
+        help="4-fold orthogonal-reflection test-time augmentation",
+    )
     return parser.parse_args()
 
 
 def evaluate_perturbation(
-    model, loader, device, perturb_fn, amp: bool = True, smoke_test: bool = False
+    model, loader, device, perturb_fn, amp: bool = True, smoke_test: bool = False,
+    tta: bool = False,
 ) -> float:
     model.eval()
     dices = []
@@ -87,8 +97,11 @@ def evaluate_perturbation(
                 images = perturb_fn(images, brain_mask)
 
             with get_autocast_context(device, enabled=amp):
-                out = model(images)
-                logits = out[0] if isinstance(out, (list, tuple)) else out
+                if tta:
+                    logits = predict_with_tta_3d(model, images)
+                else:
+                    out = model(images)
+                    logits = out[0] if isinstance(out, (list, tuple)) else out
 
             metrics = compute_volumetric_metrics_3d(logits, masks)
             dices.extend(metrics["dice_per_sample"])
@@ -191,7 +204,7 @@ def main():
                 encoder_depth=jepa_cfg.get("encoder_depth", 8),
                 num_heads=jepa_cfg.get("num_heads", 6),
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                decoder_type="multiscale",
+                decoder_type=args.decoder_type,
                 deep_supervision=ds_flag,
             )
             sd = torch.load(ckpt, map_location=device)
@@ -211,8 +224,10 @@ def main():
             jepa_cfg_path = CONFIGS_DIR / "model" / f"{prefix}_3d.yaml"
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
+            dec_candidates = [p for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*{args.decoder_type}*best.pt")) if "scratch" not in p.name.lower()]
             ms_candidates = [p for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*multiscale*best.pt")) if "scratch" not in p.name.lower()]
-            candidates = ms_candidates if ms_candidates else [p for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*best.pt")) if "scratch" not in p.name.lower()]
+            all_candidates = [p for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*best.pt")) if "scratch" not in p.name.lower()]
+            candidates = dec_candidates or ms_candidates or all_candidates
             ckpt = candidates[-1] if candidates else None
 
             ds_flag = False
@@ -233,7 +248,7 @@ def main():
                 encoder_depth=jepa_cfg.get("encoder_depth", 8),
                 num_heads=jepa_cfg.get("num_heads", 6),
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                decoder_type="multiscale",
+                decoder_type=args.decoder_type,
                 deep_supervision=ds_flag,
             )
             if ckpt and ckpt.exists():
@@ -364,7 +379,8 @@ def main():
                 row[m_name] = "N/A"
                 continue
             dice = evaluate_perturbation(
-                m, test_loader, device, p_fn, amp=args.amp, smoke_test=args.smoke_test
+                m, test_loader, device, p_fn, amp=args.amp, smoke_test=args.smoke_test,
+                tta=args.tta,
             )
             logger.info(f"{m_name} -> Dice: {dice * 100:.2f}%")
             row[m_name] = f"{dice * 100:.2f}%"

@@ -20,12 +20,13 @@ from brats_jepa_3d.config import (
     load_yaml_config,
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
-from brats_jepa_3d.losses import CombinedDiceBCELoss3D, DeepSupervisionLoss3D
+from brats_jepa_3d.losses import build_segmentation_criterion, resolve_seg_loss_type
 from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
 from brats_jepa_3d.models import BraTS3DnnUNet, BraTS3DUNet, JEPASegmentationModel3D
 from brats_jepa_3d.utils import (
     get_autocast_context,
     get_device,
+    predict_with_tta_3d,
     set_seed,
     setup_logger,
     sort_checkpoints_by_epoch,
@@ -66,6 +67,20 @@ def parse_args():
         default=False,
         help="Evaluate 3D ViT-FPN trained from random initialization (no pre-trained checkpoint)",
     )
+    parser.add_argument(
+        "--decoder_type", type=str, default="multiscale",
+        choices=["multiscale", "bottleneck", "unetr_hybrid"],
+    )
+    parser.add_argument(
+        "--loss_type", type=str, default="dice_bce", choices=["dice_bce", "tversky"],
+        help="Overlap loss: symmetric Dice+BCE (default) or asymmetric Tversky(beta=0.7)+BCE",
+    )
+    parser.add_argument("--tversky_alpha", type=float, default=0.3)
+    parser.add_argument("--tversky_beta", type=float, default=0.7)
+    parser.add_argument(
+        "--tta", action="store_true", default=False,
+        help="4-fold orthogonal-reflection test-time augmentation on test eval",
+    )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
 
@@ -78,9 +93,15 @@ def train_and_eval(
     epochs: int,
     amp: bool = True,
     smoke_test: bool = False,
+    loss_type: str = "dice_bce",
+    tversky_alpha: float = 0.3,
+    tversky_beta: float = 0.7,
+    tta: bool = False,
 ) -> float:
     use_deep_supervision = getattr(model, "deep_supervision", False)
-    criterion = DeepSupervisionLoss3D() if use_deep_supervision else CombinedDiceBCELoss3D()
+    criterion = build_segmentation_criterion(
+        loss_type, use_deep_supervision, tversky_alpha, tversky_beta
+    )
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=3e-4, weight_decay=1e-4)
 
@@ -139,8 +160,11 @@ def train_and_eval(
             images = batch["image"].to(device)
             masks = batch["mask"].to(device)
             with get_autocast_context(device, enabled=amp):
-                out = model(images)
-                logits = out[0] if isinstance(out, (list, tuple)) else out
+                if tta:
+                    logits = predict_with_tta_3d(model, images)
+                else:
+                    out = model(images)
+                    logits = out[0] if isinstance(out, (list, tuple)) else out
             metrics = compute_volumetric_metrics_3d(logits, masks)
             test_dices.extend(metrics["dice_per_sample"])
             if smoke_test and batch_idx >= 1:
@@ -235,7 +259,7 @@ def main():
                 encoder_depth=jepa_cfg.get("encoder_depth", 8),
                 num_heads=jepa_cfg.get("num_heads", 6),
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                decoder_type="multiscale",
+                decoder_type=args.decoder_type,
                 deep_supervision=True,
             ).to(device)
 
@@ -260,7 +284,7 @@ def main():
                 fallback_ckpts = [
                     p
                     for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*.pt"))
-                    if not any(dec in p.name.lower() for dec in ("multiscale", "bottleneck", "downstream", "scratch"))
+                    if not any(dec in p.name.lower() for dec in ("multiscale", "bottleneck", "unetr_hybrid", "hybrid", "downstream", "scratch"))
                 ]
                 ckpt_path = fallback_ckpts[-1] if fallback_ckpts else None
 
@@ -288,7 +312,7 @@ def main():
                 encoder_depth=jepa_cfg.get("encoder_depth", 8),
                 num_heads=jepa_cfg.get("num_heads", 6),
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                decoder_type="multiscale",
+                decoder_type=args.decoder_type,
                 deep_supervision=ds_flag,
             )
             ckpt = torch.load(ckpt_path, map_location=device)
@@ -369,6 +393,10 @@ def main():
                 epochs=epochs,
                 amp=args.amp,
                 smoke_test=args.smoke_test,
+                loss_type=resolve_seg_loss_type(args),
+                tversky_alpha=getattr(args, "tversky_alpha", 0.3),
+                tversky_beta=getattr(args, "tversky_beta", 0.7),
+                tta=args.tta,
             )
             logger.info(f"{name} ({frac * 100:.1f}% labels) -> Test Dice: {dice * 100:.2f}%")
             row[name] = f"{dice * 100:.2f}%"

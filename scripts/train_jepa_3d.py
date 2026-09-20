@@ -327,7 +327,13 @@ def main():
             optimizer.zero_grad()
 
             with get_autocast_context(device, enabled=args.amp):
-                out = model(images, ctx_idx, tgt_idx_list)
+                if args.model_type == "visreg_jepa" and "context_tissue_mask" in batch:
+                    out = model(
+                        images, ctx_idx, tgt_idx_list,
+                        context_tissue_mask=batch["context_tissue_mask"].to(device),
+                    )
+                else:
+                    out = model(images, ctx_idx, tgt_idx_list)
 
                 if args.model_type == "ijepa":
                     loss = criterion(out["predictions"], out["targets"])
@@ -404,7 +410,13 @@ def main():
                 val_tgt_idx_list = [t.to(device) for t in val_batch["target_indices_list"]]
 
                 with get_autocast_context(device, enabled=args.amp):
-                    val_out = model(val_images, val_ctx_idx, val_tgt_idx_list)
+                    if args.model_type == "visreg_jepa" and "context_tissue_mask" in val_batch:
+                        val_out = model(
+                            val_images, val_ctx_idx, val_tgt_idx_list,
+                            context_tissue_mask=val_batch["context_tissue_mask"].to(device),
+                        )
+                    else:
+                        val_out = model(val_images, val_ctx_idx, val_tgt_idx_list)
                     if args.model_type == "ijepa":
                         v_loss = criterion(val_out["predictions"], val_out["targets"])
                         v_loss_dict = {"loss": v_loss, "jepa_loss": v_loss}

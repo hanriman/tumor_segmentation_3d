@@ -1,5 +1,7 @@
 # Comprehensive Technical Guide: Improving 3D VisReg JEPA Volumetric Segmentation Performance
 
+> **Implementation status (2026-09-20, roadmap v2.5):** Solutions 1 (deep supervision default-ON all models), 2 (4-fold TTA), 3 (Tversky opt-in), and 4 (hybrid stem) are **implemented + tested locally**; Solution 7's intent is covered by **brain-aware masking** (Phase 8, pending Kaggle validation); Solutions 5 (300ep) and 6 (8³ tokens) await the consolidated Kaggle run. Benchmarks below are legacy-pool numbers (test $N=271$); current pool is 1,621 scans, test $N=242$.
+
 ## 1. Executive Summary & Problem Formulation
 
 In the empirical benchmark on the BraTS 2024 Adult Glioma cohort ($N=1,266$ training, $271$ validation, $271$ held-out test volumes), the models achieved the following performance profile:
