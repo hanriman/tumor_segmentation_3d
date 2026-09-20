@@ -133,12 +133,17 @@ def plot_benchmark_metrics(metrics_csv: Path, out_dir: Path):
     Plots benchmark comparisons across evaluated models.
     """
     if not metrics_csv.exists():
-        return
+        alt = metrics_csv.parent / "master_3d_benchmark.csv"
+        if alt.exists():
+            metrics_csv = alt
+        else:
+            return
 
     df = pd.read_csv(metrics_csv)
-    if "Model" not in df.columns or len(df) == 0:
+    model_col = "Model Architecture" if "Model Architecture" in df.columns else ("Model" if "Model" in df.columns else None)
+    if model_col is None or len(df) == 0:
         return
-    models = df["Model"].tolist()
+    models = df[model_col].tolist()
 
     # Extract mean Dice
     dices = [safe_float(v) for v in df["Dice (%)"]]

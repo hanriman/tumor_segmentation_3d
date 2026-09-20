@@ -77,6 +77,12 @@ def parse_args():
         help="Path to an explicit checkpoint file (.pt)",
     )
     parser.add_argument(
+        "--from_scratch",
+        action="store_true",
+        default=False,
+        help="Flag indicating the model being evaluated was trained from scratch (no pre-training)",
+    )
+    parser.add_argument(
         "--num_workers",
         type=int,
         default=2,
@@ -207,7 +213,7 @@ def main():
         shuffle=False,
         num_workers=num_workers,
         pin_memory=use_pin_memory,
-        persistent_workers=(num_workers > 0),
+        persistent_workers=False,
         prefetch_factor=2 if num_workers > 0 else None,
     )
 
@@ -225,6 +231,8 @@ def main():
         alias_map = {
             "visreg": "visreg_jepa",
             "visreg_jepa": "visreg_jepa",
+            "vit_scratch": "visreg_jepa",
+            "scratch": "visreg_jepa",
             "sigreg": "sigreg_jepa",
             "sigreg_jepa": "sigreg_jepa",
             "ijepa": "ijepa",
@@ -243,7 +251,13 @@ def main():
 
     results = []
 
-    for label, model_type, decoder_type in models_to_evaluate:
+    for orig_label, model_type, decoder_type in models_to_evaluate:
+        is_scratch = (
+            args.from_scratch
+            or (args.checkpoint and "scratch" in Path(args.checkpoint).name.lower())
+            or (args.model_type and args.model_type.lower() in ("vit_scratch", "scratch"))
+        )
+        label = "3D ViT-FPN (From Scratch)" if (is_scratch and "JEPA" in orig_label) else orig_label
         logger.info(f"Evaluating: {label}")
 
         if args.checkpoint and len(models_to_evaluate) == 1:
@@ -258,6 +272,14 @@ def main():
                 ckpt_file = CHECKPOINTS_DIR / "unet_3d_best.pt"
             elif model_type == "nnunet_3d":
                 ckpt_file = CHECKPOINTS_DIR / "nnunet_3d_best.pt"
+            elif is_scratch:
+                scratch_ckpts = sorted(
+                    CHECKPOINTS_DIR.glob(f"{model_type}_{decoder_type}_scratch_best.pt")
+                ) or sorted(CHECKPOINTS_DIR.glob(f"*{model_type}*scratch*best.pt"))
+                if scratch_ckpts:
+                    ckpt_file = scratch_ckpts[-1]
+                else:
+                    ckpt_file = CHECKPOINTS_DIR / f"{model_type}_{decoder_type}_scratch_best.pt"
             else:
                 downstream_ckpts = sorted(CHECKPOINTS_DIR.glob(f"{model_type}_{decoder_type}_best.pt")) or sorted(
                     CHECKPOINTS_DIR.glob(f"{model_type}*best.pt")

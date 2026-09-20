@@ -8,9 +8,10 @@ Models compared:
 """
 
 import os
-
+from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 # Set publication style
 plt.rcParams.update(
@@ -40,6 +41,18 @@ COLOR_NNUNET = "#1f77b4"  # Professional blue
 COLOR_VISREG = "#d62728"  # Distinct vibrant red / scarlet
 
 FIG_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = Path(FIG_DIR).resolve().parent.parent.parent
+OUTPUTS_DIR = PROJECT_ROOT / "outputs"
+
+
+def safe_float(v, default: float = 0.0) -> float:
+    try:
+        s = str(v).split("±")[0].replace("%", "").strip()
+        if s in ("N/A", "-", "nan", ""):
+            return default
+        return float(s)
+    except (ValueError, TypeError):
+        return default
 
 
 # -------------------------------------------------------------
@@ -50,21 +63,34 @@ def plot_low_data_efficiency():
     volume_counts = [13, 63, 127, 316, 633, 1266]
     x = np.arange(len(fractions))
 
-    # 3D UNet (empirical 5-epoch downstream run)
-    unet_mean = np.array([3.83, 13.35, 24.49, 44.33, 56.69, 64.76])
-    unet_std = np.array([1.20, 2.10, 2.45, 2.20, 1.80, 1.50])
+    # Empirical values from outputs/low_data_3d_summary.csv
+    unet_mean = np.array([3.98, 4.70, 52.66, 65.67, 75.82, 84.79])
+    nnunet_mean = np.array([56.65, 73.63, 79.06, 82.65, 85.14, 87.29])
+    visreg_mean = np.array([47.21, 58.16, 62.10, 67.04, 73.76, 77.13])
 
-    # 3D nnU-Net (empirical 5-epoch downstream run)
-    nnunet_mean = np.array([16.40, 56.03, 64.23, 74.47, 81.18, 81.27])
+    # Try loading directly from outputs/low_data_3d_summary.csv if available
+    low_data_csv = OUTPUTS_DIR / "low_data_3d_summary.csv"
+    if low_data_csv.exists():
+        try:
+            df = pd.read_csv(low_data_csv)
+            col_map = {c.lower(): c for c in df.columns}
+            unet_col = next((c for c in df.columns if "unet" in c.lower() and "nn" not in c.lower()), None)
+            nnunet_col = next((c for c in df.columns if "nnunet" in c.lower() or "nn" in c.lower()), None)
+            visreg_col = next((c for c in df.columns if "visreg" in c.lower() or "jepa" in c.lower()), None)
+            if unet_col:
+                unet_mean = np.array([safe_float(v) for v in df[unet_col]])
+            if nnunet_col:
+                nnunet_mean = np.array([safe_float(v) for v in df[nnunet_col]])
+            if visreg_col:
+                visreg_mean = np.array([safe_float(v) for v in df[visreg_col]])
+        except Exception as e:
+            print(f"Notice: using stored values for low-data ({e})")
+
+    unet_std = np.array([1.20, 1.40, 2.45, 2.20, 1.80, 1.50])
     nnunet_std = np.array([2.50, 2.15, 1.80, 1.45, 1.20, 0.95])
-
-    # 3D VisReg JEPA (empirical 5-epoch downstream run)
-    visreg_mean = np.array([9.90, 45.66, 52.69, 60.24, 62.78, 67.58])
     visreg_std = np.array([1.80, 1.95, 1.70, 1.50, 1.30, 1.10])
 
-    _fig, ax = plt.subplots(figsize=(7.2, 4.4))
-
-    # Grid
+    _fig, ax = plt.subplots(figsize=(7.4, 4.5))
     ax.grid(True, linestyle="--", color="gray", alpha=0.3, zorder=0)
 
     # Plot VisReg JEPA
@@ -117,13 +143,15 @@ def plot_low_data_efficiency():
         x, unet_mean - unet_std, unet_mean + unet_std, color=COLOR_UNET, alpha=0.15, zorder=1
     )
 
-    # Annotate 5% low-data label efficiency (3.4x over standard UNet)
+    # Annotate 5% low-data label efficiency (+53.46% absolute margin over standard UNet; 12.4x higher)
+    v5_unet = unet_mean[1]
+    v5_visreg = visreg_mean[1]
+    diff = v5_visreg - v5_unet
+    ratio = v5_visreg / max(v5_unet, 1e-3)
     ax.annotate(
-        r"$\mathbf{+32.31\%}$ vs 3D UNet"
-        + "\n"
-        + r"($3.4\times$ over standard CNN)",
-        xy=(1, 45.66),
-        xytext=(1.2, 28.0),
+        f"$\\mathbf{{+{diff:.1f}\\%}}$ vs 3D UNet\n(${ratio:.1f}\\times$ over standard CNN)",
+        xy=(1, v5_visreg),
+        xytext=(1.25, 38.0),
         arrowprops={"facecolor": COLOR_VISREG, "shrink": 0.08, "width": 1.5, "headwidth": 6},
         fontsize=9.5,
         fontweight="bold",
@@ -135,7 +163,7 @@ def plot_low_data_efficiency():
     ax.set_xticklabels([f"{f}%\n({v} vols)" for f, v in zip(fractions, volume_counts)])
     ax.set_xlabel("Annotated Training Volume Fraction (Patient Scans)")
     ax.set_ylabel("3D Volumetric Dice Score (%)")
-    ax.set_ylim(0.0, 92.0)
+    ax.set_ylim(0.0, 95.0)
     ax.set_title("Low-Data Volumetric Label Efficiency on BraTS 2024 GLI")
     ax.legend(loc="lower right", frameon=True, framealpha=0.95, edgecolor="#cccccc")
 
@@ -152,19 +180,20 @@ def plot_low_data_efficiency():
 def plot_scanner_shift_robustness():
     conditions = ["Clean\nBaseline", "3D Rician Noise\n" + r"($\sigma=0.08$)", r"3D $B_1$ Inhomogeneity" + "\n(quadratic)"]
 
-    unet_dice = [85.42, 73.10, 78.60]
+    # Empirical values from outputs/ood_3d_summary.csv and master benchmark
+    unet_dice = [86.42, 86.40, 82.80]
     unet_err = [0.03, 0.45, 0.38]
 
-    nnunet_dice = [89.80, 81.20, 84.50]
+    nnunet_dice = [87.61, 87.60, 85.21]
     nnunet_err = [0.11, 0.35, 0.40]
 
-    visreg_dice = [90.12, 87.45, 88.10]
+    visreg_dice = [79.71, 79.71, 59.98]
     visreg_err = [0.02, 0.22, 0.18]
 
     x = np.arange(len(conditions))
     width = 0.25
 
-    _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.4))
+    _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.8, 4.5))
 
     # Left subplot: Dice (%)
     ax1.grid(True, linestyle="--", color="gray", alpha=0.3, zorder=0, axis="y")
@@ -206,17 +235,17 @@ def plot_scanner_shift_robustness():
     ax1.set_title("(A) Volumetric Accuracy Across Scanner Shifts")
     ax1.set_xticks(x)
     ax1.set_xticklabels(conditions, rotation=8, ha="right")
-    ax1.set_ylim(65.0, 95.0)
+    ax1.set_ylim(50.0, 95.0)
     ax1.legend(loc="lower left", framealpha=0.9)
 
     # Right subplot: HD95 (mm in physical space, lower is better)
-    unet_hd = [5.68, 10.42, 8.95]
+    unet_hd = [6.38, 6.40, 8.95]
     unet_hd_err = [0.62, 0.85, 0.70]
 
-    nnunet_hd = [3.71, 6.85, 5.90]
+    nnunet_hd = [6.73, 6.75, 7.50]
     nnunet_hd_err = [0.38, 0.52, 0.45]
 
-    visreg_hd = [3.54, 4.10, 3.95]
+    visreg_hd = [11.04, 11.05, 14.20]
     visreg_hd_err = [0.32, 0.35, 0.30]
 
     ax2.grid(True, linestyle="--", color="gray", alpha=0.3, zorder=0, axis="y")
@@ -248,7 +277,7 @@ def plot_scanner_shift_robustness():
     ax2.set_title("(B) Boundary Surface Error (HD95, lower is better)")
     ax2.set_xticks(x)
     ax2.set_xticklabels(conditions, rotation=8, ha="right")
-    ax2.set_ylim(0, 12.5)
+    ax2.set_ylim(0, 18.0)
 
     plt.tight_layout()
     plt.savefig(os.path.join(FIG_DIR, "ood_domain_generalization.pdf"))
@@ -267,19 +296,19 @@ def plot_missing_modality():
         "Missing Sequence: FLAIR Only\n(Edema-Weighted)",
     ]
 
-    unet_dice = [85.42, 52.30, 55.10]
+    unet_dice = [86.42, 69.02, 82.50]
     unet_err = [0.03, 0.85, 0.72]
 
-    nnunet_dice = [89.80, 64.10, 68.50]
+    nnunet_dice = [87.61, 72.88, 84.09]
     nnunet_err = [0.11, 0.65, 0.58]
 
-    visreg_dice = [90.12, 76.20, 78.90]
+    visreg_dice = [79.71, 37.28, 71.40]
     visreg_err = [0.02, 0.45, 0.40]
 
     x = np.arange(len(scenarios))
     width = 0.24
 
-    _fig, ax = plt.subplots(figsize=(7.2, 4.4))
+    _fig, ax = plt.subplots(figsize=(7.6, 4.5))
     ax.grid(True, linestyle="--", color="gray", alpha=0.3, zorder=0, axis="y")
 
     ax.bar(
@@ -316,30 +345,17 @@ def plot_missing_modality():
         zorder=3,
     )
 
-    # Annotate missing sequence resilience
-    ax.annotate(
-        r"$\mathbf{+12.1\%}$ over nnU-Net" + "\n" + r"($76.2\%$ vs. $64.1\%$ Dice)",
-        xy=(1 + width, 76.20),
-        xytext=(1 + width - 0.1, 84.0),
-        arrowprops={"facecolor": COLOR_VISREG, "shrink": 0.08, "width": 1.5, "headwidth": 6},
-        fontsize=9.5,
-        fontweight="bold",
-        color=COLOR_VISREG,
-        ha="center",
-        bbox={"boxstyle": "round,pad=0.3", "facecolor": "#fff0f0", "edgecolor": COLOR_VISREG, "alpha": 0.9},
-    )
-
     ax.set_ylabel("3D Volumetric Dice Score (%)")
     ax.set_title("Emergency Triage Under Missing Pulse Sequences")
     ax.set_xticks(x)
     ax.set_xticklabels(scenarios)
-    ax.set_ylim(40.0, 98.0)
+    ax.set_ylim(30.0, 95.0)
     ax.legend(loc="lower left", framealpha=0.9)
 
     plt.tight_layout()
     plt.savefig(os.path.join(FIG_DIR, "missing_modality_ood.pdf"))
     plt.savefig(os.path.join(FIG_DIR, "missing_modality_ood.png"))
-    # Also save as men_rt_ood for direct drop-in reference if needed
+    # Also save as men_rt_ood for direct drop-in reference
     plt.savefig(os.path.join(FIG_DIR, "men_rt_ood.pdf"))
     plt.savefig(os.path.join(FIG_DIR, "men_rt_ood.png"))
     plt.close()

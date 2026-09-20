@@ -5,7 +5,11 @@
 
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
-\usepackage[hypertexnames=false]{hyperref}
+\usepackage[hypertexnames=false,breaklinks=true]{hyperref}
+\usepackage{etoolbox}
+\makeatletter
+\def\NAT@hyper@#1{\mbox{\hyper@natlinkstart{\@citeb\@extra@b@citeb}#1\hyper@natlinkend}}
+\makeatother
 \usepackage{url}
 \usepackage{booktabs}
 \usepackage{amsfonts}
@@ -24,9 +28,9 @@
 \title{Can 3D JEPA Segment? Dense Volumetric Brain MRI Segmentation Without Pixel-Level Pre-Training}
 
 \author{%
-  Han Riman \thanks{Corresponding author. Master's Thesis Research Laboratory.} \\
-  Master's Thesis Laboratory \\
-  \texttt{hanriman@master.thesis} \\
+  Han Riman \thanks{Correspondence to: \texttt{hanriman@master.thesis}} \\
+  Department of Computer Science \\
+  Master's Thesis Research \\
 }
 
 \begin{document}
@@ -34,7 +38,7 @@
 \maketitle
 
 \begin{abstract}
-Joint-Embedding Predictive Architectures (JEPA) are fundamentally formulated to avoid pixel- and voxel-level reconstruction, operating entirely in latent embedding space to capture abstract semantic structure while discarding high-frequency acquisition noise. This design philosophy creates an apparent paradox in medical imaging: \emph{if 3D JEPA is explicitly optimized to discard voxel-level details, can it perform dense, per-voxel volumetric medical image segmentation?} In this work, we investigate this tension through a controlled empirical study on multi-modal volumetric brain MRI segmentation (BraTS 2024 Glioma). We evaluate a teacher-free single-encoder 3D JEPA equipped with Variance-Invariance-Sketching Regularization (\textbf{3D VisReg}) and a multi-scale 3D Vision Transformer Feature Pyramid Network (ViT-FPN) decoder against fully supervised volumetric convolutional baselines: a 3D Residual UNet (MONAI) and a 3D nnU-Net baseline (DynUNet with multi-scale deep supervision) across independent experimental runs. We analyze performance across four rigorous experimental regimes: (1) Full-Data Volumetric Benchmark ($100\%$ labels), (2) Low-Data Volumetric Label Efficiency ($1\%$ to $100\%$ labels), (3) Synthetic Scanner Shifts and Acquisition Artifacts (3D Rician noise $\sigma=0.08$ and quadratic $B_1$ radiofrequency coil bias fields), and (4) Emergency Triage under Missing MRI Pulse Sequences (e.g., T1c-only and FLAIR-only protocols). Our empirical findings on held-out test volumes ($N=271$) resolve the paradox affirmatively: 3D VisReg JEPA learns functional volumetric representations that achieve $\mathbf{69.62 \pm 16.34\%}$ Dice and $16.83 \pm 17.17\,\text{mm}$ HD95, substantially outperforming the standard supervised 3D Residual UNet baseline ($50.83 \pm 25.03\%$ Dice, $54.35 \pm 29.28\,\text{mm}$ HD95; a $+18.79\%$ absolute Dice advantage with $3.2\times$ lower boundary distance error). Crucially, 3D VisReg JEPA delivers a $\mathbf{1.73\times}$ faster forward inference latency ($73.14\,\text{ms}$ vs.\ $126.57\,\text{ms}$ per $128^3$ volume) compared to 3D nnU-Net, which is constrained by compute-heavy multi-scale deep supervision decoders. Across volumetric label efficiency regimes ($1\%$ to $100\%$ annotations), 3D VisReg JEPA consistently surpasses standard 3D UNet (e.g., $45.66\%$ vs.\ $13.35\%$ Dice at $5\%$ labels, a $3.4\times$ advantage; $9.90\%$ vs.\ $3.83\%$ at $1\%$), confirming that self-supervised latent pre-training provides vital structural priors that prevent the catastrophic background collapse afflicting randomly initialized CNNs under extreme class imbalance. Latent space geometry audits demonstrate that decoupled optimal transport regularization maintains dimensional diversity without collapse ($\text{erank} = 15.74$, centered cosine similarity $0.0665$). While 3D nnU-Net's strong inductive biases accelerate convergence on dense annotations ($82.52 \pm 14.14\%$ Dice), 3D VisReg JEPA offers a compelling combination of competitive segmentation accuracy, robust low-data resistance to collapse, and superior inference throughput without ever reconstructing a single voxel.
+Joint-Embedding Predictive Architectures (JEPA) are formulated to learn abstract semantic representations by predicting missing regions in latent feature space rather than reconstructing raw pixel or voxel intensities. This design philosophy creates a fundamental question for volumetric medical image segmentation: \emph{can an architecture trained without voxel-level reconstruction perform dense, per-voxel volumetric segmentation?} In this work, we investigate this question through a controlled empirical study on multi-modal brain MRI segmentation (BraTS 2024 Glioma). We evaluate a teacher-free single-encoder 3D JEPA equipped with Variance-Invariance-Sketching Regularization (\textbf{3D VisReg}) and a multi-scale 3D Vision Transformer Feature Pyramid Network (ViT-FPN) decoder against fully supervised volumetric convolutional baselines: a 3D Residual UNet (MONAI) and a 3D DynUNet with multi-scale deep supervision. On held-out test volumes ($N=271$), 3D VisReg JEPA demonstrates that latent-space pre-training successfully enables dense segmentation, achieving $79.71 \pm 14.34\%$ Dice and $11.04 \pm 14.36\,\text{mm}$ HD95. However, it trails supervised CNNs on full training data ($86.42 \pm 12.06\%$ for ResUNet; $87.60 \pm 11.93\%$ for DynUNet) due to the coarse spatial granularity of $16^3$ patch tokenization. Under severe annotation scarcity ($1\%\text{--}5\%$ labels), self-supervised pre-training provides substantial utility, outperforming standard 3D Residual UNet ($47.21\%$ vs.\ $3.98\%$ at $1\%$ labels; $58.16\%$ vs.\ $4.70\%$ at $5\%$) by preventing the low-data background collapse observed in unregularized CNNs under class imbalance and short training schedules, though deeply supervised DynUNet remains superior across all tiers ($56.65\%$ at $1\%$). In inference throughput, VisReg JEPA runs $2.05\times$ faster than DynUNet ($114.57\,\text{ms}$ vs.\ $235.22\,\text{ms}$ per $128^3$ volume), while standard Residual UNet is fastest ($75.54\,\text{ms}$). Out-of-distribution evaluations reveal critical boundary conditions: while resilient to mild additive Rician noise, 3D JEPA exhibits pronounced vulnerability to smooth $B_1$ radiofrequency field inhomogeneities ($59.98\%$ Dice) and missing contrast-enhanced sequences ($37.28\%$ on T1c-only). These findings demonstrate that while 3D JEPA can segment without voxel reconstruction and offers benefits under extreme label scarcity, it incurs measurable trade-offs in boundary precision, full-supervision ceiling, and scanner artifact robustness.
 \end{abstract}
 
 \section{Introduction}
@@ -56,17 +60,19 @@ This foundational design choice leads directly to a central research question an
 \end{quote}
 At first glance, the objectives appear fundamentally incompatible. Dense volumetric segmentation requires voxel-accurate delineation of infiltrative tumor boundaries across 3D space, whereas JEPA's objective explicitly incentivizes the encoder to discard high-frequency spatial variation in favor of abstract semantic representations. If low-level spatial details are discarded during pre-training, can the learned representations support downstream volumetric boundary delineation?
 
+\newpage
 \paragraph{Scope and Contributions}
-In this work, we resolve this question through an empirical study comparing 3D Joint-Embedding Predictive Architectures against standard supervised 3D convolutional baselines in multi-modal volumetric brain MRI segmentation. Rather than relying on early dual-encoder JEPA variants that require heuristic momentum teachers, we evaluate \textbf{3D VisReg JEPA}~\citep{wu2026visreg}, a single-encoder formulation that prevents latent representation collapse through decoupled optimal transport feature regularization. We pair this encoder with a hierarchical multi-scale 3D Feature Pyramid Network (FPN) decoder to bridge the gap between latent embeddings and dense spatial predictions.
+In this work, we investigate this question through an empirical study comparing 3D Joint-Embedding Predictive Architectures against standard supervised 3D convolutional baselines in multi-modal volumetric brain MRI segmentation. Rather than relying on early dual-encoder JEPA variants that require heuristic momentum teachers, we evaluate \textbf{3D VisReg JEPA}~\citep{wu2026visreg}, a single-encoder formulation that prevents latent representation collapse through decoupled optimal transport feature regularization. We pair this encoder with a hierarchical multi-scale 3D Feature Pyramid Network (FPN) decoder to bridge the gap between latent embeddings and dense spatial predictions.
 
 Our contributions are threefold:
 \begin{enumerate}
-    \item \textbf{Resolution of the 3D JEPA Feasibility and Latency Advantage}: We demonstrate that a self-supervised 3D JEPA operating exclusively in latent embedding space without voxel reconstruction successfully learns dense volumetric segmentation representations, substantially outperforming a standard supervised 3D Residual UNet by $\mathbf{+18.79\%}$ absolute Dice ($69.62 \pm 16.34\%$ vs.\ $50.83 \pm 25.03\%$) and reducing boundary surface error from $54.35\,\text{mm}$ to $16.83\,\text{mm}$ HD95, while running $\mathbf{1.73\times}$ faster than 3D nnU-Net ($73.14\,\text{ms}$ vs.\ $126.57\,\text{ms}$ per $128^3$ volume).
-    \item \textbf{Mitigation of Low-Data Background Collapse}: We systematically benchmark volumetric label efficiency across six annotation tiers ($1\%$ to $100\%$). 3D VisReg JEPA delivers decisive improvements over standard 3D Residual UNet across all fractions (e.g., $45.66\%$ vs.\ $13.35\%$ at $5\%$ labels, a $3.4\times$ advantage; $9.90\%$ vs.\ $3.83\%$ at $1\%$), proving that latent patch prediction pre-training initializes the backbone outside the trivial background-collapse attractor basin that traps randomly initialized 3D CNNs.
-    \item \textbf{Representation Geometry and Out-of-Distribution Resilience}: We formalize single-encoder 3D JEPA with decoupled center-scale-shape optimal transport regularization, proving representation non-collapse empirically via effective spectral rank ($\text{erank} = 15.74$) and centered cosine similarity ($0.0665$). We further demonstrate robust representation preservation across physical 3D scanner noise and emergency missing pulse sequences.
+    \item \textbf{Feasibility and Inductive Bias Trade-offs in 3D JEPA}: We demonstrate that a self-supervised 3D JEPA pre-trained purely in latent embedding space without voxel reconstruction learns representations capable of dense volumetric segmentation, reaching $79.71 \pm 14.34\%$ Dice and $11.04 \pm 14.36\,\text{mm}$ HD95 on held-out test volumes ($N=271$). We quantify the performance gap relative to supervised 3D CNNs ($86.42\%$ ResUNet, $87.60\%$ DynUNet), identifying the structural trade-off between patch tokenization and fine boundary delineation.
+    \item \textbf{Mitigation of Low-Data Background Collapse}: We systematically evaluate volumetric label efficiency across six annotation tiers ($1\%$ to $100\%$). 3D VisReg JEPA substantially outperforms standard 3D Residual UNet under extreme data scarcity ($47.21\%$ vs.\ $3.98\%$ at $1\%$ labels; $58.16\%$ vs.\ $4.70\%$ at $5\%$), confirming that self-supervised latent pre-training provides structural initialization that prevents the background collapse afflicting unregularized CNNs under severe class imbalance and limited iteration budgets. However, deeply supervised DynUNet demonstrates that multi-scale architectural supervision also prevents collapse ($56.65\%$ at $1\%$).
+    \item \textbf{Empirical Boundary Conditions, Geometry, and Latency Profiles}: We analyze the representation geometry of single-encoder 3D JEPA ($\text{erank} = 27.29$ on $384$-dimensional features, centered cosine similarity $0.0062$) and profile inference latency, showing that VisReg JEPA runs $2.05\times$ faster than deeply supervised DynUNet ($114.57\,\text{ms}$ vs.\ $235.22\,\text{ms}$), while standard Residual UNet remains fastest ($75.54\,\text{ms}$). Crucially, stress tests reveal key vulnerabilities: while robust to mild additive Rician noise, JEPA degrades significantly under macroscopic $B_1$ field bias ($59.98\%$) and missing contrast sequences ($37.28\%$).
 \end{enumerate}
 
 
+\clearpage
 \section{Background: Progression of the JEPA Family}
 \label{sec:background}
 
@@ -95,7 +101,7 @@ In this study, we investigate 3D VisReg JEPA as the representative member of the
 \begin{itemize}
     \item \textbf{Teacher-Free Single-Encoder Simplicity}: It eliminates the memory overhead and momentum hyperparameter tuning of I-JEPA, making full 3D volumetric pre-training practical on standard accelerators.
     \item \textbf{Principled Geometric Decoupling}: By separating coordinate variance anchoring from non-Gaussian shape penalties, VisReg prevents opposing gradient dynamics between variance expansion and distribution matching.
-    \item \textbf{Superior Empirical Representation Geometry}: Prior empirical audits demonstrate that VisReg achieves high effective spectral rank on the projector manifold ($\text{erank} = 82.85 / 128$, representing $64.7\%$ spectral capacity utilization compared to dimensional collapse; $D_{\text{enc}} = 384$) and near-orthogonal pairwise feature alignment ($\bar{S}_{\text{centered}} = 0.0018$), indicating maximal directional dispersion across principal embedding dimensions without dimensional collapse.
+    \item \textbf{Decoupled Representation Space}: By applying non-collapse regularization to an auxiliary lower-dimensional projector space ($d_p = 128$), the primary encoder feature manifold ($D = 384$) remains unconstrained, allowing it to represent complex anatomical patterns without being forced into an isotropic distribution.
 \end{itemize}
 
 
@@ -115,29 +121,29 @@ In this study, we investigate 3D VisReg JEPA as the representative member of the
 
 Figure~\ref{fig:architecture_schematic} illustrates our end-to-end framework, contrasting single-encoder 3D VisReg JEPA pre-training, our multi-scale 3D ViT-FPN segmentation decoder, and supervised volumetric convolutional baselines.
 
-\subsection{Multi-Modal 3D Volumetric Processing and Random Modality Dropout}
+\subsection{Multi-Modal 3D Volumetric Processing and Preprocessing}
 \label{sec:data_processing}
 
-Let $\mathbf{X} \in \mathbb{R}^{B \times 4 \times H \times W \times D}$ denote a mini-batch of 3D MRI volumes with spatial dimensions $H = W = D = 128$ resampled to isotropic $1.0\,\text{mm}^3$ voxel spacing across four co-registered pulse sequences: $\mathbf{X} = [\mathbf{X}_{\text{T1}}, \mathbf{X}_{\text{T1c}}, \mathbf{X}_{\text{T2}}, \mathbf{X}_{\text{FLAIR}}]$.
+Native BraTS 2024 Adult Glioma scans are provided at $240 \times 240 \times 155$ voxels at $1.0\,\text{mm}^3$ isotropic resolution across four co-registered sequences: T1, post-contrast T1 (T1c), T2, and FLAIR. To focus computational resources on intracranial tissue and standardize inputs, we extract the 3D bounding box containing all non-zero brain voxels and resample the cropped volume to a canonical grid of $H = W = D = 128$ voxels using trilinear interpolation for images and nearest-neighbor interpolation for ground-truth masks. Let $\mathbf{X} \in \mathbb{R}^{B \times 4 \times 128 \times 128 \times 128}$ denote a mini-batch of normalized multi-parametric volumes: $\mathbf{X} = [\mathbf{X}_{\text{T1}}, \mathbf{X}_{\text{T1c}}, \mathbf{X}_{\text{T2}}, \mathbf{X}_{\text{FLAIR}}]$. The downstream segmentation target is the binary Whole Tumor (WT) mask ($\text{mask} > 0$), which combines all annotated BraTS 2024 lesion sub-compartments (enhancing tissue, non-enhancing tumor core, peritumoral edema, and resection cavity) into a single binary foreground target.
 
 \paragraph{Volume-Level Non-Zero Voxel Standardization}
-To avoid inter-slice contrast distortion and preserve true 3D spatial gradient continuity, each 3D MRI volume is Z-score normalized independently over non-zero intracranial brain voxels:
+To avoid slice-wise intensity inconsistencies and preserve 3D gradient continuity, each volume is independently Z-score standardized across its non-zero intracranial parenchyma:
 \begin{equation}
     \hat{\mathbf{X}}_{c}(v) = \frac{\mathbf{X}_c(v) - \mu_{c, p}}{\sigma_{c, p} + \epsilon}, \qquad \forall v \in \Omega_{\text{fg}} = \{u \in \mathbb{R}^3 \mid \mathbf{X}_c(u) > 0\}
 \end{equation}
-where $\mu_{c, p}$ and $\sigma_{c, p}$ are the empirical mean and standard deviation of channel $c$ within the intracranial brain mask $\Omega_{\text{fg}}$ of patient volume $p$, and $\epsilon = 10^{-8}$. Extracranial background voxels remain identically zero.
+where $\mu_{c, p}$ and $\sigma_{c, p}$ are the empirical mean and standard deviation of channel $c$ within the intracranial brain mask $\Omega_{\text{fg}}$ of patient volume $p$, and $\epsilon = 10^{-8}$. Voxels outside the brain mask are set to zero.
 
 \paragraph{Random Modality Dropout (RMD)}
-In clinical neuro-oncology, complete four-sequence protocols are frequently compromised by patient motion, acquisition time limits, or contraindications to gadolinium contrast. To instill intrinsic robustness to missing sequences, volumes undergo Random Modality Dropout during training: each sequence channel is independently zeroed out with probability $p_{\text{drop}} = 0.25$. A deterministic PyTorch PRNG fallback ensures that if all four channels are dropped, one channel is randomly preserved, preventing completely empty inputs while preserving seed reproducibility across distributed ranks~\citep{havaei2017brain}.
+In clinical neuro-oncology, complete four-sequence protocols are frequently compromised by patient motion, acquisition time limits, or contraindications to gadolinium contrast. To instill intrinsic robustness to missing sequences, volumes undergo Random Modality Dropout during training: each sequence channel is independently zeroed out with probability $p_{\text{drop}} = 0.25$~\citep{havaei2016hemis}. A deterministic fallback ensures that if all four channels are selected for dropout, one channel is randomly preserved, preventing empty inputs while maintaining reproducibility.
 
 \paragraph{Patient-Level Stratified Partitioning}
-To guarantee zero data contamination, dataset partitioning is enforced strictly at the \textbf{patient volume level}: $\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{val}} = \emptyset$ and $\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{test}} = \emptyset$. Patients are stratified into tumor volume quartiles before split assignment ($70\%$ train, $15\%$ val, $15\%$ test), ensuring that tumor size distributions are strictly invariant across splits; fractional low-data subsets ($1\%$ to $50\%$) inherit this quartile stratification to prevent lesion scale sampling bias.
+To prevent data contamination, dataset partitioning is enforced at the patient volume directory level ($\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{val}} = \emptyset$ and $\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{test}} = \emptyset$ across $1,808$ BraTS GLI volumes). Cases (identified by unique volume directories, e.g., \texttt{BraTS-GLI-00005-100}) are stratified into tumor volume quartiles before split assignment ($70\%$ train, $15\%$ val, $15\%$ test; $1,266$ train, $271$ validation, and $271$ held-out test volumes), ensuring that lesion volume distributions remain consistent across splits. Fractional low-data subsets ($1\%$ to $50\%$) inherit this quartile stratification.
 
 \subsection{3D VisReg JEPA Formulation}
 \label{sec:visreg_formulation}
 
 \paragraph{3D Vision Transformer Backbone}
-The encoder $E_\theta$ partitions a 3D volume into non-overlapping $16 \times 16 \times 16$ volumetric patches, yielding a spatial grid of $N_{\text{vox}} = (128 / 16)^3 = 8 \times 8 \times 8 = 512$ patch tokens. A 3D convolutional patch embedding layer projects each $16^3 \times 4$ cuboid to embedding dimension $D = 384$. To incorporate 3D spatial geometry, separable 3D sinusoidal coordinate positional embeddings are added:
+The encoder $E_\theta$ partitions a 3D volume into non-overlapping $16 \times 16 \times 16$ volumetric patches, yielding a spatial grid of $N_{\text{vox}} = (128 / 16)^3 = 8 \times 8 \times 8 = 512$ patch tokens. A 3D convolutional patch embedding layer projects each $16^3 \times 4$ cuboid to embedding dimension $D = 384$. Importantly, each token corresponds to a substantial spatial span of $16 \times 16 \times 16$ voxels in the canonical grid, creating an intrinsic structural bottleneck for high-frequency spatial localization that the downstream decoder must resolve. To incorporate 3D spatial geometry, separable 3D sinusoidal coordinate positional embeddings are added:
 \begin{equation}
     \mathbf{E}_{\text{pos}}^{3\text{D}}(x, y, z) = \left[ \mathbf{e}_{\text{sin/cos}}(x) \,;\, \mathbf{e}_{\text{sin/cos}}(y) \,;\, \mathbf{e}_{\text{sin/cos}}(z) \right] \in \mathbb{R}^{1 \times 512 \times 384}
 \end{equation}
@@ -184,9 +190,9 @@ To isolate non-collapse regularization from spatial representations, context tok
 \end{enumerate}
 The total 3D VisReg pre-training objective is:
 \begin{equation}
-    \mathcal{L}_{\text{VisReg}} = \mathcal{L}_{\text{pred}} + \lambda_{\text{center}} \mathcal{L}_{\text{center}} + \lambda_{\text{scale}} \mathcal{L}_{\text{scale}} + \lambda_{\text{shape}} \mathcal{L}_{\text{shape}}, \qquad \lambda_{\text{center}} = 1.0, \, \lambda_{\text{scale}} = 1.0, \, \lambda_{\text{shape}} = 1.0
+    \mathcal{L}_{\text{VisReg}} = \mathcal{L}_{\text{pred}} + \lambda_{\text{center}} \mathcal{L}_{\text{center}} + \lambda_{\text{scale}} \mathcal{L}_{\text{scale}} + \lambda_{\text{shape}} \mathcal{L}_{\text{shape}}
 \end{equation}
-Following pre-training, the Projector MLP $g_\psi$ is discarded, and the ViT backbone is transferred to downstream volumetric segmentation.
+where $\lambda_{\text{center}} = \lambda_{\text{scale}} = \lambda_{\text{shape}} = 1.0$. Following pre-training, the Projector MLP $g_\psi$ is discarded, and the ViT backbone is transferred to downstream volumetric segmentation.
 
 \subsection{Bridging Latent Space to Voxel Space: Multi-Scale 3D FPN Decoder}
 \label{sec:decoder}
@@ -200,11 +206,12 @@ are reshaped into $8 \times 8 \times 8$ spatial grids and progressively upsample
 \subsection{Supervised Volumetric Baselines}
 \label{sec:baselines}
 
-To establish an equitable benchmark, we compare against two fully supervised volumetric convolutional baselines trained under identical 3D data splits and preprocessing:
+To establish an equitable benchmark, we compare against two fully supervised volumetric convolutional baselines trained under identical 3D data splits, augmentations, and preprocessing:
 \begin{itemize}
-    \item \textbf{3D Residual UNet (MONAI ResUNet)}: A 5-stage symmetric 3D encoder-decoder spanning spatial resolutions $128^3 \to 64^3 \to 32^3 \to 16^3 \to 8^3$ with channel capacities $(32, 64, 128, 256, 512)$, Instance Normalization, LeakyReLU ($0.01$), and horizontal concatenation skip connections~\citep{ronneberger2015u,cciccek20163d}.
-    \item \textbf{3D nnU-Net Baseline (DynUNet with Deep Supervision)}: Implements the self-configuring DynUNet architecture~\citep{isensee2021nnunet} with residual blocks and intermediate supervision heads attached to decoder stages at $64^3$, $32^3$, and $16^3$. Normalized exponential decay weights $w_s = 2^{-s} / \sum_{j=0}^{S-1} 2^{-j}$ (yielding $[0.533, 0.267, 0.133, 0.067]$ for $S=4$ multi-scale outputs) guarantee dynamic loss scale invariance and prevent gradient vanishing to early encoder blocks~\citep{lee2015deeply}. In evaluation mode, auxiliary heads are deactivated, yielding deterministic full-resolution output without latency overhead.
+    \item \textbf{3D Residual UNet (MONAI ResUNet)}: A 5-stage symmetric 3D encoder-decoder spanning spatial resolutions $128^3 \to 64^3 \to 32^3 \to 16^3 \to 8^3$ with channel capacities $(32, 64, 128, 256, 512)$, Instance Normalization, LeakyReLU ($0.01$), and horizontal concatenation skip connections~\citep{ronneberger2015u,cciccek20163d}. It comprises $19.22\text{ M}$ parameters.
+    \item \textbf{3D nnU-Net Baseline (DynUNet with Deep Supervision)}: Implements the self-configuring DynUNet architecture from MONAI~\citep{isensee2021nnunet} with residual blocks and 4 multi-scale supervision heads ($128^3, 64^3, 32^3, 16^3$), totaling $22.75\text{ M}$ parameters. Normalized exponential decay weights $w_s = 2^{-s} / \sum_{j=0}^{S-1} 2^{-j}$ (yielding $[0.533, 0.267, 0.133, 0.067]$ for $S=4$ multi-scale outputs) prevent gradient attenuation in early stages~\citep{lee2015deeply}. To enable fair comparison under fixed computational resources, DynUNet is trained for a matched budget of 30 epochs under the same optimizer, rather than the 1000-epoch schedule of the full standalone nnU-Net framework. In evaluation mode, auxiliary supervision heads are deactivated.
 \end{itemize}
+The downstream 3D VisReg model (ViT encoder + 3D FPN decoder) comprises $29.43\text{ M}$ parameters, placing all three architectures within a comparable capacity envelope ($19\text{--}29\text{ M}$ parameters).
 
 \subsection{Downstream Loss Objective and Evaluation Protocol}
 \label{sec:loss_and_metrics}
@@ -218,34 +225,32 @@ Models are trained by optimizing a combined Soft Dice and Binary Cross-Entropy (
 \end{equation}
 Soft Dice directly optimizes 3D volumetric overlap with squared prediction terms ($\text{squared\_pred}=\text{True}$, following \citet{milletari2016vnet}), while BCE provides smooth voxel-level gradients. In multi-class configurations where background is excluded from foreground Dice ($\text{include\_background}=\text{False}$), Cross-Entropy loss continues to supervise all voxels including background ($\text{ignore\_index}=-100$) to provide dense negative supervision and penalize false-positive foreground predictions on healthy brain parenchyma~\citep{isensee2021nnunet}.
 
-\paragraph{Evaluation Metrics}
-We report four primary volumetric metrics:
+\paragraph{Evaluation Metrics and Benchmarking Protocol}
+We evaluate models across four primary criteria on the held-out test split ($N=271$ volumes):
 \begin{enumerate}
-    \item \textbf{3D Volumetric Dice Score ($\text{Dice}_{3\text{D}}$)}: Evaluated across complete $128^3$ volumes on the held-out test split.
+    \item \textbf{3D Volumetric Dice Score ($\text{Dice}_{3\text{D}}$)}: Evaluates spatial overlap between binary Whole Tumor prediction and ground truth.
     \item \textbf{3D Intersection-over-Union ($\text{IoU}_{3\text{D}}$)}: Volumetric Jaccard index.
-    \item \textbf{95th Percentile Hausdorff Distance ($\text{HD95}$)}: Symmetric boundary surface distance in physical millimeters ($\text{mm}$).
-    \item \textbf{Forward Inference Latency}: Measured in milliseconds ($\text{ms}$) per $128^3$ volume on a dedicated GPU.
+    \item \textbf{95th Percentile Hausdorff Distance ($\text{HD95}$)}: Symmetric boundary surface distance evaluated on the canonical $128^3$ grid with nominal unit spacing ($1.0\,\text{mm}$ effective grid pitch).
+    \item \textbf{Forward Inference Latency}: Measured in milliseconds ($\text{ms}$) per $128^3$ volume on a dedicated NVIDIA GPU (16 GB VRAM) under Automatic Mixed Precision (AMP FP16), batch size 1 (reflecting clinical single-case processing), warmup passes, and explicit CUDA synchronization (\texttt{torch.cuda.synchronize()}).
 \end{enumerate}
+Unless otherwise specified, reported standard deviations ($\pm$) represent inter-subject anatomical variance across the $N=271$ test volumes for a single deterministic training run ($\text{seed}=42$), rather than variation across random seeds.
 
 
 \section{Experimental Setup}
 \label{sec:experimental_setup}
 
 \paragraph{Dataset and Cohort Partitions}
-Experiments are conducted on the official BraTS 2024 Adult Glioma cohort (\texttt{BraTS GLI})~\citep{brats2024}, consisting of multi-parametric 3D MRI scans resampled to isotropic $1.0\,\text{mm}^3$ resolution ($128 \times 128 \times 128$). Volumes are partitioned at the patient volume level into $1,266$ training volumes ($70\%$), $271$ validation volumes ($15\%$), and $271$ held-out test volumes ($15\%$), matching the $70/15/15$ patient-level stratification.
+Experiments are conducted on the official BraTS 2024 Adult Glioma cohort (\texttt{BraTS GLI})~\citep{brats2024}. The 1,808 processed $128^3$ volumes are partitioned into $1,266$ training volumes ($70\%$), $271$ validation volumes ($15\%$), and $271$ held-out test volumes ($15\%$) using tumor-volume quartile stratification.
 
 \paragraph{Training Regimes}
 \begin{itemize}
-    \item \textbf{Empirical 5-Epoch Verification Benchmark}: All models are systematically evaluated under a controlled 5-epoch training protocol on the full BraTS 2024 GLI cohort ($1,266$ training, $271$ validation, and $271$ held-out test volumes). 3D VisReg JEPA undergoes 5 epochs of self-supervised latent pre-training on the unlabeled cohort followed by 5 epochs of downstream supervised fine-tuning. The 3D nnU-Net and 3D Residual UNet baselines are trained for 5 epochs directly from random initialization. This standardized protocol benchmarks representation learning efficiency, early convergence dynamics, and runtime throughput under identical hardware constraints (session runtimes: $1\text{h}\,32\text{m}$ for VisReg JEPA, $1\text{h}\,19\text{m}$ for nnU-Net, and $57\text{m}$ for UNet on dedicated GPU accelerators with AMP).
-    \item \textbf{Asymptotic Extended Schedules}: Complementary extended schedules ($50$ pre-training epochs, $30$ fine-tuning epochs) with cosine learning rate decay and linear warmup are specified for full asymptotic convergence.
-    \item \textbf{Optimization Parameters}: Downstream models optimize combined Soft Dice and Binary Cross-Entropy with AdamW ($\beta_1=0.9, \beta_2=0.999$, weight decay $10^{-4}$, $\text{lr}=3 \times 10^{-4}$ for full-data, $10^{-4}$ for low-data tiers), subvolume batch size $2$--$4$, and Random Modality Dropout ($p_{\text{drop}}=0.25$).
+    \item \textbf{Pre-Training}: 3D VisReg JEPA undergoes 100 epochs of self-supervised latent pre-training on the unlabeled training cohort ($B=8$ or $B=16$, AdamW $\text{lr}=5 \times 10^{-4}$ to $7 \times 10^{-4}$, weight decay $0.05$).
+    \item \textbf{Downstream Supervised Fine-Tuning}: All architectures (VisReg ViT-FPN, DynUNet, Residual UNet) are trained for 30 epochs on the full training split ($1,266$ volumes) with batch size $2$, AdamW ($\text{lr}=3 \times 10^{-4}$, weight decay $10^{-4}$), and Random Modality Dropout ($p_{\text{drop}}=0.25$).
+    \item \textbf{Low-Data Regimes}: Models are trained for 15 epochs across six annotation tiers: $1\%$ ($13$ volumes), $5\%$ ($63$ volumes), $10\%$ ($127$ volumes), $25\%$ ($316$ volumes), $50\%$ ($633$ volumes), and $100\%$ ($1,266$ volumes) with $\text{lr}=10^{-4}$ and batch size 2. Crucially, VisReg JEPA leverages its backbone pre-trained on the unlabeled cohort, whereas supervised baselines train exclusively from scratch on the labeled fraction.
 \end{itemize}
 
-\paragraph{Label Efficiency Tiers}
-To evaluate label efficiency, we benchmark six labeled-data availability tiers: $1\%$ ($13$ volumes), $5\%$ ($63$ volumes), $10\%$ ($127$ volumes), $25\%$ ($316$ volumes), $50\%$ ($633$ volumes), and $100\%$ ($1,266$ volumes). Crucially, VisReg JEPA pre-trains on the complete unlabeled cohort, whereas supervised baselines train exclusively on the designated labeled fraction.
-
 \paragraph{Out-of-Distribution Perturbations}
-We evaluate three distinct distribution shift regimes:
+We evaluate three distinct distribution shift regimes on the held-out test split:
 \begin{enumerate}
     \item \textbf{3D Rician Noise}: Non-central Rician noise ($\sigma = 0.08$) applied to normalized 3D volumes: $\tilde{\mathbf{X}} = \sqrt{(\mathbf{X} + \mathbf{N}_1)^2 + \mathbf{N}_2^2}$, modeling physical MRI coil thermal noise.
     \item \textbf{Synthetic $B_1$ Magnetic Bias Field}: A smooth quadratic 3D spatial gradient $\mathbf{B}_1(x, y, z) = s \cdot (x^2 + y^2 + z^2 - 0.5)$ with $s = 0.35$, simulating low-frequency radiofrequency coil sensitivity variations.
@@ -256,14 +261,14 @@ We evaluate three distinct distribution shift regimes:
 \section{Empirical Results}
 \label{sec:results}
 
-\subsection{Full-Data Benchmark: Can 3D JEPA Match Supervised Volumetric CNNs?}
+\subsection{Full-Data Benchmark: Representation Capacity and Computational Throughput}
 \label{sec:results_full_data}
 
 Table~\ref{tab:benchmark_results} presents the full-data evaluation on the held-out BraTS 2024 test split ($N=271$ volumes).
 
 \begin{table}[ht]
 \centering
-\caption{\textbf{Master 3D Volumetric Brain Glioma Segmentation Benchmark} (BraTS 2024 GLI held-out test split, $N=271$ volumes) evaluated following 5-epoch training under AMP. Effective Spectral Rank ($\text{erank}$) is evaluated on the transferred $384$-dimensional volumetric encoder representation ($D_{\text{enc}} = 384$). Best per column is in \textbf{bold}.}
+\caption{\textbf{Master 3D Volumetric Brain Glioma Segmentation Benchmark} (BraTS 2024 GLI held-out test split, $N=271$ volumes). Effective Spectral Rank ($\text{erank}$) is evaluated on the transferred $384$-dimensional volumetric encoder representations ($D_{\text{enc}} = 384$). For latency and segmentation metrics, best model is in \textbf{bold}; standard deviations ($\pm$) indicate inter-subject variance across the $271$ test volumes.}
 \label{tab:benchmark_results}
 \vspace{0.5em}
 \resizebox{\textwidth}{!}{%
@@ -271,9 +276,9 @@ Table~\ref{tab:benchmark_results} presents the full-data evaluation on the held-
 \toprule
 \textbf{Model Architecture} & $\text{Dice}_{3\text{D}} (\%)\uparrow$ & \textbf{3D IoU (\%)} $\uparrow$ & \textbf{HD95 (mm)} $\downarrow$ & \textbf{Forward Latency} $\downarrow$ & \textbf{EffRank ($S^2$)} $\uparrow$ & \textbf{CosSim} $\downarrow$ \\
 \midrule
-3D nnU-Net Baseline (DynUNet) & $\mathbf{82.52 \pm 14.14}$ & $\mathbf{72.05 \pm 15.32}$ & $\mathbf{9.05 \pm 14.41}$ & $126.57\,\text{ms}$ & -- & -- \\
-3D VisReg JEPA (Multiscale FPN) & $69.62 \pm 16.34$ & $55.40 \pm 16.28$ & $16.83 \pm 17.17$ & $\mathbf{73.14\,\text{ms}}$ & $\mathbf{15.74}$ ($4.1\%$) & $\mathbf{0.0665}$ \\
-3D Residual UNet Baseline & $50.83 \pm 25.03$ & $37.80 \pm 22.45$ & $54.35 \pm 29.28$ & $43.11\,\text{ms}$ & -- & -- \\
+3D nnU-Net Baseline (DynUNet) & $\mathbf{87.60 \pm 11.93}$ & $\mathbf{79.29 \pm 13.02}$ & $6.73 \pm 22.46$ & $235.22\,\text{ms}$ & -- & -- \\
+3D Residual UNet Baseline & $86.42 \pm 12.06$ & $77.46 \pm 13.31$ & $\mathbf{6.38 \pm 17.44}$ & $\mathbf{75.54\,\text{ms}}$ & -- & -- \\
+3D VisReg JEPA (Multiscale FPN) & $79.71 \pm 14.34$ & $68.02 \pm 15.05$ & $11.04 \pm 14.36$ & $114.57\,\text{ms}$ & $27.29$ ($7.1\%$) & $0.0062$ \\
 \bottomrule
 \end{tabular}%
 }
@@ -281,10 +286,9 @@ Table~\ref{tab:benchmark_results} presents the full-data evaluation on the held-
 
 \paragraph{Key Observations}
 \begin{enumerate}
-    \item \textbf{Latent Pre-Training Strongly Outperforms Supervised UNet}: 3D VisReg JEPA achieves $\text{Dice}_{3\text{D}} = \mathbf{69.62 \pm 16.34\%}$ and $\text{HD95} = \mathbf{16.83 \pm 17.17\,\text{mm}}$, outperforming the standard supervised 3D Residual UNet baseline ($50.83 \pm 25.03\%$ Dice; $54.35 \pm 29.28\,\text{mm}$ HD95) by $\mathbf{+18.79\%}$ absolute Dice while reducing physical boundary distance error by $\mathbf{3.2\times}$. This directly resolves our central question: \emph{latent-space pre-training without voxel reconstruction does not compromise dense volumetric boundary delineation; when paired with multi-scale 3D FPN decoding, it builds robust structural priors that dramatically exceed randomly initialized CNNs.}
-    \item \textbf{Computational Efficiency and Latency Advantage}: 3D VisReg JEPA achieves a forward inference latency of \textbf{$73.14\,\text{ms}$ per $128^3$ volume}, running $\mathbf{1.73\times}$ \textbf{faster} than 3D nnU-Net ($126.57\,\text{ms}$). 3D nnU-Net requires compute-heavy deep supervision decoders and dense full-resolution convolutions across all stages, whereas the 3D Vision Transformer backbone with hierarchical FPN decodes volumetric representations with superior throughput suitable for near-real-time clinical inference.
-    \item \textbf{Architectural Inductive Bias vs.\ Latent Generalization}: 3D nnU-Net achieves rapid early convergence ($82.52 \pm 14.14\%$ Dice) due to its self-configuring isotropic receptive fields and multi-scale deep supervision heads that inject gradient signals directly into intermediate decoder stages. However, comparing 3D VisReg against the standard 3D Residual UNet ($50.83\%$) confirms that the learned self-supervised representations provide a decisive foundation over standard supervised training.
-    \item \textbf{Empirical Non-Collapse and Representation Geometry}: 3D VisReg achieves an Effective Rank of $15.74$ ($4.1\%$ of max capacity) and a centered cosine similarity of $0.0665$, empirically confirming that decoupled optimal transport Sliced-Wasserstein regularization prevents dimensional collapse and decorrelates latent embeddings during 3D pre-training.
+    \item \textbf{Throughput Comparison Across Architectures}: 3D VisReg JEPA achieves a forward inference latency of $114.57\,\text{ms}$ per $128^3$ volume, running $2.05\times$ faster than the deeply supervised 3D nnU-Net baseline ($235.22\,\text{ms}$). DynUNet maintains dense volumetric feature maps across multiple decoder stages with auxiliary supervision heads, which increases computational burden. In comparison, 3D VisReg processes tokens through a sequence-based ViT encoder before upsampling via a lightweight FPN decoder. However, standard 3D Residual UNet remains the fastest model overall ($75.54\,\text{ms}$), as it uses a single-scale decoder with conventional convolutional channel widths.
+    \item \textbf{Empirical Non-Collapse and Representation Geometry}: In the transferred encoder representations, 3D VisReg exhibits an Effective Spectral Rank of $27.29$ ($7.1\%$ of the theoretical maximum for $D_{\text{enc}}=384$) and a centered cosine similarity of $0.0062$. While near-zero centered cosine similarity is largely a mathematical consequence of mean-centering in high dimensions, the non-degenerate effective rank indicates that the Sliced-Wasserstein regularization on the auxiliary projector prevents dimensional collapse onto a low-rank subspace during pre-training.
+    \item \textbf{Performance Ceiling Under Full Supervision}: With complete volumetric supervision ($100\%$ labels), convolutional architectures achieve higher accuracy ($87.60\%$ for DynUNet and $86.42\%$ for Residual UNet vs.\ $79.71\%$ for 3D VisReg) and lower boundary surface error ($6.38\text{--}6.73\,\text{mm}$ vs.\ $11.04\,\text{mm}$ HD95). This gap reflects the structural difference between continuous convolutional feature maps with high-resolution skip connections and the discrete $16 \times 16 \times 16$ patch tokenization of the Vision Transformer, which limits local boundary precision.
 \end{enumerate}
 
 \subsection{Low-Data Label Efficiency: Pre-Training Prevents 3D Background Collapse}
@@ -302,9 +306,9 @@ Table~\ref{tab:low_data_results} and Figure~\ref{fig:low_data_efficiency} docume
 \toprule
 \textbf{Model Architecture} & \textbf{1\% (13 Vols)} & \textbf{5\% (63 Vols)} & \textbf{10\% (127 Vols)} & \textbf{25\% (316 Vols)} & \textbf{50\% (633 Vols)} & \textbf{100\% (1,266 Vols)} \\
 \midrule
-3D nnU-Net Baseline (DynUNet) & $\mathbf{16.40\%}$ & $\mathbf{56.03\%}$ & $\mathbf{64.23\%}$ & $\mathbf{74.47\%}$ & $\mathbf{81.18\%}$ & $\mathbf{81.27\%}$ \\
-3D VisReg JEPA (Multiscale FPN) & $9.90\%$ & $45.66\%$ & $52.69\%$ & $60.24\%$ & $62.78\%$ & $67.58\%$ \\
-3D Residual UNet Baseline & $3.83\%$ & $13.35\%$ & $24.49\%$ & $44.33\%$ & $56.69\%$ & $64.76\%$ \\
+3D nnU-Net Baseline (DynUNet) & $\mathbf{56.65\%}$ & $\mathbf{73.63\%}$ & $\mathbf{79.06\%}$ & $\mathbf{82.65\%}$ & $\mathbf{85.14\%}$ & $\mathbf{87.29\%}$ \\
+3D VisReg JEPA (Multiscale FPN) & $47.21\%$ & $58.16\%$ & $62.10\%$ & $67.04\%$ & $73.76\%$ & $77.13\%$ \\
+3D Residual UNet Baseline & $3.98\%$ & $4.70\%$ & $52.66\%$ & $65.67\%$ & $75.82\%$ & $84.79\%$ \\
 \bottomrule
 \end{tabular}%
 }
@@ -313,14 +317,14 @@ Table~\ref{tab:low_data_results} and Figure~\ref{fig:low_data_efficiency} docume
 \begin{figure}[ht]
 \centering
 \includegraphics[width=0.82\textwidth]{figures/low_data_label_efficiency.pdf}
-\caption{\textbf{Downstream Volumetric Label Efficiency Benchmark.} 3D Volumetric Dice curves across 6 annotation tiers ($1\%$ to $100\%$ labels) with shaded error bands. At $5\%$ labels ($63$ volumes), 3D VisReg JEPA achieves a $\mathbf{+32.31\%}$ absolute Dice gain over 3D Residual UNet ($45.66\%$ vs.\ $13.35\%$, a $3.4\times$ relative advantage), proving that self-supervised latent pre-training effectively mitigates background collapse.}
+\caption{\textbf{Downstream Volumetric Label Efficiency Benchmark.} 3D Volumetric Dice curves across 6 annotation tiers ($1\%$ to $100\%$ labels) with shaded error bands. At $5\%$ labels ($63$ volumes), 3D VisReg JEPA achieves a $+53.46\%$ absolute Dice gain over 3D Residual UNet ($58.16\%$ vs.\ $4.70\%$), and $+43.23\%$ at $1\%$ labels ($47.21\%$ vs.\ $3.98\%$), demonstrating that self-supervised latent pre-training effectively prevents background collapse in low-data regimes, though deeply supervised DynUNet achieves the highest Dice across all tiers ($56.65\%$ at $1\%$).}
 \label{fig:low_data_efficiency}
 \end{figure}
 
 \paragraph{Analysis of Low-Data Behavior}
-Across all annotation fractions from $1\%$ to $100\%$, \textbf{3D VisReg JEPA} consistently outperforms the standard 3D Residual UNet baseline by large margins. At $5\%$ labels ($63$ annotated patient volumes), 3D VisReg JEPA reaches $\mathbf{45.66\%}$ Dice compared to only $13.35\%$ for 3D UNet, delivering a $\mathbf{+32.31\%}$ absolute improvement ($\mathbf{3.4\times}$ relative gain). At $1\%$ labels ($13$ volumes), VisReg achieves $9.90\%$ vs.\ $3.83\%$ for 3D UNet ($2.6\times$ higher). At $10\%$ and $25\%$, VisReg maintains strong advantages ($52.69\%$ vs.\ $24.49\%$ at $10\%$, and $60.24\%$ vs.\ $44.33\%$ at $25\%$).
+Under low annotation budgets ($1\%$ to $25\%$), 3D VisReg JEPA demonstrates marked performance gains over the standard 3D Residual UNet baseline. At $1\%$ labels ($13$ patient volumes), standard 3D Residual UNet achieves a test Dice of $3.98\%$, failing to learn foreground boundaries under the matched 15-epoch budget ($\approx 98$ optimizer update steps at batch size 2). In contrast, 3D VisReg JEPA achieves $47.21\%$ Dice ($+43.23\%$ margin). At $5\%$ labels ($63$ volumes), 3D UNet reaches $4.70\%$, while 3D VisReg JEPA reaches $58.16\%$ Dice ($+53.46\%$ margin). At $10\%$ and $25\%$, VisReg maintains an advantage over standard Residual UNet ($62.10\%$ vs.\ $52.66\%$ at $10\%$, and $67.04\%$ vs.\ $65.67\%$ at $25\%$).
 
-This substantial performance advantage over standard supervised CNNs originates from an optimization failure mode inherent to 3D convolutional models under extreme class imbalance. Because brain tumor lesions typically occupy $<1.5\%$ of total intracranial brain voxels, randomly initialized 3D CNNs optimizing combined Dice-BCE frequently fall into a degenerate all-background attractor basin ($\hat{\mathbf{Y}} \le -c$, predicting zero foreground). Any exploratory positive activation on background voxels incurs steep penalties, which suppresses early lesion detection when annotated examples are scarce. In contrast, self-supervised 3D VisReg JEPA pre-training on the unlabeled cohort structures the 3D ViT feature space into meaningful anatomical tissue manifolds \emph{before} exposure to manual labels. Downstream fine-tuning initializes outside the background-collapse attractor basin, enabling rapid lesion boundary acquisition even from minimal supervision. Meanwhile, 3D nnU-Net's multi-scale deep supervision provides strong architectural guidance across resolution levels ($16.40\%$ at $1\%$, $56.03\%$ at $5\%$, reaching $81.27\%$ at $100\%$).
+These results illustrate the practical utility of self-supervised pre-training when labels are extremely scarce: pre-training on unannotated scans structures the ViT feature space into meaningful anatomical manifolds, enabling the model to acquire lesion boundaries from minimal supervision without collapsing to a trivial all-background prediction ($\hat{\mathbf{Y}} \le 0$). However, this low-data collapse is not an inevitable property of all convolutional networks: the deeply supervised 3D DynUNet baseline achieves $56.65\%$ Dice at $1\%$ labels and $73.63\%$ at $5\%$ labels, outperforming VisReg across all annotation tiers. This indicates that architectural interventions such as multi-scale deep supervision can provide strong gradient flow that also counteracts optimization failure under severe sample scarcity.
 
 \subsection{Robustness to Synthetic 3D Scanner Shifts}
 \label{sec:results_ood_synthetic}
@@ -337,17 +341,17 @@ Table~\ref{tab:ood_synthetic_results} and Figure~\ref{fig:ood_synthetic} report 
 \toprule
 \textbf{Domain Shift Condition} & \textbf{Model Architecture} & $\text{Dice}_{3\text{D}} (\%)\uparrow$ & \textbf{3D IoU (\%)} $\uparrow$ & \textbf{HD95 (mm)} $\downarrow$ \\
 \midrule
-\textbf{Clean Baseline} & \textbf{3D VisReg JEPA (FPN)} & $\mathbf{90.12 \pm 0.02}$ & $\mathbf{82.01 \pm 0.01}$ & $\mathbf{3.54 \pm 0.32}$ \\
-Clean Baseline & 3D nnU-Net Baseline & $89.80 \pm 0.11$ & $81.50 \pm 0.06$ & $3.71 \pm 0.38$ \\
-Clean Baseline & 3D Residual UNet Baseline & $85.42 \pm 0.03$ & $74.80 \pm 0.01$ & $5.68 \pm 0.62$ \\
+Clean Baseline & 3D nnU-Net Baseline & $\mathbf{87.60 \pm 11.93}$ & $\mathbf{79.29 \pm 13.02}$ & $6.73 \pm 22.46$ \\
+Clean Baseline & 3D Residual UNet Baseline & $86.42 \pm 12.06$ & $77.46 \pm 13.31$ & $\mathbf{6.38 \pm 17.44}$ \\
+Clean Baseline & 3D VisReg JEPA (FPN) & $79.71 \pm 14.34$ & $68.02 \pm 15.05$ & $11.04 \pm 14.36$ \\
 \midrule
-\textbf{3D Rician Noise ($\sigma=0.08$)} & \textbf{3D VisReg JEPA (FPN)} & $\mathbf{87.45 \pm 0.22}$ & $\mathbf{77.70 \pm 0.31}$ & $\mathbf{4.10 \pm 0.35}$ \\
-3D Rician Noise ($\sigma=0.08$) & 3D nnU-Net Baseline & $81.20 \pm 0.35$ & $68.35 \pm 0.45$ & $6.85 \pm 0.52$ \\
-3D Rician Noise ($\sigma=0.08$) & 3D Residual UNet Baseline & $74.50 \pm 0.45$ & $59.36 \pm 0.55$ & $10.42 \pm 0.85$ \\
+\textbf{3D Rician Noise ($\sigma=0.08$)} & 3D nnU-Net Baseline & $\mathbf{87.60 \pm 11.95}$ & $\mathbf{79.28 \pm 13.05}$ & $6.75 \pm 22.48$ \\
+3D Rician Noise ($\sigma=0.08$) & 3D Residual UNet Baseline & $86.40 \pm 12.10$ & $77.44 \pm 13.35$ & $\mathbf{6.40 \pm 17.50}$ \\
+3D Rician Noise ($\sigma=0.08$) & 3D VisReg JEPA (FPN) & $79.71 \pm 14.34$ & $68.02 \pm 15.05$ & $11.05 \pm 14.38$ \\
 \midrule
-\textbf{B1 Bias Field Inhomogeneity} & \textbf{3D VisReg JEPA (FPN)} & $\mathbf{88.10 \pm 0.18}$ & $\mathbf{78.73 \pm 0.25}$ & $\mathbf{3.95 \pm 0.30}$ \\
-B1 Bias Field Inhomogeneity & 3D nnU-Net Baseline & $83.40 \pm 0.40$ & $71.53 \pm 0.50$ & $5.90 \pm 0.45$ \\
-B1 Bias Field Inhomogeneity & 3D Residual UNet Baseline & $77.80 \pm 0.38$ & $63.67 \pm 0.48$ & $8.95 \pm 0.70$ \\
+\textbf{B1 Bias Field Inhomogeneity} & 3D nnU-Net Baseline & $\mathbf{85.21 \pm 12.50}$ & $\mathbf{75.80 \pm 13.60}$ & $\mathbf{7.50 \pm 23.10}$ \\
+B1 Bias Field Inhomogeneity & 3D Residual UNet Baseline & $82.80 \pm 13.20$ & $72.15 \pm 14.20$ & $8.95 \pm 20.40$ \\
+B1 Bias Field Inhomogeneity & 3D VisReg JEPA (FPN) & $59.98 \pm 18.20$ & $47.30 \pm 17.50$ & $14.20 \pm 16.80$ \\
 \bottomrule
 \end{tabular}%
 }
@@ -356,11 +360,12 @@ B1 Bias Field Inhomogeneity & 3D Residual UNet Baseline & $77.80 \pm 0.38$ & $63
 \begin{figure}[ht]
 \centering
 \includegraphics[width=0.92\textwidth]{figures/ood_domain_generalization.pdf}
-\caption{\textbf{Synthetic Scanner Shift Robustness.} (A) 3D Volumetric Dice Score (\%) and (B) 95th percentile Hausdorff Distance (HD95, in physical mm) under clean baseline, 3D Rician noise ($\sigma=0.08$), and quadratic $B_1$ bias fields. 3D VisReg JEPA preserves high segmentation accuracy and consistently lower boundary errors than 3D nnU-Net and UNet across all conditions.}
+\caption{\textbf{Synthetic Scanner Shift Robustness.} (A) 3D Volumetric Dice Score (\%) and (B) 95th percentile Hausdorff Distance (HD95, in physical mm) under clean baseline, 3D Rician noise ($\sigma=0.08$), and quadratic $B_1$ bias fields.}
 \label{fig:ood_synthetic}
 \end{figure}
 
-Under 3D Rician perturbations and quadratic $B_1$ bias fields, 3D VisReg JEPA exhibits markedly lower degradation ($\Delta = -2.67\%$ Dice vs.\ $-8.60\%$ for nnU-Net and $-10.92\%$ for UNet). Boundary errors remain well below $4.10\,\text{mm}$ HD95, whereas nnU-Net degrades to $6.85\,\text{mm}$ and UNet to $10.42\,\text{mm}$. Because JEPA pre-training optimizes patch prediction in latent space rather than voxel reconstruction, the encoder naturally learns invariance to low-frequency gain drifts and high-frequency additive perturbations.
+Under 3D Rician noise perturbations ($\sigma = 0.08$), all three architectures maintain their segmentation accuracy with negligible change ($< 0.02\%$ difference across models; $87.60\%$ for nnU-Net, $86.40\%$ for Residual UNet, and $79.71\%$ for VisReg JEPA). Because the noise is applied to Z-score normalized volumes at $\sigma = 0.08$, the signal-to-noise ratio remains high across brain parenchyma, making this test insufficient to discriminate among the models; all architectures filter out this mild perturbation effectively.
+In contrast, smooth quadratic $B_1$ field bias introduces a macroscopic intensity gradient across the volume that reveals a major boundary condition: 3D VisReg JEPA drops by approximately $20$ Dice points ($79.71\% \to 59.98\%$), whereas the convolutional baselines show modest decreases ($87.60\% \to 85.21\%$ for nnU-Net; $86.42\% \to 82.80\%$ for ResUNet). Because convolutional architectures employ local operations with Instance Normalization, they are less sensitive to low-frequency spatial contrast drift. For the Vision Transformer, non-local self-attention across unnormalized patch tokens causes embeddings to drift when continuous intensity gradients alter relative contrast across distant brain regions.
 
 \subsection{Emergency Triage Under Missing MRI Pulse Sequences}
 \label{sec:results_missing_modality}
@@ -377,17 +382,17 @@ Table~\ref{tab:missing_modality_results} and Figure~\ref{fig:missing_modality_oo
 \toprule
 \textbf{Protocol Scenario} & \textbf{Model Architecture} & $\text{Dice}_{3\text{D}} (\%)\uparrow$ & \textbf{3D IoU (\%)} $\uparrow$ & \textbf{HD95 (mm)} $\downarrow$ \\
 \midrule
-\textbf{Clean 4-Sequence Protocol} & \textbf{3D VisReg JEPA (FPN)} & $\mathbf{90.12 \pm 0.02}$ & $\mathbf{82.01 \pm 0.01}$ & $\mathbf{3.54 \pm 0.32}$ \\
-Clean 4-Sequence Protocol & 3D nnU-Net Baseline & $89.80 \pm 0.11$ & $81.50 \pm 0.06$ & $3.71 \pm 0.38$ \\
-Clean 4-Sequence Protocol & 3D Residual UNet Baseline & $85.42 \pm 0.03$ & $74.80 \pm 0.01$ & $5.68 \pm 0.62$ \\
+Clean 4-Sequence Protocol & 3D nnU-Net Baseline & $\mathbf{87.60 \pm 11.93}$ & $\mathbf{79.29 \pm 13.02}$ & $6.73 \pm 22.46$ \\
+Clean 4-Sequence Protocol & 3D Residual UNet Baseline & $86.42 \pm 12.06$ & $77.46 \pm 13.31$ & $\mathbf{6.38 \pm 17.44}$ \\
+Clean 4-Sequence Protocol & 3D VisReg JEPA (FPN) & $79.71 \pm 14.34$ & $68.02 \pm 15.05$ & $11.04 \pm 14.36$ \\
 \midrule
-\textbf{Missing Sequence: T1c Only} & \textbf{3D VisReg JEPA (FPN)} & $\mathbf{76.20 \pm 0.45}$ & $\mathbf{61.55 \pm 0.58}$ & $\mathbf{6.25 \pm 0.45}$ \\
-Missing Sequence: T1c Only & 3D nnU-Net Baseline & $64.10 \pm 0.65$ & $47.17 \pm 0.75$ & $12.40 \pm 0.85$ \\
-Missing Sequence: T1c Only & 3D Residual UNet Baseline & $52.30 \pm 0.85$ & $35.41 \pm 0.90$ & $18.15 \pm 1.20$ \\
+\textbf{Missing Sequence: T1c Only} & 3D nnU-Net Baseline & $\mathbf{72.88 \pm 15.80}$ & $\mathbf{59.80 \pm 16.20}$ & $\mathbf{9.80 \pm 24.10}$ \\
+Missing Sequence: T1c Only & 3D Residual UNet Baseline & $69.02 \pm 16.40$ & $55.20 \pm 16.80$ & $12.10 \pm 22.50$ \\
+Missing Sequence: T1c Only & 3D VisReg JEPA (FPN) & $37.28 \pm 22.10$ & $26.40 \pm 18.90$ & $22.40 \pm 20.30$ \\
 \midrule
-\textbf{Missing Sequence: FLAIR Only} & \textbf{3D VisReg JEPA (FPN)} & $\mathbf{78.90 \pm 0.40}$ & $\mathbf{65.15 \pm 0.52}$ & $\mathbf{5.80 \pm 0.40}$ \\
-Missing Sequence: FLAIR Only & 3D nnU-Net Baseline & $68.50 \pm 0.58$ & $52.09 \pm 0.68$ & $10.95 \pm 0.75$ \\
-Missing Sequence: FLAIR Only & 3D Residual UNet Baseline & $55.10 \pm 0.72$ & $38.03 \pm 0.80$ & $16.40 \pm 1.10$ \\
+\textbf{Missing Sequence: FLAIR Only} & 3D nnU-Net Baseline & $\mathbf{84.09 \pm 13.10}$ & $\mathbf{74.50 \pm 14.00}$ & $\mathbf{7.60 \pm 22.80}$ \\
+Missing Sequence: FLAIR Only & 3D Residual UNet Baseline & $82.50 \pm 13.80$ & $71.90 \pm 14.50$ & $8.40 \pm 19.50$ \\
+Missing Sequence: FLAIR Only & 3D VisReg JEPA (FPN) & $71.40 \pm 16.50$ & $58.10 \pm 16.90$ & $14.10 \pm 16.20$ \\
 \bottomrule
 \end{tabular}%
 }
@@ -395,40 +400,40 @@ Missing Sequence: FLAIR Only & 3D Residual UNet Baseline & $55.10 \pm 0.72$ & $3
 
 \begin{figure}[ht]
 \centering
-\includegraphics[width=0.68\textwidth]{figures/missing_modality_ood.pdf}
-\caption{\textbf{Emergency Triage Under Missing Pulse Sequences.} 3D Volumetric Dice Score (\%) comparison across models under complete 4-sequence acquisition, missing FLAIR (T1c only), and missing T1c (FLAIR only). 3D VisReg JEPA delivers a $\mathbf{+12.1\%}$ Dice improvement over 3D nnU-Net ($76.20\%$ vs.\ $64.10\%$).}
+\includegraphics[width=0.74\textwidth]{figures/missing_modality_ood.pdf}
+\caption{\textbf{Emergency Triage Under Missing Pulse Sequences.} 3D Volumetric Dice Score (\%) comparison across models under complete 4-sequence acquisition, missing FLAIR (T1c only), and missing T1c (FLAIR only).}
 \label{fig:missing_modality_ood}
 \end{figure}
 
-Under incomplete emergency protocols, supervised convolutional baselines suffer severe performance collapse: 3D nnU-Net drops from $89.80\%$ to $64.10\%$ (T1c only) and $68.50\%$ (FLAIR only), while 3D UNet drops to $52.30\%$ and $55.10\%$. In contrast, \textbf{3D VisReg JEPA achieves $\mathbf{76.20\%}$ and $\mathbf{78.90\%}$ Dice}, outperforming 3D nnU-Net by $\mathbf{+12.10\%}$ and $\mathbf{+10.40\%}$ absolute Dice. Pre-training with Random Modality Dropout in latent space forces the 3D Vision Transformer to decouple cross-sequence interdependencies, enabling resilient morphological delineation even when critical pulse sequences are unavailable.
+Under single-sequence triage protocols, all architectures retain substantial Whole Tumor segmentation performance under FLAIR-only acquisition ($84.09\%$ for nnU-Net, $82.50\%$ for UNet, and $71.40\%$ for VisReg JEPA), reflecting FLAIR's strong contrast on hyperintense vasogenic edema. However, evaluating T1c alone exposes a substantial vulnerability in 3D VisReg JEPA: while nnU-Net and Residual UNet achieve $72.88\%$ and $69.02\%$ respectively, VisReg drops sharply to $37.28\%$ Dice ($22.40\,\text{mm}$ HD95). Because multi-modal self-supervised pre-training was conducted on 4-channel inputs (with random channel dropout), the Transformer tokens appear to learn representations that rely heavily on the co-occurrence of contrast enhancement (T1c) with hyperintense edema (T2/FLAIR). When complementary sequences are omitted, the model struggles to detect non-enhancing and infiltrative tumor margins that lack strong T1c signal. Supervised CNNs, in comparison, rely on dense local spatial filters that retain higher feature robustness when individual channels are omitted.
 
 \subsection{Qualitative Multi-Planar Orthogonal Visualizations}
 \label{sec:results_qualitative}
 
-Figure~\ref{fig:orthogonal_view} displays orthogonal cross-sections through the tumor centroid of clinical glioblastoma patient \texttt{BraTS-GLI-00005-100}.
+Figure~\ref{fig:orthogonal_view} displays orthogonal cross-sections through the tumor centroid of glioblastoma case \texttt{BraTS-GLI-00005-100}.
 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{figures/qualitative_segmentation_cases.png}
-\caption{\textbf{Multi-Planar Orthogonal View of Patient \texttt{BraTS-GLI-00005-100}.} Axial ($Z=80$), Coronal ($Y=32$), and Sagittal ($X=91$) cross-sections through the 3D tumor centroid, demonstrating precise Whole Tumor (WT) contour delineation across all three orthogonal anatomical planes.}
+\caption{\textbf{Multi-Planar Orthogonal View of Patient \texttt{BraTS-GLI-00005-100}.} Axial ($Z=80$), Coronal ($Y=32$), and Sagittal ($X=91$) cross-sections through the 3D tumor centroid, illustrating Whole Tumor (WT) contour predictions across orthogonal anatomical planes.}
 \label{fig:orthogonal_view}
 \end{figure*}
 
-The multi-planar orthogonal slices demonstrate that isotropic $128^3$ volumetric processing preserves continuous 3D anatomical boundaries without the through-plane stepping artifacts typical of 2D slice-by-slice inference. The Multi-Scale 3D FPN decoder accurately outlines irregular infiltrative margins across Axial, Coronal, and Sagittal planes.
+The multi-planar orthogonal slices demonstrate that isotropic volumetric processing preserves continuous 3D anatomical boundaries without the through-plane stepping artifacts typical of 2D slice-by-slice inference. The Multi-Scale 3D FPN decoder outlines the macroscopic tumor bulk across Axial, Coronal, and Sagittal planes. However, as reflected in the quantitative HD95 distance ($11.04\,\text{mm}$ vs.\ $6.38\text{--}6.73\,\text{mm}$ for CNNs), subtle infiltrative margins and high-frequency edge protrusions exhibit boundary smoothing due to the $16^3$ patch tokenization bottleneck.
 
 
 \section{Discussion, Practical Guidance, and Conclusion}
 \label{sec:discussion}
 
-\subsection{Resolving the Paradox: Why Does Latent Pre-Training Enable Dense 3D Segmentation?}
+\subsection{Structural Analysis: Why Can 3D JEPA Segment, and Where Does It Fall Short?}
 \label{sec:resolving_paradox}
 
-Our empirical findings provide a clear resolution to the central paradox posed in Section~\ref{sec:introduction}. Why does an architecture that explicitly avoids voxel reconstruction perform competitively on dense volumetric segmentation? Three mechanistic factors explain this behavior:
+Our empirical findings clarify the central question posed in Section~\ref{sec:introduction}: can an architecture optimized to avoid voxel reconstruction perform dense volumetric segmentation? The results demonstrate that 3D JEPA pre-training learns representations capable of dense prediction ($79.71\%$ Dice), while highlighting key structural trade-offs:
 
 \begin{enumerate}
-    \item \textbf{Latent 3D Topological Continuity}: Rather than discarding spatial coordinates, masked 3D cuboid target prediction in latent space forces the Vision Transformer to model inter-patch volumetric continuity and spatial transitions. The encoder learns where anatomical structures terminate and where pathological tissue margins begin across all three spatial axes without wasting representational capacity on voxel-level acquisition noise.
-    \item \textbf{Hierarchical Multi-Scale 3D FPN Decoding}: While the deepest ViT tokens ($\mathbf{Z}^{(8)}$) encode high-level semantic abstractions, intermediate Transformer blocks ($\mathbf{Z}^{(2)}, \mathbf{Z}^{(4)}, \mathbf{Z}^{(6)}$) retain localized 3D spatial coordinates and boundary gradients. The multi-scale decoder combines these intermediate features into a hierarchical 3D feature pyramid, retrieving fine spatial coordinates for boundary delineation.
-    \item \textbf{The Auxiliary Regularization Head as a Semantic Shield}: A crucial architectural detail in 3D VisReg JEPA is routing context tokens through an auxiliary 2-layer Projector MLP ($384 \to 1024 \to 128$) prior to applying Sliced-Wasserstein regularization. The isotropic Gaussianity penalties act strictly upon the projected tokens $\mathbf{Z}$, leaving the raw 384-dimensional ViT backbone features unconstrained to represent complex, non-Gaussian anatomical and pathological tissue patterns. Discarding the projector after pre-training delivers a rich, uninhibited representation space to the downstream segmentation decoder.
+    \item \textbf{Latent Topological Continuity and Dense Decoding}: Rather than discarding spatial structure, predicting masked 3D target cuboids in latent feature space requires the Vision Transformer to model volumetric continuity across adjacent patches. By extracting intermediate representations from across the network ($\mathbf{Z}^{(L_2)}, \mathbf{Z}^{(L_4)}, \mathbf{Z}^{(L_6)}, \mathbf{Z}^{(L_8)}$), the multi-scale 3D FPN decoder retrieves localized spatial coordinate cues and progressively upsamples them ($8^3 \to 16^3 \to 32^3 \to 64^3 \to 128^3$), enabling dense per-voxel mask prediction.
+    \item \textbf{Decoupled Projector Regularization}: Applying Sliced-Wasserstein distribution matching to the auxiliary Projector MLP ($d_p = 128$) prevents representation collapse without constraining the primary encoder representation manifold ($D = 384$) to adhere to an isotropic Gaussian distribution. Discarding the projector after pre-training delivers an uninhibited, non-collapsed feature space to the downstream segmentation decoder.
+    \item \textbf{The Boundary Precision Bottleneck of Patch Tokenization}: Despite viable overall overlap, 3D VisReg JEPA exhibits significantly higher boundary distance error than convolutional baselines ($11.04\,\text{mm}$ vs.\ $6.38\text{--}6.73\,\text{mm}$ HD95). This gap directly reflects the inductive bias of patch tokenization: partitioning a $128^3$ volume into $16 \times 16 \times 16$ patches yields an $8 \times 8 \times 8$ grid of 512 tokens, where each token corresponds to a $16\,\text{mm}$ cube in the canonical coordinate frame. Convolutional architectures maintain dense spatial feature hierarchies with horizontal skip connections that route low-level edge gradients directly into the decoder. In contrast, 3D JEPA discards intra-patch spatial coordinates during patch projection, requiring the FPN decoder to interpolate fine boundary contours from coarse patch embeddings.
 \end{enumerate}
 
 \subsection{Practical Model Selection Guidance}
@@ -436,34 +441,38 @@ Our empirical findings provide a clear resolution to the central paradox posed i
 
 Based on our empirical results, we outline concrete practical considerations for model selection in 3D medical imaging:
 \begin{itemize}
-    \item \textbf{3D VisReg JEPA is strongly recommended when}:
+    \item \textbf{Consider 3D VisReg JEPA when}:
     \begin{enumerate}
-        \item \emph{Annotations are scarce or costly}: In low-label regimes ($< 100$ annotated patient volumes), pre-training 3D VisReg JEPA on available unannotated scans provides a decisive advantage over standard supervised CNNs ($45.66\%$ vs.\ $13.35\%$ Dice at $5\%$ labels, a $3.4\times$ relative gain; $9.90\%$ vs.\ $3.83\%$ at $1\%$).
-        \item \emph{Inference latency and throughput are critical}: With a forward latency of $73.14\,\text{ms}$ per $128^3$ volume, 3D VisReg JEPA runs $\mathbf{1.73\times}$ faster than 3D nnU-Net ($126.57\,\text{ms}$) while achieving an $18.79\%$ higher Dice score and $3.2\times$ lower boundary error than standard 3D Residual UNet ($69.62\%$ vs.\ $50.83\%$; $16.83\,\text{mm}$ vs.\ $54.35\,\text{mm}$ HD95).
-        \item \emph{Protocols face missing sequences}: Under single-modality emergency triage, 3D VisReg JEPA exhibits substantially higher resilience than supervised CNNs ($76.20\%$ vs.\ $64.10\%$ Dice).
+        \item \emph{Annotations are extremely scarce}: In low-label regimes ($1\%\text{--}5\%$ annotated volumes, corresponding to $13\text{--}63$ patient scans), pre-training 3D VisReg JEPA on available unannotated scans provides a substantial advantage over standard unregularized 3D Residual UNet ($47.21\%$ vs.\ $3.98\%$ at $1\%$ labels; $58.16\%$ vs.\ $4.70\%$ at $5\%$), preventing background collapse under limited iteration budgets.
+        \item \emph{Throughput advantages over deep supervision are needed}: With an inference latency of $114.57\,\text{ms}$ per $128^3$ volume, 3D VisReg JEPA operates $2.05\times$ faster than the deeply supervised 3D DynUNet baseline ($235.22\,\text{ms}$), providing higher throughput when multi-scale auxiliary heads incur prohibitive latency.
     \end{enumerate}
-    \item \textbf{3D nnU-Net remains viable when}:
+    \item \textbf{Prefer Supervised Convolutional Baselines when}:
     \begin{enumerate}
-        \item \emph{Abundant manual annotations exist}: When hundreds of annotated volumes are available and multi-scale deep supervision is feasible, nnU-Net's strong inductive biases deliver rapid early convergence ($82.52\%$ Dice).
-        \item \emph{Standard clinical baselines are mandated}: In clinical environments where established, validated CNN pipelines are required by institutional certification, nnU-Net remains a dependable standard.
+        \item \emph{Full annotations are available}: When hundreds of annotated volumes exist ($100\%$ labels), fully supervised CNNs achieve superior segmentation accuracy ($87.60\%$ for DynUNet and $86.42\%$ for Residual UNet vs.\ $79.71\%$ for VisReg) and markedly sharper boundary delineation ($6.38\text{--}6.73\,\text{mm}$ vs.\ $11.04\,\text{mm}$ HD95).
+        \item \emph{Maximum raw throughput is required}: Standard 3D Residual UNet with a single-scale decoder achieves the fastest forward latency overall ($75.54\,\text{ms}$ per volume).
+        \item \emph{Scans exhibit field inhomogeneities or missing sequences}: Convolutional networks with local normalization (Instance Normalization) provide vastly superior robustness to smooth $B_1$ bias fields ($82.80\text{--}85.21\%$ vs.\ $59.98\%$ Dice) and missing contrast-enhanced sequences ($69.02\text{--}72.88\%$ vs.\ $37.28\%$ on T1c-only).
     \end{enumerate}
 \end{itemize}
 
-\subsection{Limitations}
+\subsection{Limitations and Methodological Validity}
 \label{sec:limitations}
 
-We explicitly delineate four methodological limitations of this study:
+We explicitly delineate six methodological limitations of this study:
 \begin{enumerate}
-    \item \textbf{Spatial Resolution}: Volumes were resampled to isotropic $128^3$ grid dimensions ($1.0\,\text{mm}^3$ effective spacing) to fit standard GPU accelerator memory during 3D attention operations. Scaling to $256^3$ native BraTS resolution via windowed or linear attention represents a valuable direction for future scaling.
-    \item \textbf{Pathology Scope}: Primary evaluation is conducted on multi-modal Glioma (BraTS 2024 GLI). Generalization to non-neuro-oncological 3D modalities (e.g., abdominal CT, cardiac cine MRI) or unstripped clinical DICOM data remains to be explored.
-    \item \textbf{Synthetic vs.\ Physical Scanner Variations}: Scanner shifts are modeled via synthetic Rician noise and quadratic bias fields. While mathematically grounded in physical MRI acquisition principles, they do not fully capture multi-vendor hardware discrepancies.
-    \item \textbf{Confounding of Pre-Training Data Access}: In low-label benchmarks ($1\%$ to $10\%$), self-supervised models utilize the full unlabeled cohort during pre-training, whereas supervised baselines train only on the labeled fraction. This reflects the standard self-supervised learning paradigm, but downstream gains reflect both representation learning and access to unannotated data.
+    \item \textbf{Absence of Specific Architectural and Pre-Training Controls}: This study does not evaluate a randomly initialized ViT-FPN trained with the same schedule, meaning that the observed performance cannot be fully decoupled into the contribution of the Vision Transformer architecture versus the self-supervised pre-training objective. Furthermore, while the central premise of JEPA is avoiding pixel reconstruction, we do not evaluate a 3D Masked Autoencoder (3D MAE) baseline under matched compute to directly contrast latent prediction against voxel-level reconstruction. Similarly, we evaluate VisReg as a representative single-encoder JEPA without an isolated fine-tuning comparison against I-JEPA or SIGReg.
+    \item \textbf{Nature of Low-Data Background Collapse}: Standard 3D Residual UNet collapses to background predictions at $1\%\text{--}5\%$ labels ($3.98\%\text{--}4.70\%$ Dice) under the matched 15-epoch budget ($\approx 98$ optimizer steps on 13 volumes at batch size 2). This appears to reflect an optimization and undertraining failure mode under severe class imbalance and short schedules rather than an intrinsic limitation of convolutional architectures, as evidenced by deeply supervised DynUNet reaching $56.65\%$ Dice under the same budget.
+    \item \textbf{Spatial Resolution and Preprocessing Coordinates}: Volumes are resampled from native $240 \times 240 \times 155$ ($1.0\,\text{mm}^3$) to a canonical $128 \times 128 \times 128$ grid following brain bounding box extraction. This introduces case-dependent scaling (typically $\approx 1.2\text{--}1.5\,\text{mm}$ per voxel), meaning that reported HD95 values reflect nominal unit grid distance rather than exact physical millimeters.
+    \item \textbf{Statistical Scope and Seed Variance}: All benchmark metrics reflect a single deterministic training run ($\text{seed}=42$). The reported standard deviations ($\pm$) capture inter-subject anatomical variance across the $N=271$ held-out test volumes, not variance across random initializations. Multi-seed evaluations with paired bootstrap confidence intervals are needed for formal statistical hypothesis testing.
+    \item \textbf{Baseline Training Budgets}: The 3D nnU-Net baseline implements the MONAI DynUNet architecture trained for a matched budget of 30 epochs. Full standalone nnU-Net pipelines train for 1000 epochs with extensive automated data augmentation and ensembling, representing a substantially higher compute regime.
+    \item \textbf{Perturbation Fidelity}: The Rician noise perturbation ($\sigma=0.08$) on normalized volumes is too mild to differentiate models. While synthetic polynomial $B_1$ gradients expose vulnerabilities in the ViT embeddings, they do not fully model real-world multi-scanner, multi-center domain shifts.
 \end{enumerate}
 
 \subsection{Conclusion}
 \label{sec:conclusion}
 
-In this paper, we investigated whether 3D Joint-Embedding Predictive Architectures---designed explicitly to avoid voxel-level reconstruction---can perform dense volumetric medical image segmentation. Through a controlled empirical evaluation comparing 3D VisReg JEPA against supervised 3D Residual UNet and 3D nnU-Net baselines on multi-modal brain MRI, we resolve this question affirmatively. 3D VisReg JEPA learns rich volumetric representations achieving $69.62 \pm 16.34\%$ Dice and $16.83 \pm 17.17\,\text{mm}$ HD95 after 5 training epochs, dramatically outperforming standard supervised 3D Residual UNet ($50.83 \pm 25.03\%$ Dice, $54.35\,\text{mm}$ HD95; a $+18.79\%$ absolute gain with $3.2\times$ lower boundary distance error). Furthermore, 3D VisReg JEPA delivers a $\mathbf{1.73\times}$ faster forward inference latency ($73.14\,\text{ms}$ vs.\ $126.57\,\text{ms}$ per $128^3$ volume) compared to 3D nnU-Net. In low-data regimes, it consistently outpaces standard CNNs ($45.66\%$ vs.\ $13.35\%$ at $5\%$ labels), demonstrating that self-supervised latent pre-training effectively bypasses background collapse. We conclude that 3D latent patch prediction, when regularized by decoupled optimal transport distribution matching and paired with a hierarchical multi-scale 3D FPN decoder, provides an effective, teacher-free foundation for dense volumetric medical image segmentation without ever reconstructing raw voxel intensities.
+In this paper, we investigated whether 3D Joint-Embedding Predictive Architectures (JEPA)---designed explicitly to avoid voxel-level reconstruction---can perform dense volumetric medical image segmentation. Through a controlled empirical evaluation comparing 3D VisReg JEPA against supervised 3D Residual UNet and deeply supervised 3D DynUNet baselines on multi-modal brain MRI (BraTS 2024 GLI), we find that 3D JEPA successfully learns representations capable of dense volumetric segmentation, achieving $79.71 \pm 14.34\%$ Dice on held-out test volumes ($N=271$). Furthermore, self-supervised latent pre-training provides effective structural priors under severe annotation scarcity, outperforming standard 3D Residual UNet ($47.21\%$ vs.\ $3.98\%$ at $1\%$ labels; $58.16\%$ vs.\ $4.70\%$ at $5\%$) by preventing background collapse, while operating $2.05\times$ faster than deeply supervised DynUNet ($114.57\,\text{ms}$ vs.\ $235.22\,\text{ms}$).
+
+However, our empirical benchmark establishes clear trade-offs and boundary conditions: fully supervised CNNs achieve higher overall Dice ($86.42\text{--}87.60\%$) and significantly sharper boundary delineation ($6.38\text{--}6.73\,\text{mm}$ vs.\ $11.04\,\text{mm}$ HD95) on full training data, where the coarse $16^3$ patch tokenization acts as an architectural bottleneck. Moreover, 3D JEPA displays marked vulnerability to smooth $B_1$ magnetic field inhomogeneities ($59.98\%$) and missing contrast-enhanced sequences ($37.28\%$). We conclude that 3D JEPA provides a viable, teacher-free foundation for volumetric medical imaging, offering notable advantages under extreme label scarcity and multi-scale decoder latency constraints, but requires architectural innovations in high-resolution spatial routing and field-invariant normalization to match the boundary precision and artifact resilience of specialized convolutional networks.
 
 \bibliographystyle{plainnat}
 \bibliography{references}

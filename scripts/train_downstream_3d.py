@@ -81,6 +81,12 @@ def parse_args():
         help="Enable pinned memory for faster host-to-device transfers (default: True)",
     )
     parser.add_argument("--no_pin_memory", action="store_false", dest="pin_memory")
+    parser.add_argument(
+        "--from_scratch",
+        action="store_true",
+        default=False,
+        help="Train 3D ViT-FPN downstream model from random initialization (no pre-trained checkpoint)",
+    )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
 
@@ -90,7 +96,7 @@ def evaluate(model, loader, device, amp: bool = True, smoke_test: bool = False) 
     all_dices, all_ious, all_hd95s = [], [], []
 
     with torch.no_grad():
-        for batch_idx, batch in enumerate(loader):
+        for batch_idx, batch in enumerate(tqdm(loader, desc="Validating", leave=False)):
             images = batch["image"].to(device)
             masks = batch["mask"].to(device)
 
@@ -99,7 +105,7 @@ def evaluate(model, loader, device, amp: bool = True, smoke_test: bool = False) 
                 if isinstance(logits, (list, tuple)):
                     logits = logits[0]
 
-            metrics = compute_volumetric_metrics_3d(logits, masks)
+            metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
             all_dices.extend(metrics["dice_per_sample"])
             all_ious.extend(metrics["iou_per_sample"])
             all_hd95s.extend(metrics["hd95_per_sample"])
@@ -110,7 +116,7 @@ def evaluate(model, loader, device, amp: bool = True, smoke_test: bool = False) 
     return {
         "val_dice": float(np.mean(all_dices)) if all_dices else 0.0,
         "val_iou": float(np.mean(all_ious)) if all_ious else 0.0,
-        "val_hd95": float(np.mean(all_hd95s)) if all_hd95s else 0.0,
+        "val_hd95": float(np.nanmean(all_hd95s)) if all_hd95s else 0.0,
     }
 
 
@@ -137,11 +143,13 @@ def main():
     ensure_directories()
     set_seed(args.seed)
     device = get_device()
+    suffix = "_scratch" if args.from_scratch else ""
     logger = setup_logger(
-        "downstream_3d", LOGS_DIR / f"{args.model_type}_{args.decoder_type}_downstream.log"
+        "downstream_3d", LOGS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_downstream.log"
     )
     logger.info(
-        f"Starting 3D Downstream Fine-Tuning: Model={args.model_type}, Decoder={args.decoder_type}, FreezeEncoder={args.freeze_encoder}"
+        f"Starting 3D Downstream Fine-Tuning: Model={args.model_type}, Decoder={args.decoder_type}, "
+        f"FromScratch={args.from_scratch}, FreezeEncoder={args.freeze_encoder}"
     )
 
     aug_tf = VolumetricAugmentations3D(
@@ -196,7 +204,7 @@ def main():
         shuffle=False,
         num_workers=num_workers,
         pin_memory=use_pin_memory,
-        persistent_workers=(num_workers > 0),
+        persistent_workers=False,
         prefetch_factor=2 if num_workers > 0 else None,
     )
 
@@ -225,7 +233,11 @@ def main():
 
     # Load pre-trained encoder checkpoint if specified or auto-discover
     ckpt_path = None
-    if args.pretrained_checkpoint:
+    if args.from_scratch:
+        logger.info(
+            "Initializing 3D ViT-FPN from SCRATCH (random initialization, no pre-trained checkpoint) [--from_scratch active]"
+        )
+    elif args.pretrained_checkpoint:
         ckpt_path = Path(args.pretrained_checkpoint)
     else:
         ssl_best = sorted(CHECKPOINTS_DIR.glob(f"{args.model_type}*_3d_best.pt"))
@@ -243,13 +255,13 @@ def main():
             if candidates:
                 ckpt_path = candidates[-1]
 
-    if ckpt_path and ckpt_path.exists():
+    if not args.from_scratch and ckpt_path and ckpt_path.exists():
         ckpt = torch.load(ckpt_path, map_location=device)
         res = model.load_pretrained_encoder(ckpt)
         logger.info(
             f"Loaded pre-trained encoder weights from {ckpt_path} ({res['loaded_keys']} keys matched)"
         )
-    else:
+    elif not args.from_scratch:
         if args.freeze_encoder:
             raise FileNotFoundError(
                 f"Cannot freeze encoder without a pre-trained checkpoint! "
@@ -344,7 +356,8 @@ def main():
 
         if val_metrics["val_dice"] > best_val_dice or args.smoke_test:
             best_val_dice = val_metrics["val_dice"]
-            best_ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_{args.decoder_type}_best.pt"
+            suffix = "_scratch" if args.from_scratch else ""
+            best_ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_best.pt"
             torch.save(
                 {
                     "epoch": epoch,
@@ -366,9 +379,12 @@ def main():
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
-    tracker.save_json(LOGS_DIR / f"{args.model_type}_{args.decoder_type}_downstream_metrics.json")
-    tracker.save_csv(LOGS_DIR / f"{args.model_type}_{args.decoder_type}_downstream_metrics.csv")
-    logger.info("3D Downstream Fine-Tuning finished.")
+    suffix = "_scratch" if args.from_scratch else ""
+    tracker.save_json(LOGS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_downstream_metrics.json")
+    tracker.save_csv(LOGS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_downstream_metrics.csv")
+    logger.info(
+        f"3D Downstream Fine-Tuning finished ({'from scratch' if args.from_scratch else 'pre-trained'})."
+    )
 
 
 if __name__ == "__main__":
