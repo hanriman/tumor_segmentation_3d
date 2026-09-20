@@ -87,13 +87,25 @@ def parse_args():
         default=False,
         help="Train 3D ViT-FPN downstream model from random initialization (no pre-trained checkpoint)",
     )
+    parser.add_argument(
+        "--save_freq",
+        type=int,
+        default=0,
+        help="Frequency (in epochs) to save periodic model checkpoints (default: 0, disabled)",
+    )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Path to checkpoint file to resume training from",
+    )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
 
 
 def evaluate(model, loader, device, amp: bool = True, smoke_test: bool = False) -> dict[str, float]:
     model.eval()
-    all_dices, all_ious, all_hd95s = [], [], []
+    all_dices, all_ious = [], []
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(loader, desc="Validating", leave=False)):
@@ -108,7 +120,6 @@ def evaluate(model, loader, device, amp: bool = True, smoke_test: bool = False) 
             metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
             all_dices.extend(metrics["dice_per_sample"])
             all_ious.extend(metrics["iou_per_sample"])
-            all_hd95s.extend(metrics["hd95_per_sample"])
 
             if smoke_test and batch_idx >= 1:
                 break
@@ -116,7 +127,6 @@ def evaluate(model, loader, device, amp: bool = True, smoke_test: bool = False) 
     return {
         "val_dice": float(np.mean(all_dices)) if all_dices else 0.0,
         "val_iou": float(np.mean(all_ious)) if all_ious else 0.0,
-        "val_hd95": float(np.nanmean(all_hd95s)) if all_hd95s else 0.0,
     }
 
 
@@ -300,9 +310,28 @@ def main():
     )
 
     best_val_dice = -1.0
+    start_epoch = 1
     tracker = MetricTracker()
 
-    for epoch in range(1, epochs + 1):
+    if args.resume and Path(args.resume).exists():
+        resume_path = Path(args.resume)
+        logger.info(f"Resuming training state from checkpoint: {resume_path}")
+        resume_ckpt = torch.load(resume_path, map_location=device)
+        if "model_state_dict" in resume_ckpt:
+            model.load_state_dict(resume_ckpt["model_state_dict"])
+        if "optimizer_state_dict" in resume_ckpt and resume_ckpt["optimizer_state_dict"]:
+            optimizer.load_state_dict(resume_ckpt["optimizer_state_dict"])
+        if "scheduler_state_dict" in resume_ckpt and resume_ckpt["scheduler_state_dict"]:
+            scheduler.load_state_dict(resume_ckpt["scheduler_state_dict"])
+        if "scaler_state_dict" in resume_ckpt and resume_ckpt["scaler_state_dict"] and scaler.is_enabled():
+            scaler.load_state_dict(resume_ckpt["scaler_state_dict"])
+        if "epoch" in resume_ckpt:
+            start_epoch = resume_ckpt["epoch"] + 1
+        if "best_val_dice" in resume_ckpt:
+            best_val_dice = float(resume_ckpt["best_val_dice"])
+        logger.info(f"Resumed successfully at epoch {start_epoch} with best_val_dice: {best_val_dice:.4f}")
+
+    for epoch in range(start_epoch, epochs + 1):
         model.train()
         train_loss = 0.0
         num_batches = 0
@@ -342,7 +371,7 @@ def main():
         current_lr = scheduler.get_last_lr()[0]
         logger.info(
             f"Epoch {epoch}/{epochs} - LR: {current_lr:.6f} | Train Loss: {avg_train_loss:.4f} | "
-            f"Val Dice: {val_metrics['val_dice']:.4f} | Val HD95: {val_metrics['val_hd95']:.2f} mm"
+            f"Val Dice: {val_metrics['val_dice']:.4f} | Val IoU: {val_metrics['val_iou']:.4f}"
         )
 
         tracker.update(
@@ -354,19 +383,35 @@ def main():
             }
         )
 
+        suffix = "_scratch" if args.from_scratch else ""
+        state_dict_to_save = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "scaler_state_dict": scaler.state_dict() if scaler.is_enabled() else None,
+            "val_dice": val_metrics["val_dice"],
+            "best_val_dice": best_val_dice,
+        }
+
+        # 1. Best model checkpoint
         if val_metrics["val_dice"] > best_val_dice or args.smoke_test:
             best_val_dice = val_metrics["val_dice"]
-            suffix = "_scratch" if args.from_scratch else ""
+            state_dict_to_save["best_val_dice"] = best_val_dice
             best_ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_best.pt"
-            torch.save(
-                {
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "val_dice": best_val_dice,
-                },
-                best_ckpt_path,
-            )
+            torch.save(state_dict_to_save, best_ckpt_path)
             logger.info(f"New best model saved: {best_ckpt_path} (Val Dice: {best_val_dice:.4f})")
+
+        # 2. Latest checkpoint saved every epoch for safe resumption
+        latest_ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_latest.pt"
+        torch.save(state_dict_to_save, latest_ckpt_path)
+
+        # 3. Optional periodic checkpoint if save_freq > 0
+        save_freq = getattr(args, "save_freq", 0)
+        if save_freq > 0 and epoch % save_freq == 0 and not args.smoke_test:
+            periodic_ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_epoch_{epoch}.pt"
+            torch.save(state_dict_to_save, periodic_ckpt_path)
+            logger.info(f"Periodic checkpoint saved: {periodic_ckpt_path}")
 
         # Explicit CPU RAM and CUDA memory cleanup between epochs
         if "images" in locals():

@@ -1,7 +1,8 @@
 # 📋 Phased Engineering & Scientific Roadmap: Fair Benchmarks Across All Models, 3D JEPA Improvements, Validation Optimization, ViT From-Scratch Ablation, Hybrid UNETR Stem, and Additional Dataset Kaggle Packaging
 
-**Document Version**: 2.2 (2026-09-20)  
+**Document Version**: 2.3 (2026-09-20)  
 **Target Repository**: `thesis_3d`  
+**Current Status**: Phase 1 (Validation Optimization & Resilient Checkpointing) and Phase 2 (ViT From-Scratch Ablation Engine & Dedicated Kaggle Notebook) are **COMPLETED**. Phase 3 (Fair Downstream Training Suite: Deep Supervision, Asymmetric Tversky Loss, Hybrid Conv Stem, TTA) is **IN PROGRESS / NEXT**.  
 **Theoretical Framework**: In strict accordance with [`AGENTS.md`](../AGENTS.md) and [`docs/`](./) specifications.
 
 ---
@@ -19,10 +20,13 @@ To ensure the master thesis and subsequent paper submission withstand rigorous p
    - Supported across **all three training runners** (`train_nnunet_3d.py`, `train_unet_3d.py`, and `train_downstream_3d.py`).
 3. **3D Test-Time Augmentation (TTA, 4-Fold Reflections) Applied to ALL 3 Models**:
    - 4-fold reflection averaging (original + flip $X$ + flip $Y$ + flip $Z$) implemented in `predict_with_tta_3d` and evaluated uniformly across **all three architectures** in `evaluate_3d.py`.
-4. **Validation Latency & Memory Bottleneck** ([`docs/training_validation_bottleneck_and_hd95_optimization.md`](./training_validation_bottleneck_and_hd95_optimization.md)):
-   - Decouple HD95 from routine epoch validation (`compute_hd95=False`) and add point-cap subsampling ($max\_points=10000$), speeding up validation by **$18.7\times$** ($13\text{ minutes} \to 2.4\text{ seconds}$).
-5. **Scientific ViT From-Scratch Ablation Baseline** ([`docs/vit_from_scratch_ablation.md`](./vit_from_scratch_ablation.md)):
+4. **Validation Latency & Memory Bottleneck [COMPLETED]** ([`docs/training_validation_bottleneck_and_hd95_optimization.md`](./training_validation_bottleneck_and_hd95_optimization.md)):
+   - Decoupled HD95 from routine epoch validation (`compute_hd95=False`) and added point-cap subsampling ($max\_points=10000$), speeding up validation by **$18.7\times$** ($13\text{ minutes} \to 2.4\text{ seconds}$).
+   - Cleaned per-epoch logging (removed `Val HD95: nan mm`) across all runners.
+   - Full checkpoint resilience: saves `_best.pt` and `_latest.pt` (overwritten in place each epoch for safe crash recovery without disk bloating), plus `--resume` support.
+5. **Scientific ViT From-Scratch Ablation Baseline [COMPLETED]** ([`docs/vit_from_scratch_ablation.md`](./vit_from_scratch_ablation.md)):
    - Clean random-initialization baseline (`--from_scratch`) to isolate the true self-supervised representation gain ($\Delta_{\text{JEPA}}$).
+   - Dedicated Kaggle notebook created: [`notebooks/04_train_vit_from_scratch_ablation_3d.ipynb`](../notebooks/04_train_vit_from_scratch_ablation_3d.ipynb).
 6. **UNETR-Style Hybrid Conv Stem ($128^3 + 64^3$ Skips)** ([`docs/improving_3d_jepa_segmentation_performance.md`](./improving_3d_jepa_segmentation_performance.md)):
    - Injects native pixel-level spatial skips into decoder stages 4 and 3, **usable immediately with existing pre-trained weights without retraining SSL**.
 7. **Finer $8^3$ Token Resolution ($4,096$ Tokens)**:
@@ -32,51 +36,51 @@ To ensure the master thesis and subsequent paper submission withstand rigorous p
 
 ---
 
-## 2. Priority Ordering: Which Task Should Be Done First?
-
-The implementation sequence is strictly dictated by **algorithmic dependencies, compute efficiency, and checkpoint compatibility**:
+## 2. Priority Ordering & Current Progress
 
 ```mermaid
 flowchart TD
-    P1["Phase 1 (MUST BE DONE FIRST): Validation & HD95 Optimization
-    - compute_hd95=False in epoch validation
+    P1["Phase 1: Validation Engine & Training Optimization [COMPLETED]
+    - compute_hd95=False in epoch validation (18.7x speedup)
     - point-cap subsampling (max 10k points) in compute_hd95_3d
-    - persistent_workers=False on val loaders
-    - tqdm real-time telemetry"]
+    - Removed 'Val HD95: nan mm' from all training logs
+    - Checkpoint resilience: _best.pt + _latest.pt + --resume across all runners
+    - persistent_workers=False on val loaders"]
     
-    P2["Phase 2 (SECOND): ViT From-Scratch Ablation Baseline
+    P2["Phase 2: ViT From-Scratch Ablation Baseline [COMPLETED]
     - Add --from_scratch flag in train_downstream_3d.py
     - Isolate checkpoints (*_scratch_best.pt) and metrics
-    - Prevents architectural confounding critique"]
+    - Standalone Kaggle Notebook: 04_train_vit_from_scratch_ablation_3d.ipynb
+    - Auto-detection in evaluate_3d.py"]
     
-    P3["Phase 3 (THIRD): Fair Downstream Training Suite for ALL Models
+    P3["Phase 3: Fair Downstream Training Suite for ALL Models [NEXT]
     - Deep Supervision for ALL (nnunet, unet, visreg)
-    - Asymmetric Tversky Loss (beta=0.7, alpha=0.3) for ALL (nnunet, unet, visreg)
+    - Asymmetric Tversky Loss (beta=0.7, alpha=0.3) for ALL
     - UNETR-Style Hybrid Conv Stem (128³ + 64³ skips) in segmentation_head_3d.py
     - 3D Test-Time Augmentation (TTA) in evaluate_3d.py for ALL models
     - USES EXISTING PRE-TRAINED WEIGHTS (No SSL retraining needed!)"]
     
-    P4["Phase 4 (FOURTH): Finer 8³ Token Resolution Support
+    P4["Phase 4: Finer 8³ Token Resolution Support
     - Configurable patch_size (8 vs 16) in PatchEmbed3D & ViT
     - Adaptive decoder for 16³ initial grid (4,096 tokens)
     - FlashAttention-2 / SDPA memory optimization"]
     
-    P5["Phase 5 (FIFTH): Additional Raw Dataset & Kaggle Packaging
+    P5["Phase 5: Additional Raw Dataset & Kaggle Packaging
     - Process 271 volumes from training_data_additional -> 128³ .npz
     - Stratified metadata.csv (train/val/test)
     - Package dist_kaggle/brats_3d_additional.zip + metadata.json"]
     
-    P6["Phase 6 (SIXTH): Kaggle Notebooks Synchronization
-    - Update 01, 02, 03, and kaggle_runner notebooks
+    P6["Phase 6: Kaggle Notebooks Synchronization
+    - Update 01, 02, 03, 04, and kaggle_runner notebooks
     - Auto-mount attached Kaggle dataset
     - Add ablation, hybrid stem, and fair-comparison cells"]
     
-    P7["Phase 7 (SEVENTH): Comprehensive Regression Suite
-    - Automated tests for validation speedup, hybrid stem, Tversky loss, 8³ tokens
-    - Pytest across all test suites (90+ tests)"]
+    P7["Phase 7: Comprehensive Regression Suite [87 TESTS PASSING]
+    - Validation speedup, checkpoints, resume, and ablation verified
+    - Expanding tests for hybrid stem, Tversky loss, 8³ tokens"]
 
-    P1 -->|Unlocks 18.7x faster validation| P2
-    P2 -->|Isolates representation gain| P3
+    P1 -->|Done| P2
+    P2 -->|Done| P3
     P3 -->|Maximizes downstream Dice on existing weights| P4
     P4 -->|Architecture ready for next pre-train| P5
     P5 -->|Upload-ready dataset archive| P6
@@ -87,27 +91,36 @@ flowchart TD
 
 ## 3. Detailed Technical Blueprint by Phase
 
-### Phase 1: Core Validation Engine & HD95 Optimization (MUST BE DONE FIRST)
-- **Problem**: In early epochs, noisy boundary predictions create $200,000\text{ to }500,000$ points, freezing validation for 13 minutes per epoch and consuming $15\text{ GB}$ RAM.
-- **Actions**:
-  1. In `src/brats_jepa_3d/metrics/volumetric_metrics.py`:
-     Add `compute_hd95: bool = True` to `compute_volumetric_metrics_3d`. When `False`, return `nan` without KD-tree construction.
-  2. In `compute_hd95_3d`:
-     Subsample boundary coordinates to $10,000$ points (`max_points: int = 10000`) before constructing `scipy.spatial.cKDTree`.
-  3. In `scripts/train_downstream_3d.py`, `scripts/train_nnunet_3d.py`, and `scripts/train_unet_3d.py`:
-     Pass `compute_hd95=False` during routine epoch validation.
-     Set `persistent_workers=False` on `val_loader`.
-     Add real-time `tqdm(loader, desc="Validating", leave=False)`.
+### Phase 1: Core Validation Engine & HD95 Optimization [COMPLETED]
+- **Status**: **Fully Implemented and Verified** across all models.
+- **Implemented Changes**:
+  1. `src/brats_jepa_3d/metrics/volumetric_metrics.py`:
+     - Added `compute_hd95: bool = True` to `compute_volumetric_metrics_3d`. During training validation, passing `False` skips KD-tree construction entirely, reducing validation time from 13 minutes down to **2.4 seconds** ($18.7\times$ speedup).
+     - Added `max_points: int = 10000` subsampling in `compute_hd95_3d`, guaranteeing fast computation on noisy boundaries during final test evaluation without running out of RAM.
+  2. Training Runners Updated (`scripts/train_downstream_3d.py`, `scripts/train_nnunet_3d.py`, `scripts/train_unet_3d.py`):
+     - Pass `compute_hd95=False` in `evaluate(...)`.
+     - Removed `Val HD95: nan mm` from per-epoch logs and metric CSVs.
+     - Implemented resilient checkpoint saving: `_best.pt` (saved when validation Dice improves) and `_latest.pt` (overwritten in-place each epoch for safe crash recovery).
+     - Set default `--save_freq 0` so no extra periodic checkpoints are created, keeping disk and download archive sizes minimal.
+     - Added full `--resume <checkpoint_path>` support restoring model, optimizer, scheduler, and GradScaler states.
+     - Set `persistent_workers=False` on `val_loader`.
+  3. Tests: Verified via `tests/test_from_scratch_and_validation_3d.py` and `tests/test_baselines_checkpoint_and_logging_3d.py`.
 
 ---
 
-### Phase 2: Scientific ViT From-Scratch Baseline
-- **Problem**: Reviewers can challenge whether performance comes from the ViT+FPN architecture or from self-supervised representation learning.
-- **Actions**:
-  1. Add `--from_scratch` CLI argument to `scripts/train_downstream_3d.py`.
-  2. When enabled, bypass pre-trained checkpoint auto-discovery and train from random initialization.
-  3. Save checkpoints distinctly to `outputs/checkpoints/{model_type}_{decoder_type}_scratch_best.pt`.
-  4. Log metrics to `outputs/logs/{model_type}_{decoder_type}_scratch_downstream_metrics.csv`.
+### Phase 2: Scientific ViT From-Scratch Baseline [COMPLETED]
+- **Status**: **Fully Implemented and Verified**.
+- **Implemented Changes**:
+  1. `scripts/train_downstream_3d.py`:
+     - Added `--from_scratch` CLI argument.
+     - Bypasses pre-trained checkpoint auto-discovery and initializes the 3D ViT encoder and multiscale FPN decoder from fresh random weights.
+     - Saves checkpoints to `outputs/checkpoints/visreg_jepa_multiscale_scratch_best.pt` and `_latest.pt`.
+     - Logs metrics to `outputs/logs/visreg_jepa_multiscale_scratch_downstream_metrics.csv`.
+  2. `scripts/evaluate_3d.py`:
+     - Added `--from_scratch` flag and auto-detection of `scratch` in checkpoint filenames, correctly labeling models as `3D ViT-FPN (From Scratch)`.
+  3. Standalone Kaggle Notebook:
+     - Created [`notebooks/04_train_vit_from_scratch_ablation_3d.ipynb`](../notebooks/04_train_vit_from_scratch_ablation_3d.ipynb) containing self-contained setup, clone, training, evaluation, visualization, and 1-click artifact zip packaging (`vit_scratch_outputs.zip`).
+  4. Tests: Verified via `tests/test_from_scratch_and_validation_3d.py`.
 
 ---
 

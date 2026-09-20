@@ -58,7 +58,13 @@ def parse_args():
         "--model_type",
         type=str,
         default="all",
-        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, ijepa, unet_3d, nnunet_3d, or all)",
+        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, ijepa, unet_3d, nnunet_3d, vit_scratch, or all)",
+    )
+    parser.add_argument(
+        "--from_scratch",
+        action="store_true",
+        default=False,
+        help="Evaluate 3D ViT-FPN trained from random initialization (no pre-trained checkpoint)",
     )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
@@ -200,11 +206,15 @@ def main():
         "unet_3d": "unet_3d",
         "nnunet": "nnunet_3d",
         "nnunet_3d": "nnunet_3d",
+        "scratch": "vit_scratch",
+        "vit_scratch": "vit_scratch",
         "all": "all",
     }
 
     req_model = alias_map.get(args.model_type.lower(), args.model_type.lower())
-    if req_model != "all":
+    if args.from_scratch or req_model == "vit_scratch":
+        selected_models = [("3D ViT-FPN (From Scratch)", "vit_scratch")]
+    elif req_model != "all":
         selected_models = [m for m in all_models if m[1] == req_model]
         if not selected_models:
             logger.warning(f"Unknown model_type '{args.model_type}'. Defaulting to all models.")
@@ -213,6 +223,22 @@ def main():
         selected_models = all_models
 
     def build_model(name: str):
+        if name == "3D ViT-FPN (From Scratch)":
+            jepa_cfg_path = CONFIGS_DIR / "model" / "visreg_jepa_3d.yaml"
+            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
+            logger.info("Initializing 3D ViT-FPN from SCRATCH (random initialization, no pre-trained weights)")
+            return JEPASegmentationModel3D(
+                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
+                patch_size=tuple(jepa_cfg.get("patch_size", (16, 16, 16))),
+                in_channels=jepa_cfg.get("in_channels", 4),
+                embed_dim=jepa_cfg.get("embed_dim", 384),
+                encoder_depth=jepa_cfg.get("encoder_depth", 8),
+                num_heads=jepa_cfg.get("num_heads", 6),
+                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
+                decoder_type="multiscale",
+                deep_supervision=True,
+            ).to(device)
+
         jepa_prefixes = {
             "3D VisReg JEPA (FPN)": "visreg_jepa",
             "3D SigReg JEPA (FPN)": "sigreg_jepa",
@@ -224,8 +250,8 @@ def main():
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
             # Prioritize pre-trained SSL checkpoints (*_3d_best.pt or *_3d_epoch_*.pt), excluding downstream fine-tuned checkpoints
-            ssl_best_ckpts = sorted(CHECKPOINTS_DIR.glob(f"{prefix}*_3d_best.pt"))
-            ssl_epoch_ckpts = sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{prefix}*_epoch_*.pt")))
+            ssl_best_ckpts = [p for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*_3d_best.pt")) if "scratch" not in p.name.lower()]
+            ssl_epoch_ckpts = [p for p in sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{prefix}*_epoch_*.pt"))) if "scratch" not in p.name.lower()]
             if ssl_best_ckpts:
                 ckpt_path = ssl_best_ckpts[-1]
             elif ssl_epoch_ckpts:
@@ -234,7 +260,7 @@ def main():
                 fallback_ckpts = [
                     p
                     for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*.pt"))
-                    if not any(dec in p.name for dec in ("multiscale", "bottleneck", "downstream"))
+                    if not any(dec in p.name.lower() for dec in ("multiscale", "bottleneck", "downstream", "scratch"))
                 ]
                 ckpt_path = fallback_ckpts[-1] if fallback_ckpts else None
 

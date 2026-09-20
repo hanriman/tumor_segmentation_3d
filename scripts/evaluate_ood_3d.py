@@ -59,7 +59,13 @@ def parse_args():
         "--model_type",
         type=str,
         default="all",
-        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, ijepa, unet_3d, nnunet_3d, or all)",
+        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, ijepa, unet_3d, nnunet_3d, vit_scratch, or all)",
+    )
+    parser.add_argument(
+        "--from_scratch",
+        action="store_true",
+        default=False,
+        help="Evaluate 3D ViT-FPN trained from random initialization (no pre-trained checkpoint)",
     )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
@@ -138,11 +144,15 @@ def main():
         "unet_3d": "unet_3d",
         "nnunet": "nnunet_3d",
         "nnunet_3d": "nnunet_3d",
+        "scratch": "vit_scratch",
+        "vit_scratch": "vit_scratch",
         "all": "all",
     }
 
     req_model = alias_map.get(args.model_type.lower(), args.model_type.lower())
-    if req_model != "all":
+    if args.from_scratch or req_model == "vit_scratch":
+        selected_models = [("3D ViT-FPN (From Scratch)", "vit_scratch")]
+    elif req_model != "all":
         selected_models = [m for m in all_models if m[1] == req_model]
         if not selected_models:
             logger.warning(f"Unknown model_type '{args.model_type}'. Defaulting to all models.")
@@ -151,6 +161,46 @@ def main():
         selected_models = all_models
 
     def get_model(name: str):
+        if name == "3D ViT-FPN (From Scratch)":
+            jepa_cfg_path = CONFIGS_DIR / "model" / "visreg_jepa_3d.yaml"
+            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
+
+            scratch_candidates = sorted(CHECKPOINTS_DIR.glob("*visreg*scratch*best.pt")) or sorted(
+                CHECKPOINTS_DIR.glob("*scratch*best.pt")
+            )
+            ckpt = scratch_candidates[-1] if scratch_candidates else (CHECKPOINTS_DIR / "visreg_jepa_multiscale_scratch_best.pt")
+
+            if not ckpt.exists():
+                logger.warning(f"Checkpoint for {name} not found at {ckpt}. Skipping OOD evaluation.")
+                return None
+
+            ds_flag = False
+            try:
+                sd_peek = torch.load(ckpt, map_location="cpu")
+                sd_peek = sd_peek.get("model_state_dict", sd_peek)
+                if any(k.startswith("decoder.ds") for k in sd_peek):
+                    ds_flag = True
+            except (KeyError, OSError, RuntimeError, AttributeError):
+                pass
+
+            m = JEPASegmentationModel3D(
+                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
+                patch_size=tuple(jepa_cfg.get("patch_size", (16, 16, 16))),
+                in_channels=jepa_cfg.get("in_channels", 4),
+                embed_dim=jepa_cfg.get("embed_dim", 384),
+                encoder_depth=jepa_cfg.get("encoder_depth", 8),
+                num_heads=jepa_cfg.get("num_heads", 6),
+                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
+                decoder_type="multiscale",
+                deep_supervision=ds_flag,
+            )
+            sd = torch.load(ckpt, map_location=device)
+            sd = sd.get("model_state_dict", sd)
+            missing, _unexpected = m.load_state_dict(sd, strict=False)
+            matched = [k for k in m.state_dict() if k not in missing]
+            logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
+            return m.to(device)
+
         jepa_prefixes = {
             "3D VisReg JEPA (FPN)": "visreg_jepa",
             "3D SigReg JEPA (FPN)": "sigreg_jepa",
@@ -161,8 +211,8 @@ def main():
             jepa_cfg_path = CONFIGS_DIR / "model" / f"{prefix}_3d.yaml"
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
-            ms_candidates = sorted(CHECKPOINTS_DIR.glob(f"{prefix}*multiscale*best.pt"))
-            candidates = ms_candidates if ms_candidates else sorted(CHECKPOINTS_DIR.glob(f"{prefix}*best.pt"))
+            ms_candidates = [p for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*multiscale*best.pt")) if "scratch" not in p.name.lower()]
+            candidates = ms_candidates if ms_candidates else [p for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*best.pt")) if "scratch" not in p.name.lower()]
             ckpt = candidates[-1] if candidates else None
 
             ds_flag = False
@@ -206,9 +256,7 @@ def main():
                     matched = [k for k in m.state_dict() if k not in missing]
                     logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             else:
-                pretrain_ckpts = sort_checkpoints_by_epoch(
-                    list(CHECKPOINTS_DIR.glob(f"{prefix}*epoch*.pt"))
-                )
+                pretrain_ckpts = [p for p in sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{prefix}*epoch*.pt"))) if "scratch" not in p.name.lower()]
                 if pretrain_ckpts:
                     ckpt = pretrain_ckpts[-1]
                     sd = torch.load(ckpt, map_location=device)

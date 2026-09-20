@@ -281,12 +281,17 @@ def main():
                 else:
                     ckpt_file = CHECKPOINTS_DIR / f"{model_type}_{decoder_type}_scratch_best.pt"
             else:
-                downstream_ckpts = sorted(CHECKPOINTS_DIR.glob(f"{model_type}_{decoder_type}_best.pt")) or sorted(
-                    CHECKPOINTS_DIR.glob(f"{model_type}*best.pt")
-                )
-                pretrain_ckpts = sort_checkpoints_by_epoch(
-                    list(CHECKPOINTS_DIR.glob(f"{model_type}*epoch*.pt"))
-                )
+                downstream_ckpts = [
+                    p for p in sorted(CHECKPOINTS_DIR.glob(f"{model_type}_{decoder_type}_best.pt"))
+                    if "scratch" not in p.name.lower()
+                ] or [
+                    p for p in sorted(CHECKPOINTS_DIR.glob(f"{model_type}*best.pt"))
+                    if "scratch" not in p.name.lower()
+                ]
+                pretrain_ckpts = [
+                    p for p in sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{model_type}*epoch*.pt")))
+                    if "scratch" not in p.name.lower()
+                ]
                 if downstream_ckpts:
                     ckpt_file = downstream_ckpts[-1]
                 elif pretrain_ckpts:
