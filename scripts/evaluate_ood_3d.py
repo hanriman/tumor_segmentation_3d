@@ -103,7 +103,7 @@ def evaluate_perturbation(
                     out = model(images)
                     logits = out[0] if isinstance(out, (list, tuple)) else out
 
-            metrics = compute_volumetric_metrics_3d(logits, masks)
+            metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
             dices.extend(metrics["dice_per_sample"])
             if smoke_test and batch_idx >= 1:
                 break
