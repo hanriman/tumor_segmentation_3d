@@ -2,14 +2,20 @@
 """
 3D BraTS 2024 GLI Data Preparation Script.
 
-Extracts non-zero brain bounding boxes, performs aspect-preserving trilinear resampling
-to canonical 128x128x128 grid, applies parenchyma-only Z-score intensity normalization,
-and saves compressed .npz volumes with patient-stratified metadata.csv.
+Extracts non-zero brain bounding boxes, resamples the bounding-box crop to a
+canonical 128x128x128 grid via trilinear interpolation, applies
+parenchyma-only Z-score intensity normalization, and saves compressed .npz
+volumes with patient-stratified metadata.csv.
 
 Theoretical & Methodological References:
 ----------------------------------------
 1. Bounding Box & Resampling (Isensee et al., Nature Methods 2021):
    Parenchyma bounding box extraction removes uninformative air background (~60% of native voxels).
+   NOTE — aspect ratio is NOT preserved: the (usually anisotropic) bounding box
+   is stretched directly to the isotropic cube, so elongated anatomy is
+   anisotropically scaled. This preserves full anatomical coverage (no cortical
+   truncation from naive center-cropping) at the cost of geometric distortion;
+   distance metrics in physical mm therefore inherit this preprocessing warp.
    Resampling preserves continuous anatomical morphology across white matter tracts, preventing
    the peripheral cortical and infiltrative margin truncation caused by naive spatial cropping.
 2. Z-Score Intensity Normalization (Isensee et al., 2021; Baid et al., 2024):

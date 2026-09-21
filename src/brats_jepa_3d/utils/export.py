@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import zipfile
@@ -10,6 +11,8 @@ from brats_jepa_3d.config import (
     OUTPUTS_DIR,
     PROJECT_ROOT,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_outputs_source_dir(preferred_dir: Path | str | None = None) -> Path:
@@ -71,8 +74,8 @@ def export_artifacts(
         (target_export_dir / sub).mkdir(parents=True, exist_ok=True)
 
     if verbose:
-        print(f"📦 Packaging artifacts from outputs source: {src_base}")
-        print(f"📁 Staging directory: {target_export_dir}")
+        logger.info("Packaging artifacts from outputs source: %s", src_base)
+        logger.info("Staging directory: %s", target_export_dir)
 
     copied_files: list[Path] = []
     prefix_filter = model_prefix.lower() if model_prefix else None
@@ -116,17 +119,17 @@ def export_artifacts(
                     seen_dest_names.add(item.name)
 
     if verbose:
-        print(f"\n✓ Collected {len(copied_files)} artifact file(s) into {target_export_dir}:")
+        logger.info("Collected %d artifact file(s) into %s:", len(copied_files), target_export_dir)
         for cf in copied_files:
             sz_mb = cf.stat().st_size / (1024 * 1024)
-            print(f"  • {cf.relative_to(target_export_dir)} ({sz_mb:.2f} MB)")
+            logger.info("  • %s (%.2f MB)", cf.relative_to(target_export_dir), sz_mb)
 
         if "checkpoints" in include_subdirs:
             ckpt_count = sum(1 for f in copied_files if f.suffix == ".pt")
             if ckpt_count == 0:
-                print("⚠️ WARNING: No model checkpoints (.pt) were found to export!")
+                logger.warning("No model checkpoints (.pt) were found to export!")
             else:
-                print(f"✓ Found {ckpt_count} checkpoint file(s).")
+                logger.info("Found %d checkpoint file(s).", ckpt_count)
 
     # Create zip archive
     if target_zip.exists():
@@ -144,8 +147,8 @@ def export_artifacts(
     zip_size_mb = zip_size_bytes / (1024 * 1024)
 
     if verbose:
-        print(f"\n✓ {target_zip.name} created! Total archive size: {zip_size_mb:.2f} MB")
-        print(f"📍 Archive path: {target_zip}")
+        logger.info("%s created! Total archive size: %.2f MB", target_zip.name, zip_size_mb)
+        logger.info("Archive path: %s", target_zip)
 
     return {
         "export_dir": target_export_dir,
@@ -178,16 +181,16 @@ def import_artifacts(
     imported_files: list[Path] = []
     if not in_path.exists():
         if verbose:
-            print(f"⚠️ Input directory does not exist: {in_path}")
+            logger.warning("Input directory does not exist: %s", in_path)
         return imported_files
 
     if verbose:
-        print(f"=== DISCOVERING ARTIFACTS IN {in_path} ===")
+        logger.info("=== DISCOVERING ARTIFACTS IN %s ===", in_path)
 
     # 1. Look for and extract any zip archives (e.g. visreg_outputs.zip, nnunet_outputs.zip)
     for zip_file in in_path.glob("**/*.zip"):
         if verbose:
-            print(f"  📦 Extracting zip archive: {zip_file.name}")
+            logger.info("  Extracting zip archive: %s", zip_file.name)
         try:
             with zipfile.ZipFile(zip_file, "r") as zf:
                 for member in zf.infolist():
@@ -212,7 +215,7 @@ def import_artifacts(
                     imported_files.append(out_target)
         except Exception as e:
             if verbose:
-                print(f"⚠️ Failed to extract {zip_file}: {e}")
+                logger.warning("Failed to extract %s: %s", zip_file, e)
 
     # 2. Look for directory trees (e.g. export_visreg/checkpoints/*, outputs/*)
     for sub in ["checkpoints", "metrics", "logs", "figures"]:
@@ -242,8 +245,8 @@ def import_artifacts(
     if verbose:
         ckpts = list((dst_path / "checkpoints").glob("*.pt"))
         metrics = list((dst_path / "metrics").iterdir()) if (dst_path / "metrics").exists() else []
-        print(f"\n✓ Imported {len(imported_files)} files to {dst_path}")
-        print(f"✓ Available Checkpoints ({len(ckpts)}): {[c.name for c in ckpts]}")
-        print(f"✓ Available Metrics ({len(metrics)}): {[m.name for m in metrics]}")
+        logger.info("Imported %d files to %s", len(imported_files), dst_path)
+        logger.info("Available Checkpoints (%d): %s", len(ckpts), [c.name for c in ckpts])
+        logger.info("Available Metrics (%d): %s", len(metrics), [m.name for m in metrics])
 
     return imported_files

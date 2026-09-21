@@ -28,6 +28,7 @@ class VolumetricTverskyLoss(nn.Module):
         alpha: float = 0.3,
         beta: float = 0.7,
         smooth: float = 1e-5,
+        include_background: bool = True,
     ):
         super().__init__()
         if alpha < 0 or beta < 0 or alpha + beta <= 0:
@@ -35,6 +36,7 @@ class VolumetricTverskyLoss(nn.Module):
         self.alpha = alpha
         self.beta = beta
         self.smooth = smooth
+        self.include_background = include_background
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         C = logits.shape[1]
@@ -61,6 +63,8 @@ class VolumetricTverskyLoss(nn.Module):
         fp = (probs * (1.0 - targets_bin)).sum(dim=spatial)
         fn = ((1.0 - probs) * targets_bin).sum(dim=spatial)
         ti = (tp + self.smooth) / (tp + self.alpha * fp + self.beta * fn + self.smooth)
+        if not self.include_background:
+            ti = ti[:, 1:]
         return 1.0 - ti.mean()
 
 
@@ -74,7 +78,7 @@ class CombinedTverskyBCEWithLogitsLoss3D(nn.Module):
     aggregation and training-log formatting work unchanged.
 
     Note: the BCE term is binary-only (C=1 whole-tumor task); multi-class logits
-    fail fast with a broadcast error rather than silently miscomputing.
+    raise an explicit ValueError rather than silently miscomputing.
     """
 
     def __init__(
@@ -91,6 +95,11 @@ class CombinedTverskyBCEWithLogitsLoss3D(nn.Module):
         self.tversky_loss = VolumetricTverskyLoss(alpha=alpha, beta=beta, smooth=smooth)
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> dict[str, torch.Tensor]:
+        if logits.shape[1] != 1:
+            raise ValueError(
+                f"CombinedTverskyBCEWithLogitsLoss3D is binary-only (C=1); got C={logits.shape[1]}. "
+                "Use VolumetricTverskyLoss directly for multi-class logits."
+            )
         tversky = self.tversky_loss(logits, targets)
         targets_bin = (targets > 0).float()
         if targets_bin.dim() == 4:
@@ -115,12 +124,10 @@ def resolve_seg_loss_type(args: object, cli_args: list[str] | None = None) -> st
     merge_config_with_args), else the `cli_args` parameter; (2) accepted
     segmentation values; (3) "dice_bce" fallback.
 
-    Passing neither (legacy direct calls) falls back to sniffing `sys.argv`
-    with a VisibleDeprecation-style runtime log — kept only for backward
-    compatibility; trainers should route through merge_config_with_args.
+    No `sys.argv` sniffing: legacy direct calls without either record log a
+    deprecation warning and fall back to the accepted-value check.
     """
     import logging
-    import sys
 
     explicit: set[str] = set()
     tracked = getattr(args, "_explicit_cli_flags", None)
@@ -135,15 +142,10 @@ def resolve_seg_loss_type(args: object, cli_args: list[str] | None = None) -> st
         }
     else:
         logging.getLogger(__name__).warning(
-            "resolve_seg_loss_type: no explicit-flag record; sniffing sys.argv "
+            "resolve_seg_loss_type: no explicit-flag record and no cli_args; "
+            "falling back to accepted-value check "
             "(deprecated — route trainers through merge_config_with_args)."
         )
-        cli = sys.argv[1:]
-        explicit = {
-            a.lstrip("-").split("=")[0].replace("-", "_")
-            for a in cli
-            if a.startswith("-")
-        }
     val = getattr(args, "loss_type", "dice_bce")
     if "loss_type" in explicit:
         return val

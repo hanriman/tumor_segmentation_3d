@@ -15,7 +15,7 @@
   - SigReg tissue filtering parity with VisReg,
   - per-sample tissue fallback,
   - Rician air noise non-zero + non-negativity,
-  - random B1 field varies per call,
+  - random B1 field varies per sample,
   - masking zero-overlap hard guarantee,
   - `hd95_tumor_only is nan` when `compute_hd95=False` / no-tumor cohort.
 - [ ] **0.3 Smoke gate.** Define gate: `train_jepa_3d.py --smoke_test` (all 3 model types) + full `pytest` must pass before merging any phase.
@@ -69,13 +69,13 @@ Done when: per-sample test passes; batch-all fallback code removed.
 
 Done when: OOD smoke eval runs and air-noise test passes. Note: this changes OOD numbers — re-baseline expected.
 
-### Step 6 — B1 field: random coefficients per sample [P0]
-**Problem:** `transforms.py:183-185` single fixed field for all volumes.
-- [ ] 6.1 Sample `c_ijk ~ N(0, σ²)` per forward (per-sample in batch) for the 10-term 2nd-order polynomial (`i+j+k≤2`), scaled by `strength`. Accept optional `generator` for determinism.
-- [ ] 6.2 Keep coordinate grid `[-1,1]³`, multiplicative `(1+field)`, clamp field to e.g. `[-0.5,0.5]` to avoid sign flip; preserve background-zeroing semantics (or air handling consistent with Step 5 decision).
-- [ ] 6.3 Tests: two calls same seed → identical field; different seed → different; field smooth (low-freq by construction).
+### Step 6 — B1 field: random coefficients per sample [P0] — DONE (per-sample follow-up)
+**Problem:** `transforms.py:183-185` single fixed field for all volumes (interim fix: one random field broadcast across the batch).
+- [x] 6.1 Sample `c_ijk ~ N(0, 1)` per sample in the batch (`[B, 10]` via `einsum` over the 10-term 2nd-order polynomial), scaled by `strength`. Accepts optional `generator` for determinism (CPU-sampled, then moved to device for cross-device reproducibility).
+- [x] 6.2 Keep coordinate grid `[-1,1]³`, multiplicative `(1 + strength*field)`, field clamped to `[-0.5, 0.5]` so gain stays in `[1-0.5*strength, 1+0.5*strength]` (docstring gain-range `[0.5, 1.5]` corrected); preserve background-zeroing semantics (gain on signal; air contrast vs Rician documented).
+- [x] 6.3 Tests: identical inputs in one batch now get different fields; same seed → identical; explicit generator → identical; README §2 B1 row + §6.3 caution updated.
 
-Done when: randomness + determinism tests pass.
+Done when: randomness + determinism tests pass. Note: this changes OOD numbers again — re-baseline required (prior per-call-broadcast tables not comparable).
 
 ---
 
@@ -108,10 +108,10 @@ Done when: randomness + determinism tests pass.
 
 ## P2 — Fragility / Fairness / Reporting
 
-### Step 11 — Remove encoder mode-toggle side effect [P2]
-**Problem:** `sigreg_jepa_3d.py:85-89`, `visreg_jepa_3d.py:75-80` flip `train()/eval()` inside `forward`.
-- [ ] 11.1 Replace with gradient-free target pass that does **not** mutate mode: `with torch.no_grad():` + dropout-disabled context. Options: (a) `torch.no_grad` + temporarily set `requires_grad=False` only, relying on `model.eval()` externally for val; or (b) functional dropout-off via `self.context_encoder.eval()` snapshot restored in `finally` (minimal change) + comment. Prefer (b) as surgical fix, (a) as follow-up research change — document choice.
-- [ ] 11.2 Test: `model.train()` before forward → still `training==True` after; `model.eval()` → stays `False`; grads flow only to context path.
+### Step 11 — Remove encoder mode-toggle side effect [P2] — DONE (dropout-disabled context)
+**Problem:** `sigreg_jepa_3d.py`, `visreg_jepa_3d.py` flipped `train()/eval()` inside `forward`.
+- [x] 11.1 Gradient-free target pass that does **not** mutate mode: `with torch.no_grad(), dropout_disabled(self.context_encoder)` (`models/vision_transformer_3d.py`). Zeroes `nn.Dropout.p` + `nn.MultiheadAttention.dropout` and restores on exit; thread/DDP-safe, no caller-visible side effect. Encoder input still includes air by design (only the projector regularizer is tissue-filtered).
+- [x] 11.2 Test: `model.train()` before forward → still `training==True` after; `model.eval()` → stays `False`; grads flow only to context path (`test_p2_step11_no_mode_side_effect` green).
 
 ### Step 12 — Freeze sincos positional embeddings [P2]
 **Problem:** `vision_transformer_3d.py:178` learnable `pos_embed` lets metric topology drift.
@@ -119,17 +119,17 @@ Done when: randomness + determinism tests pass.
 - [ ] 12.2 Note in docstring: fixed Vaswani/Feichtenhofer topology from step 0.
 - [ ] 12.3 Test: `pos_embed.requires_grad==False`; optimizer param list excludes it; smoke run finite.
 
-### Step 13 — Aggregation + LaTeX hygiene [P2]
-**Problem:** `utils/aggregation.py:87-93` best-Dice dedup hides variance; `251` hardcodes `N=271`.
-- [ ] 13.1 Dedup policy: keep all runs + add `run_id` column, OR keep best but add `n_runs` + `std` columns and log dropped rows at `INFO`. Implement one explicitly.
-- [ ] 13.2 Parameterize LaTeX caption `N=` (derive from metadata or pass `test_n=`); remove hardcoded 271.
-- [ ] 13.3 Tests: duplicate-model CSVs → both preserved or explicitly summarized; caption contains injected `N`.
+### Step 13 — Aggregation + LaTeX hygiene [P2] — DONE (variance reporting)
+**Problem:** `utils/aggregation.py` best-Dice dedup hides variance; hardcoded `N=271`.
+- [x] 13.1 Keep-best policy retained but with `n_runs` + `dice_std` columns and dropped-row `INFO` log — no run disappears silently.
+- [x] 13.2 LaTeX caption `N=` parameterized via `test_n=` (no hardcoded 271).
+- [x] 13.3 Tests: duplicate-model CSVs → explicitly summarized; caption contains injected `N`.
 
-### Step 14 — Harden UNet DS hooks [P2]
-**Problem:** `models/unet_3d.py:86-100` permanent hooks, version-sensitive.
-- [ ] 14.1 Use `with torch.no_grad()`-safe local hook handles + `try/finally` removal per forward, or bind once with `removable` handles and explicit `close()`; fix type hint (`list[tuple[str,Tensor]]`).
-- [ ] 14.2 Keep `RuntimeError` on missing shape/channel mismatch (already good).
-- [ ] 14.3 Test: two consecutive forwards identical outputs; no handle leak (`len(model.unet._forward_hooks)` bounded); eval returns single tensor.
+### Step 14 — Harden UNet DS hooks [P2] — DONE (bounded + version-recorded)
+**Problem:** `models/unet_3d.py` permanent hooks, version-sensitive.
+- [x] 14.1 Bound once in `__init__` with removable handles + explicit `close()`; type hint `list[tuple[str,Tensor]]`; `monai_version` recorded on the module for drift diagnosis.
+- [x] 14.2 `RuntimeError` on missing shape/channel mismatch kept.
+- [x] 14.3 Test: two consecutive forwards identical outputs; no handle leak; eval returns single tensor (`test_p2_step14_unet_hooks_bounded` green).
 
 ---
 
@@ -137,14 +137,14 @@ Done when: randomness + determinism tests pass.
 
 ### Step 15 — Deduplicate tissue filter + freeze branches [P3]
 - [ ] 15.1 Extract `filter_tissue_tokens(full_projected, mask, min_tokens=32)` helper; both JEPA models call it.
-- [ ] 15.2 Collapse `JEPASegmentationModel3D.forward` freeze duplication (`segmentation_head_3d.py:505-509,512-516`) into single `torch.no_grad()`-guarded encoder call.
+- [x] 15.2 Collapse `JEPASegmentationModel3D._encode` freeze duplication into a single `torch.no_grad()` / `nullcontext`-guarded encoder call.
 - [ ] 15.3 Unify double RNG counters (`dataset.py` + `masking.py`) — keep per-sample `initial_seed+idx` scheme, remove one layer, document worker-divergence intent.
-- [ ] 15.4 Replace `resolve_seg_loss_type` `sys.argv` sniffing with explicit `loss_type` pass-through from trainers; keep backward-compat shim + deprecation log.
+- [x] 15.4 Remove `resolve_seg_loss_type` `sys.argv` sniffing; legacy direct calls without an explicit-flag record or `cli_args` now log a deprecation warning and fall back to the accepted-value check (no `sys.argv` read).
 
-### Step 16 — Docs sync [P3]
-- [ ] 16.1 Update README §2 rows: modality-dropout rescaling, torch-only RNG, SigReg tissue-only, random B1, Rician air, fixed sincos, NaN HD95 semantics, Dice-background default.
-- [ ] 16.2 Update `docs/roadmap_improvements_ablation_dataset.md` Phase 8: mark SigReg parity done, per-sample fallback done, new OOD re-baseline required.
-- [ ] 16.3 Note OOD number break: prior Rician/B1 tables not comparable post-Step 5/6.
+### Step 16 — Docs sync [P3] — DONE (follow-up batch)
+- [x] 16.1 Update README §2 rows: modality-dropout rescaling, torch-only RNG, SigReg tissue-only, per-sample random B1 (+ corrected gain range), Rician air, fixed sincos, NaN HD95 semantics, Dice-background default; Grid Resampling row + preprocessing §5.1 now state the bbox-to-cube stretch (aspect not preserved).
+- [x] 16.2 Update `docs/roadmap_improvements_ablation_dataset.md` Phase 8: per-sample B1 done, OOD re-baseline required again.
+- [x] 16.3 Note OOD number break: prior Rician/B1 tables not comparable post-Step 5/6 (README §6.3 caution extended to per-sample B1).
 
 ---
 
@@ -161,3 +161,48 @@ Done when: randomness + determinism tests pass.
 - New loss weights (`center/scale/swd`, `sigreg_weight`) tuning.
 - Full-pool Kaggle re-run (needs dataset upload + GPU session).
 - Context-air content (`~55%` air in encoder input by design) — only regularization filtered; encoder-input air removal is a research change, not a bug fix.
+
+---
+
+## Residual Fix Log (2026-09-21, post-audit follow-up)
+
+All four residual items from the re-audit are fixed. Tests: `test_audit_remediation_2026_09_21.py + test_metrics_3d.py` **23 passed**; `test_losses + test_models + test_data` **24 passed**.
+
+- [x] **R1 — Tumor-only NaN triad.** `dice_tumor_only`/`iou_tumor_only` returned `1.0` on tumor-free cohorts while `hd95_tumor_only` was NaN. Now all three return NaN (`metrics/volumetric_metrics.py`); per-sample guarded `1.0` on empty volumes unchanged. Eval scripts consume only `*_per_sample` lists, so no script changes needed. Test `test_p1_step8_*` extended to all three keys.
+- [x] **R2 — Air-model contrast sentence.** B1 docstring now states the deliberate difference from Rician (gain on signal vs. magnitude noise floor); Rician + B1 docstrings carry the 2026-09-21 re-baseline note. README §2 B1 row and §6.3 OOD bullet carry the same notes.
+- [x] **R3 — Re-baseline note.** Covered by R2 (code docstrings + README caution block). Prior OOD tables must be re-run via `evaluate_ood_3d.py` before citing.
+- [x] **R4 — Loud shape contract.** `filter_tissue_tokens` raises `ValueError` on non-3D input; `SigRegLoss`/`VisRegLoss` validate non-empty 2D `[N, D]` after flatten. New test `test_residual_tissue_filter_rejects_non3d`.
+
+Notebooks (01–06, kaggle_runner): verified — no hardcoded metric semantics. All OOD/eval cells delegate to `scripts/evaluate_ood_3d.py` / `evaluate_3d.py`, which aggregate `*_per_sample` lists and are unaffected by the tumor-only NaN change. No `.ipynb` edits required.
+
+## Follow-Up Fix Log (post-remediation audit batch)
+
+Code fixes (all backward-compatible; full `pytest tests/` green — 134 passed):
+
+- [x] **F1 — B1 per-sample fields.** `apply_b1_bias_field_3d` samples `[B, 10]` coefficients (`einsum`, CPU-sampled for generator/device safety) so every volume gets its own field; gain-range docstring corrected to `[1-0.5*strength, 1+0.5*strength]`. Verified: identical batch inputs diverge; same seed / same generator reproduce.
+- [x] **F2 — Seeded regularizer projections.** `SigRegLoss.forward` / `VisRegLoss.forward` (+ `_sliced_wasserstein_distance`) accept optional `generator` (CPU-sampled, moved to device); default path unchanged.
+- [x] **F3 — IJEPA loss in fp32.** `IJEPALoss` casts block losses to float32 before accumulation (was prediction dtype → fp16 under AMP).
+- [x] **F4 — Explicit Tversky binary guard.** `CombinedTverskyBCEWithLogitsLoss3D.forward` raises `ValueError` on `C != 1` instead of relying on a broadcast error.
+- [x] **F5 — `_encode` dedup + logging hygiene.** Single `no_grad`/`nullcontext` encoder path; `aggregation.py` / `export.py` `print()` → `logging` (notebook `export_artifacts(..., verbose=True)` callers unaffected — return-dict contract unchanged).
+- [x] **F6 — Aspect-ratio honesty.** `prepare_data_3d.py` docstring + README §2 Grid Resampling row + §5.1 state the bbox-to-cube stretch (aspect not preserved).
+
+Docs/notebooks synced: README §2 B1/SigReg/VisReg/baseline rows, §5.1, §6.3 caution; roadmap Phase 8 status; this plan (Steps 6 / 15.2 / 15.4 / 16); notebook OOD cells carry the per-sample re-baseline pointer. OOD tables must be re-run via `evaluate_ood_3d.py` before citing (per-sample B1 break).
+
+## Fix Log — F1–F13 audit batch (2026-09-21, second round)
+
+Code fixes (targeted `47 passed`; rest of suite `120 passed`; smoke asserts green):
+
+- [x] **F1 — Mode-toggle removed.** `dropout_disabled()` context (`models/vision_transformer_3d.py`, exported) zeroes `Dropout.p` + `MultiheadAttention.dropout` and restores; both JEPA models use `torch.no_grad() + dropout_disabled` with no `.eval()/.train()` flip.
+- [x] **F2 — VisReg mu detached.** Shape term detaches both `mu` and `std`; center handled only by `_center_loss`.
+- [x] **F3 — Sign-preserving OOD.** Rician tissue: true Rician for `X>=0`, additive Gaussian for Z-scored negatives, Rayleigh air. B1: gain on original voxels (negatives preserved), zero air. Second OOD number break — re-run `evaluate_ood_3d.py` before citing.
+- [x] **F4 — Air scope documented.** Encoder input includes air by design; only the projector regularizer is tissue-filtered (model docstrings).
+- [x] **F5 — HD95 per-volume seed.** Content-derived RNG seed replaces fixed `42/42`; same pair reproducible, different volumes differ.
+- [x] **F6/F7 — Dataset/masking hygiene.** Pooling failures log warnings (no silent `None`); `random` fallback and function-local logging import removed.
+- [x] **F8 — UNet version record.** `monai_version` stored on module; loud `RuntimeError` guards kept.
+- [x] **F9 — Aggregation variance.** `dice_std` column + dropped-row `INFO` log alongside `n_runs`.
+- [x] **F10 — Tversky background flag.** `VolumetricTverskyLoss(include_background=True)` default behavior-preserving; `False` excludes class 0 for multi-class parity with Dice.
+- [x] **F11 — Bottleneck fast path.** `_encode(x, return_intermediate=False)` skips intermediate list for bottleneck decoder.
+- [x] **F12 — README scope.** §6.2 relabeled unvalidated targets with do-not-cite caution.
+- [x] **F13 — Calibration status.** SigReg/VisReg docstrings marked uncalibrated with sweep guidance; EP truncation noted. Weight tuning itself remains deferred (Out of Scope).
+
+Docs/notebooks synced: README §2 VisReg/Rician/B1/Tversky rows + §6.3 second-break caution; roadmap Phase 8 status; notebook OOD cells carry the sign-preserving re-baseline pointer. OOD tables must be re-run via `evaluate_ood_3d.py` before citing.

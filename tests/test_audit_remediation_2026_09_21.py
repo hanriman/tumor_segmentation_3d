@@ -144,14 +144,18 @@ def test_p1_step7_zero_overlap_hard_guarantee():
 
 
 def test_p1_step8_hd95_tumor_only_nan_semantics():
-    """hd95_tumor_only is nan (not 0.0) when HD95 is off or cohort tumor-free."""
+    """Tumor-only aggregates are nan (not 1.0/0.0) when HD95 is off or cohort tumor-free."""
     torch.manual_seed(0)
     logits = torch.randn(2, 1, 16, 16, 16)
     masks = torch.zeros(2, 1, 16, 16, 16)
     res = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
     assert res["hd95_tumor_only"] != res["hd95_tumor_only"], "must be nan when HD95 off"
+    assert res["dice_tumor_only"] != res["dice_tumor_only"], "must be nan when cohort tumor-free"
+    assert res["iou_tumor_only"] != res["iou_tumor_only"], "must be nan when cohort tumor-free"
     res2 = compute_volumetric_metrics_3d(logits, masks, compute_hd95=True)
     assert res2["hd95_tumor_only"] != res2["hd95_tumor_only"], "must be nan on tumor-free cohort"
+    assert res2["dice_tumor_only"] != res2["dice_tumor_only"], "must be nan on tumor-free cohort"
+    assert res2["iou_tumor_only"] != res2["iou_tumor_only"], "must be nan on tumor-free cohort"
 
 
 def test_p2_step11_no_mode_side_effect():
@@ -209,3 +213,13 @@ def test_p2_step14_unet_hooks_bounded():
     assert isinstance(y, torch.Tensor)
     m.close_hooks()
     assert len(m._ds_hook_handles) == 0
+
+
+def test_residual_tissue_filter_rejects_non3d():
+    """filter_tissue_tokens fails loud on pre-flattened 2D input (mask would misalign)."""
+    import pytest
+
+    from brats_jepa_3d.models._tissue_filter import filter_tissue_tokens
+
+    with pytest.raises(ValueError):
+        filter_tissue_tokens(torch.randn(100, 128), torch.ones(1, 8, dtype=torch.bool))

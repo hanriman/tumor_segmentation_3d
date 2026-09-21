@@ -31,18 +31,18 @@ class IJEPALoss(nn.Module):
         if len(predictions) == 0:
             raise ValueError("predictions and targets must be non-empty lists of tensors")
 
-        total_loss = torch.tensor(0.0, device=predictions[0].device, dtype=predictions[0].dtype)
+        total_loss = torch.tensor(0.0, device=predictions[0].device, dtype=torch.float32)
 
         for pred, tgt in zip(predictions, targets):
             # Apply LayerNorm to target representations to stabilize target scale
             tgt_norm = F.layer_norm(tgt.detach(), (tgt.shape[-1],))
 
             if self.loss_type == "smooth_l1":
-                block_loss = F.smooth_l1_loss(pred, tgt_norm, beta=self.beta)
+                block_loss = F.smooth_l1_loss(pred.float(), tgt_norm.float(), beta=self.beta)
             elif self.loss_type == "l1":
-                block_loss = F.l1_loss(pred, tgt_norm)
+                block_loss = F.l1_loss(pred.float(), tgt_norm.float())
             elif self.loss_type == "mse":
-                block_loss = F.mse_loss(pred, tgt_norm)
+                block_loss = F.mse_loss(pred.float(), tgt_norm.float())
             else:
                 raise ValueError(f"Unknown loss_type: {self.loss_type}")
 

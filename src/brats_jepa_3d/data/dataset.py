@@ -2,12 +2,16 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import logging
+
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
 from brats_jepa_3d.config import get_dataset_dir, get_metadata_path
+
+logger = logging.getLogger(__name__)
 
 
 class BraTS3DDataset(Dataset):
@@ -157,17 +161,20 @@ class BraTS3DDataset(Dataset):
                 elif bm.dim() == 3:
                     pooled = _F.avg_pool3d(bm.unsqueeze(0).unsqueeze(0), kernel_size=16, stride=16)
                     token_frac = pooled.reshape(-1)
-            except Exception:
+                else:
+                    logger.warning(
+                        "Unexpected brain_mask shape %s; falling back to uniform masking.",
+                        tuple(brain_mask.shape),
+                    )
+            except Exception as e:
+                logger.warning("Token-fraction pooling failed (%s); uniform masking.", e)
                 token_frac = None
-            try:
-                _gen = torch.Generator()
-                # Monotonic counter: same idx yields different masks across epochs.
-                self._mask_counter += 1
-                _gen.manual_seed(
-                    (torch.initial_seed() + idx * 7919 + self._mask_counter * 104729) % 2**32
-                )
-            except Exception:
-                _gen = None
+            _gen = torch.Generator()
+            # Monotonic counter: same idx yields different masks across epochs.
+            self._mask_counter += 1
+            _gen.manual_seed(
+                (torch.initial_seed() + idx * 7919 + self._mask_counter * 104729) % 2**32
+            )
             try:
                 mask_dict = self.masking_transform(
                     token_brain_frac=token_frac, generator=_gen

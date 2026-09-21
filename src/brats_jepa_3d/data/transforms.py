@@ -149,14 +149,17 @@ def apply_rician_noise_3d(
         M = \sqrt{(X + \eta_1)^2 + \eta_2^2}, \quad \eta_1, \eta_2 \sim \mathcal{N}(0, \sigma^2)
 
     Design decisions (documented approximations):
-    - Magnitude is applied to **all voxels**: tissue follows Rician statistics,
-      background air follows Rayleigh statistics (`X = 0` limit) instead of being
+    - Magnitude is applied to **non-negative voxels** with true Rician statistics
+      ``M = sqrt((X+ + eta1)^2 + eta2^2)`` (``X+ = max(X, 0)``); voxels that are
+      already negative after Z-score normalization receive additive Gaussian
+      noise ``X + eta1`` (the high-SNR limit where Rician -> Gaussian). This
+      preserves sub-mean tissue contrast instead of rectifying it to zero.
+    - Background air follows Rayleigh statistics (`X = 0` limit) instead of being
       forced to zero — zero air is unphysical for magnitude MRI.
-    - Z-scored inputs contain negatives, on which magnitude rectification is not
-      physically defined. The baseline is therefore clamped at zero
-      (`X+ = max(X, 0)`) rather than shifted by a data-dependent `min_val`;
-      this is an explicit, volume-independent approximation noted here.
     - `sigma <= 0` and empty inputs are identity (no-op) paths.
+    - Re-baseline notes: 2026-09-21 (zero air, `min_val` shift) and this fix
+      (negative-preserving tissue noise) both change OOD numbers — re-run
+      `evaluate_ood_3d.py` before citing.
     """
     if sigma <= 0:
         return image
@@ -172,12 +175,14 @@ def apply_rician_noise_3d(
     if not bm_bool.any():
         return image
 
-    baseline = torch.clamp(image, min=0.0)
     eta1 = torch.randn_like(image) * sigma
     eta2 = torch.randn_like(image) * sigma
-    noisy = torch.sqrt((baseline + eta1) ** 2 + eta2**2)
+    nonneg = image >= 0
+    rician = torch.sqrt((torch.clamp(image, min=0.0) + eta1) ** 2 + eta2**2)
+    gaussian = image + eta1
+    tissue_noisy = torch.where(nonneg, rician, gaussian)
     air = torch.sqrt(eta1**2 + eta2**2)
-    return torch.where(bm_bool, noisy, air)
+    return torch.where(bm_bool, tissue_noisy, air)
 
 
 def apply_b1_bias_field_3d(
@@ -193,15 +198,25 @@ def apply_b1_bias_field_3d(
         X_{corrupt} = X \cdot (1 + \sum_{i+j+k \le 2} c_{ijk} z^i y^j x^k)
 
     Design decisions:
-    - The 10 polynomial coefficients `c_ijk` are sampled `N(0, 1)` **per call**
-      (broadcast across the batch), so every volume sees a different smooth field
-      instead of one fixed field for the whole cohort. Pass `generator` for
-      fully explicit determinism (same generator state → identical field).
-    - The field is clamped to `[-0.5, 0.5]` before the `1 +` shift so the
-      multiplicative gain stays in `[0.5, 1.5]` (no contrast sign flips).
-    - Like Rician, the baseline is clamped at zero rather than shifted by a
-      data-dependent `min_val`; background stays zero (bias is a gain on
-      acquired signal, and air carries none).
+    - The 10 polynomial coefficients `c_ijk` are sampled `N(0, 1)` **per sample
+      in the batch** (shape `[B, 10]`), so every volume sees a different smooth
+      field instead of one fixed field for the whole cohort. Pass `generator`
+      for fully explicit determinism (same generator state → identical fields).
+    - The field is clamped to `[-0.5, 0.5]` before the `strength` scaling, so
+      the multiplicative gain stays in `[1 - 0.5*strength, 1 + 0.5*strength]`
+      (e.g. `[0.85, 1.15]` at the default `strength=0.3`; no contrast sign
+      flips).
+    - The gain multiplies the original (possibly Z-scored, possibly negative)
+      voxel value, preserving sub-mean contrast; background stays zero (bias is
+      a gain on acquired signal, and air carries none). This intentionally
+      differs from `apply_rician_noise_3d`, which synthesizes Rayleigh air:
+      Rician models the magnitude noise floor (air has noise), B1 models a
+      multiplicative receive/transmit gain (air has no signal to scale).
+    - Re-baseline note (2026-09-21 remediation, extended per-sample): the
+      pre-fix field was a single fixed coefficient set for the whole cohort,
+      and the interim fix used one random field broadcast across the batch, so
+      previously reported B1 numbers are NOT comparable to post-fix
+      (per-sample random field) numbers.
     """
     if brain_mask is None:
         bm_bool = image != 0
@@ -229,12 +244,18 @@ def apply_b1_bias_field_3d(
         grid_z**2, grid_y**2, grid_x**2,
         grid_z * grid_y, grid_z * grid_x, grid_y * grid_x,
     ])  # [10, D, H, W]
-    coeffs = torch.randn(10, generator=generator, device=dev, dtype=torch.float32)
+    # Per-sample coefficients: sample on CPU (generator-compatible across
+    # devices) then move to the image device. Sequential draws keep seeded and
+    # explicit-generator determinism: same state -> identical fields.
+    if image.dim() == 5:
+        n_batch = image.shape[0]
+        coeffs = torch.randn(n_batch, 10, generator=generator, dtype=torch.float32).to(dev)
+        field = torch.clamp(torch.einsum("bi,idhw->bdhw", coeffs, monos), -0.5, 0.5)
+        bias = (1.0 + strength * field).to(dt).unsqueeze(1)  # [B, 1, D, H, W]
+    else:
+        coeffs = torch.randn(10, generator=generator, dtype=torch.float32).to(dev)
+        field = torch.clamp((coeffs[:, None, None, None] * monos).sum(dim=0), -0.5, 0.5)
+        bias = (1.0 + strength * field).to(dt).unsqueeze(0)  # [1, D, H, W]
 
-    field = torch.clamp((coeffs[:, None, None, None] * monos).sum(dim=0), -0.5, 0.5)
-    bias = (1.0 + strength * field).to(dt)
-    bias = bias.unsqueeze(0).unsqueeze(0) if image.dim() == 5 else bias.unsqueeze(0)
-
-    baseline = torch.clamp(image, min=0.0)
-    return torch.where(bm_bool, baseline * bias, torch.zeros_like(image))
+    return torch.where(bm_bool, image * bias, torch.zeros_like(image))
 

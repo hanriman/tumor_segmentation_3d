@@ -48,6 +48,9 @@ class VisRegLoss(nn.Module):
     - Bonneel, N., et al. (2015). "Sliced and Radon transform Wasserstein metrics of distributions."
       Journal of Mathematical Imaging and Vision, 51(1), 22-45.
     - Villani, C. (2009). Optimal Transport: Old and New. Springer.
+
+    Calibration status (uncalibrated): `center/scale/swd_weight=1.0` defaults
+    are not tuned - sweep with EffRank / centered-cosim curves before citing.
     """
 
     def __init__(
@@ -89,17 +92,28 @@ class VisRegLoss(nn.Module):
             return torch.mean(F.relu(self.target_std - std_z))
         return torch.mean((self.target_std - std_z) ** 2)
 
-    def _sliced_wasserstein_distance(self, z: torch.Tensor) -> torch.Tensor:
+    def _sliced_wasserstein_distance(
+        self, z: torch.Tensor, generator: torch.Generator | None = None
+    ) -> torch.Tensor:
         """Shape regularization: 1D Sliced-Wasserstein distance against standard normal quantiles."""
         N, D = z.shape
 
         # Center features and scale-normalize with stop-gradient to decouple shape from scale
-        mu = z.mean(dim=0, keepdim=True)
+        # Both mu and std are detached: center is handled by _center_loss, so the
+        # shape term must not add a redundant mean gradient.
+        mu = z.mean(dim=0, keepdim=True).detach()
         std = torch.sqrt(z.var(dim=0, unbiased=False, keepdim=True) + 1e-6)
         z_norm = (z - mu) / (std.detach() + 1e-6)
 
-        # Sample random projection vectors on unit hypersphere in float32
-        u = torch.randn(D, self.num_projections, device=z.device, dtype=torch.float32)
+        # Sample random projection vectors on unit hypersphere in float32.
+        # CPU-sampled when an explicit generator is given for cross-device
+        # reproducibility, then moved to the token device.
+        if generator is None:
+            u = torch.randn(D, self.num_projections, device=z.device, dtype=torch.float32)
+        else:
+            u = torch.randn(D, self.num_projections, generator=generator, dtype=torch.float32).to(
+                z.device
+            )
         u = F.normalize(u, p=2, dim=0)  # [D, M]
 
         # 1D projected slices: [N, M] in float32 to prevent FP16 underflow under AMP
@@ -125,6 +139,7 @@ class VisRegLoss(nn.Module):
         context_tokens: torch.Tensor | None = None,
         tokens: torch.Tensor | None = None,
         projected_tokens: torch.Tensor | None = None,
+        generator: torch.Generator | None = None,
     ) -> dict[str, torch.Tensor]:
         j_loss = self.jepa_loss(predictions, targets)
 
@@ -138,10 +153,14 @@ class VisRegLoss(nn.Module):
 
         # Flatten across batch and patch dimensions: [N, D]
         z = reg_tokens.reshape(-1, reg_tokens.shape[-1])
+        if z.dim() != 2 or z.shape[0] < 1 or z.shape[1] < 1:
+            raise ValueError(
+                f"VisRegLoss expects non-empty [N, D] tokens after flatten, got {tuple(z.shape)}."
+            )
 
         center_loss = self._center_loss(z)
         scale_loss = self._scale_loss(z)
-        swd_loss = self._sliced_wasserstein_distance(z)
+        swd_loss = self._sliced_wasserstein_distance(z, generator=generator)
 
         total_loss = (
             j_loss

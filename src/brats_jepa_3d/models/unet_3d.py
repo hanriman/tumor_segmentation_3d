@@ -2,6 +2,10 @@ import torch
 from monai.networks.nets import UNet
 from torch import nn
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class BraTS3DUNet(nn.Module):
     r"""
@@ -58,6 +62,14 @@ class BraTS3DUNet(nn.Module):
         )
         self.out_channels = out_channels
         self.deep_supervision = bool(deep_supervision) and len(channels) >= 5
+
+        try:
+            from importlib.metadata import version as _pkg_version
+
+            _monai_version = _pkg_version("monai")
+        except Exception:
+            _monai_version = "unknown"
+        self.monai_version = _monai_version
 
         self.ds1: nn.Conv3d | None = None  # 16^3 head
         self.ds2: nn.Conv3d | None = None  # 32^3 head

@@ -4,7 +4,7 @@ import torch
 from torch import nn
 
 from .predictor_3d import JEPAPredictor3D
-from .vision_transformer_3d import VisionTransformerEncoder3D
+from .vision_transformer_3d import VisionTransformerEncoder3D, dropout_disabled
 from ._tissue_filter import filter_tissue_tokens
 
 
@@ -73,18 +73,12 @@ class VisRegJEPA3D(nn.Module):
         context_tissue_mask: torch.Tensor | None = None,
     ) -> dict[str, Any]:
         # 1. Forward encoder on full image without gradients for target representations.
-        # Deterministic targets need dropout disabled; the mode flip is snapshot-
-        # restored in `finally` so forward() has no caller-visible side effect.
-        # (Deliberate minimal fix: restructuring into gradient-free paths without
-        # mode mutation is deferred as a research change.)
-        was_training = self.context_encoder.training
-        self.context_encoder.eval()
-        try:
-            with torch.no_grad():
-                target_full_tokens = self.context_encoder(images)  # [B, 512, embed_dim]
-        finally:
-            if was_training:
-                self.context_encoder.train()
+        # Deterministic targets via dropout-disabled pass: never mutates training
+        # mode (no .eval()/.train() flip), so forward() has no caller-visible
+        # side effect and is safe under DDP / threads. Encoder input includes
+        # air voxels by design; only the projector regularizer is tissue-filtered.
+        with torch.no_grad(), dropout_disabled(self.context_encoder):
+            target_full_tokens = self.context_encoder(images)  # [B, 512, embed_dim]
 
         # 2. Forward encoder on ONLY visible context patches WITH gradients
         context_tokens = self.context_encoder(

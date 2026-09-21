@@ -9,7 +9,7 @@ from .segmentation_head_3d import (
 )
 from .sigreg_jepa_3d import SigRegJEPA3D
 from .unet_3d import BraTS3DUNet
-from .vision_transformer_3d import PatchEmbed3D, VisionTransformerEncoder3D
+from .vision_transformer_3d import PatchEmbed3D, VisionTransformerEncoder3D, dropout_disabled
 from .visreg_jepa_3d import VisRegJEPA3D
 
 __all__ = [
@@ -25,4 +25,5 @@ __all__ = [
     "ViTSegmentationDecoder3D",
     "VisRegJEPA3D",
     "VisionTransformerEncoder3D",
+    "dropout_disabled",
 ]

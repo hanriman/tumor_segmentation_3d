@@ -1,5 +1,40 @@
+import contextlib
+
 import torch
 from torch import nn
+
+
+@contextlib.contextmanager
+def dropout_disabled(module: nn.Module):
+    """Deterministic target pass without mutating ``module.training``.
+
+    Temporarily sets dropout probabilities to 0 (both ``nn.Dropout.p`` and
+    ``nn.MultiheadAttention.dropout``) and restores them on exit. Unlike
+    ``module.eval()``, the caller's train/eval mode is never changed, so this
+    is thread-safe and has no caller-visible side effect.
+    """
+    saved_dropouts: list[tuple[nn.Dropout, float]] = []
+    saved_attn: list[tuple[nn.MultiheadAttention, float]] = []
+    for m in module.modules():
+        if isinstance(m, nn.Dropout):
+            saved_dropouts.append((m, float(m.p)))
+            m.p = 0.0
+        elif isinstance(m, nn.MultiheadAttention):
+            try:
+                saved_attn.append((m, float(m.dropout)))
+                m.dropout = 0.0
+            except (AttributeError, TypeError):
+                pass
+    try:
+        yield module
+    finally:
+        for m, p in saved_dropouts:
+            m.p = p
+        for m, p in saved_attn:
+            try:
+                m.dropout = p
+            except (AttributeError, TypeError):
+                pass
 
 
 class PatchEmbed3D(nn.Module):

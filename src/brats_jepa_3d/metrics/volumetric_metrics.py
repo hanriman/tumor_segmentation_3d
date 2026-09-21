@@ -116,15 +116,21 @@ def compute_hd95_3d(
         # One volume is empty while other is non-empty -> maximum penalty
         return diag
 
-    # Point-cap subsampling to prevent cKDTree computational explosion on early noise
-    if max_points is not None and len(pts_p) > max_points:
-        rng = np.random.default_rng(42)
-        indices = rng.choice(len(pts_p), size=max_points, replace=False)
-        pts_p = pts_p[indices]
-    if max_points is not None and len(pts_t) > max_points:
-        rng = np.random.default_rng(42)
-        indices = rng.choice(len(pts_t), size=max_points, replace=False)
-        pts_t = pts_t[indices]
+    # Point-cap subsampling to prevent cKDTree computational explosion on early noise.
+    # Per-volume deterministic seed (content-derived) so different volumes get
+    # different subsamples while the same volume pair stays reproducible.
+    if max_points is not None and (len(pts_p) > max_points or len(pts_t) > max_points):
+        content_seed = (
+            (len(pts_p) * 7919 + len(pts_t) * 104729 + int(pts_p.sum()) + int(pts_t.sum()))
+            % (2**32)
+        )
+        rng = np.random.default_rng(content_seed)
+        if len(pts_p) > max_points:
+            indices = rng.choice(len(pts_p), size=max_points, replace=False)
+            pts_p = pts_p[indices]
+        if len(pts_t) > max_points:
+            indices = rng.choice(len(pts_t), size=max_points, replace=False)
+            pts_t = pts_t[indices]
 
     # Scale to physical millimeters
     scaled_pts_p = pts_p.astype(np.float64) * scale
@@ -258,8 +264,14 @@ def compute_volumetric_metrics_3d(
         hd95_vals.append(hd95_val)
 
     tumor_indices = [i for i, h in enumerate(has_tumor_vals) if h]
-    dice_tumor = float(np.mean([dice_vals[i] for i in tumor_indices])) if tumor_indices else 1.0
-    iou_tumor = float(np.mean([iou_vals[i] for i in tumor_indices])) if tumor_indices else 1.0
+    # Consistent NaN semantics for the tumor-only cohort: when no tumor volumes
+    # exist, all three tumor-only aggregates are NaN (not 1.0/0.0). A perfect
+    # 1.0 would masquerade as flawless tumor segmentation on a cohort with no
+    # tumors to segment. Callers must use nan-aware aggregation (np.nanmean)
+    # and render NaN as "n/a". (Per-sample guarded Dice/IoU of 1.0 on empty
+    # volumes is unchanged — only the tumor-only cohort mean is NaN.)
+    dice_tumor = float(np.mean([dice_vals[i] for i in tumor_indices])) if tumor_indices else float("nan")
+    iou_tumor = float(np.mean([iou_vals[i] for i in tumor_indices])) if tumor_indices else float("nan")
     # NaN (not 0.0) when HD95 was not computed or no tumor volumes exist:
     # 0.0 would masquerade as a perfect boundary score. Callers must use
     # nan-aware aggregation (np.nanmean) and render NaN as "n/a".

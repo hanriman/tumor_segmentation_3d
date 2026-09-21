@@ -14,7 +14,17 @@ def filter_tissue_tokens(
     `[N_kept, proj_dim]` when filtering occurs (matching the loss flattening
     contract); with no (or malformed) mask the input is returned unchanged to
     preserve legacy `[B, N_ctx, proj_dim]` callers.
+
+    Raises:
+        ValueError: if `projected_tokens` is not 3D `[B, N_ctx, proj_dim]`
+            (filters operate on batched context projections; a 2D tensor here
+            means the caller flattened before filtering — a loud misuse that
+            would otherwise silently misalign the mask).
     """
+    if projected_tokens.dim() != 3:
+        raise ValueError(
+            f"filter_tissue_tokens expects 3D [B, N_ctx, proj_dim], got {tuple(projected_tokens.shape)}."
+        )
     if tissue_mask is None:
         return projected_tokens
     if tissue_mask.dim() != 2 or tissue_mask.shape != projected_tokens.shape[:2]:

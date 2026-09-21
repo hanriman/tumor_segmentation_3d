@@ -1,3 +1,4 @@
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -5,6 +6,8 @@ from typing import Any
 import pandas as pd
 
 from brats_jepa_3d.config import PROJECT_ROOT
+
+logger = logging.getLogger(__name__)
 
 
 def discover_experiment_directories(base_dir: Path | str | None = None) -> list[Path]:
@@ -70,7 +73,7 @@ def aggregate_master_benchmarks(
                             df = df.rename(columns={"Model": "Model Architecture"})
                     dfs.append(df)
             except Exception as e:
-                print(f"⚠️ Warning: Could not read {csv_path}: {e}")
+                logger.warning("Could not read %s: %s", csv_path, e)
 
     if not dfs:
         return pd.DataFrame()
@@ -85,14 +88,26 @@ def aggregate_master_benchmarks(
     dice_col = next((c for c in combined.columns if "dice" in c.lower()), None)
 
     # Deduplicate keeping the best record per model, but record the evidence:
-    # `n_runs` counts merged rows per model so dropped runs stay visible.
+    # `n_runs` counts merged rows per model, `dice_std` captures spread, and
+    # dropped rows are logged so no run disappears silently.
     if dice_col:
         combined["_sort_dice"] = combined[dice_col].apply(parse_dice_value)
         combined = combined.sort_values(by="_sort_dice", ascending=False)
-        n_runs = combined.groupby(model_col).size().rename("n_runs")
+        grouped = combined.groupby(model_col)["_sort_dice"]
+        n_runs = grouped.size().rename("n_runs")
+        dice_std = grouped.std(ddof=0).fillna(0.0).rename("dice_std")
+        dropped = combined.duplicated(subset=[model_col], keep="first").sum()
+        if dropped:
+            logger.info(
+                "aggregate_master_benchmarks: keeping best of %d rows per model "
+                "(%d dropped); see n_runs/dice_std columns.",
+                len(combined),
+                int(dropped),
+            )
         combined = combined.drop_duplicates(subset=[model_col], keep="first")
         combined = combined.drop(columns=["_sort_dice"])
         combined = combined.merge(n_runs, left_on=model_col, right_index=True, how="left")
+        combined = combined.merge(dice_std, left_on=model_col, right_index=True, how="left")
     else:
         combined = combined.drop_duplicates(subset=[model_col], keep="last")
 
@@ -154,7 +169,7 @@ def aggregate_low_data_summaries(
                             if pd.notna(val) and str(val) != "N/A":
                                 merged_df.loc[merged_df["Fraction"] == frac, col] = val
         except Exception as e:
-            print(f"⚠️ Warning: Could not read {csv_path}: {e}")
+            logger.warning("Could not read %s: %s", csv_path, e)
 
     if merged_df is None:
         return pd.DataFrame()
@@ -219,7 +234,7 @@ def aggregate_ood_summaries(
                             if pd.notna(val) and str(val) != "N/A":
                                 merged_df.loc[merged_df["Regime"] == r_name, col] = val
         except Exception as e:
-            print(f"⚠️ Warning: Could not read {csv_path}: {e}")
+            logger.warning("Could not read %s: %s", csv_path, e)
 
     if merged_df is None:
         return pd.DataFrame()

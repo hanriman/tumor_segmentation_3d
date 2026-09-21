@@ -1,8 +1,10 @@
-import random
+import logging
 from collections import deque
 from typing import Any
 
 import torch
+
+logger = logging.getLogger(__name__)
 
 # Fraction of a token's voxels that must be brain for the token to count as tissue.
 TISSUE_TOKEN_FRAC = 0.10
@@ -95,11 +97,11 @@ class JEPAMaskingTransform3D:
         """
         if generator is not None:
             return generator
+        # Worker-safe: derive from the global torch RNG (worker-seeded in
+        # DataLoader). The seed draw advances global state, so successive calls
+        # vary under `manual_seed`; the dataset adds its epoch counter on top.
         g = torch.Generator()
-        try:
-            g.manual_seed(int(torch.randint(2**31, ()).item()))
-        except Exception:
-            g.manual_seed(random.randint(0, 2**32 - 1))
+        g.manual_seed(int(torch.randint(2**31, ()).item()))
         return g
 
     @staticmethod
@@ -243,8 +245,7 @@ class JEPAMaskingTransform3D:
 
         # Fallback: if BFS cluster reached a dead-end, fill remaining from available candidates
         if len(visited) < self.context_num_patches:
-            import logging
-            logging.getLogger(__name__).debug(
+            logger.debug(
                 f"BFS reached {len(visited)}/{self.context_num_patches} patches before dead-end; "
                 f"filling {self.context_num_patches - len(visited)} remaining with random available patches "
                 f"(spatial contiguity partially broken)"

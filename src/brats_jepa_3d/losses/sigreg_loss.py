@@ -90,6 +90,11 @@ class SigRegLoss(nn.Module):
     Tissue parity: the regularized tokens are tissue-filtered upstream
     (`filter_tissue_tokens`, same rule as VisReg), so the Epps-Pulley match fits
     the tissue manifold rather than the air-padding spike.
+
+    Calibration status (uncalibrated): `sigreg_weight=1.0` is a default, not a
+    tuned balance between JEPA and EP scales — sweep ~[0.1, 10] with collapse
+    curves before citing. EP quadrature `t_max=3.0, n_knots=17` truncates the
+    (-inf, inf) integral; tail mass beyond |t|>3 is assumed negligible.
     """
 
     def __init__(
@@ -118,6 +123,7 @@ class SigRegLoss(nn.Module):
         context_tokens: torch.Tensor | None = None,
         tokens: torch.Tensor | None = None,
         projected_tokens: torch.Tensor | None = None,
+        generator: torch.Generator | None = None,
     ) -> dict[str, torch.Tensor]:
         j_loss = self.jepa_loss(predictions, targets)
 
@@ -131,11 +137,23 @@ class SigRegLoss(nn.Module):
 
         # Flatten tokens across batch and patch dimensions: [N, D]
         z = reg_tokens.reshape(-1, reg_tokens.shape[-1])
+        if z.dim() != 2 or z.shape[0] < 1 or z.shape[1] < 1:
+            raise ValueError(
+                f"SigRegLoss expects non-empty [N, D] tokens after flatten, got {tuple(z.shape)}."
+            )
         D = z.shape[-1]
 
         # Sample M random projection directions on unit hypersphere in float32
-        # to ensure isotropic distribution without half-precision artifacts
-        A = torch.randn(D, self.num_projections, device=z.device, dtype=torch.float32)
+        # to ensure isotropic distribution without half-precision artifacts.
+        # Sampled on CPU when an explicit generator is given (CUDA generators
+        # cannot back CPU-callers and vice versa), then moved to device so
+        # seeded runs stay bitwise reproducible across devices.
+        if generator is None:
+            A = torch.randn(D, self.num_projections, device=z.device, dtype=torch.float32)
+        else:
+            A = torch.randn(D, self.num_projections, generator=generator, dtype=torch.float32).to(
+                z.device
+            )
         A = F.normalize(A, p=2, dim=0)  # [D, M]
 
         # 1D projections: [N, M] in float32
