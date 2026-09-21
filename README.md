@@ -319,7 +319,7 @@ Measured on NVIDIA Tesla T4 GPU (16 GB VRAM) with Automatic Mixed Precision (`--
 ### 6.2 Projected Asymptotic Targets — NOT measured (30 / 50 Epochs, requires full re-run)
 > [!CAUTION]
 > Values below are **unvalidated convergence targets**, not measured results. Do not cite as findings. Only §6.1 is empirical.
-Full-budget asymptotic convergence targets across the five evaluated architectures:
+Full-budget asymptotic convergence targets across the five evaluated architectures (EffRank/CosSim columns are per-model collapse diagnostics, not a cross-JEPA ranking):
 
 | Model Architecture | 3D Dice (%) | 3D IoU (%) | 3D HD95 (mm) | Latency (ms / vol) | EffRank ($S^2$) | Centered CosSim |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -331,7 +331,7 @@ Full-budget asymptotic convergence targets across the five evaluated architectur
 
 ### 6.3 Key Scientific Insights & Diagnostic Observations:
 1. **Teacher-Free JEPA Parity & Superiority**: 3D VisReg JEPA and SigReg JEPA match and exceed the segmentation accuracy of standard 3D I-JEPA and supervised 3D nnU-Net while completely eliminating the secondary EMA teacher network ($\approx 40\%$ parameter savings).
-2. **Effective Dimensionality**: The Effective Rank using squared singular values ($S_k^2$) confirms that VisReg preserves a high-dimensional latent isotropic manifold on the projector manifold ($\text{erank} \approx 82.9 / 128$, representing $64.7\%$ spectral capacity utilization; $D_{\text{enc}} = 384$) with near-zero centered cosine similarity ($0.0018$), mathematically verifying collapse prevention.
+2. **Effective Dimensionality**: The Effective Rank using squared singular values ($S_k^2$) is reported strictly as a binary non-collapse sanity check (not a cross-JEPA ranking; higher rank does not imply better Dice). The value confirms that VisReg preserves a high-dimensional latent isotropic manifold on the projector manifold ($\text{erank} \approx 82.9 / 128$, representing $64.7\%$ spectral capacity utilization; $D_{\text{enc}} = 384$) with near-zero centered cosine similarity ($0.0018$), mathematically verifying collapse prevention.
 3. **Hierarchical 3D FPN Advantage**: Multi-scale lateral skips from $L_2, L_4, L_6, L_8$ recover high-frequency spatial gradients, reducing 3D Hausdorff boundary error (HD95) by $\approx 25\%$ compared to bottleneck-only decoders.
 4. **OOD Robustness**: Pre-trained 3D JEPAs maintain higher segmentation stability under 3D Rician scanner noise and RF B1 coil bias field corruption compared to supervised baselines trained from scratch.
 
