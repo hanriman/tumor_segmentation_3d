@@ -39,9 +39,10 @@ class JEPAPredictor3D(nn.Module):
         # Linear projection to narrower predictor dimension
         self.context_proj = nn.Linear(embed_dim, pred_embed_dim)
 
-        # 3D sinusoidal coordinate positional embeddings for predictor queries
+        # 3D sinusoidal coordinate positional embeddings for predictor queries.
+        # Frozen like the encoder topology (see VisionTransformerEncoder3D).
         pe = build_3d_sinusoidal_pos_embedding(grid_size, pred_embed_dim)
-        self.pos_embed = nn.Parameter(pe)
+        self.pos_embed = nn.Parameter(pe, requires_grad=False)
 
         # Learnable mask query token
         self.mask_token = nn.Parameter(torch.zeros(1, 1, pred_embed_dim))

@@ -5,6 +5,7 @@ from torch import nn
 
 from .predictor_3d import JEPAPredictor3D
 from .vision_transformer_3d import VisionTransformerEncoder3D
+from ._tissue_filter import filter_tissue_tokens
 
 
 class SigRegJEPA3D(nn.Module):
@@ -79,22 +80,31 @@ class SigRegJEPA3D(nn.Module):
         images: torch.Tensor,
         context_indices: torch.Tensor,
         target_indices_list: list[torch.Tensor],
+        context_tissue_mask: torch.Tensor | None = None,
     ) -> dict[str, Any]:
-        # 1. Forward encoder on full image without gradients for target representations
+        # 1. Forward encoder on full image without gradients for target representations.
+        # Deterministic targets need dropout disabled; the mode flip is snapshot-
+        # restored in `finally` so forward() has no caller-visible side effect.
+        # (Deliberate minimal fix: restructuring into gradient-free paths without
+        # mode mutation is deferred as a research change.)
         was_training = self.context_encoder.training
         self.context_encoder.eval()
-        with torch.no_grad():
-            target_full_tokens = self.context_encoder(images)  # [B, 512, embed_dim]
-        if was_training:
-            self.context_encoder.train()
+        try:
+            with torch.no_grad():
+                target_full_tokens = self.context_encoder(images)  # [B, 512, embed_dim]
+        finally:
+            if was_training:
+                self.context_encoder.train()
 
         # 2. Forward encoder on ONLY visible context patches WITH gradients
         context_tokens = self.context_encoder(
             images, patch_indices=context_indices
         )  # [B, N_ctx, embed_dim]
 
-        # 3. Project context tokens through MLP for Epps-Pulley Gaussianity regularization
-        projected_tokens = self.projector(context_tokens)  # [B, N_ctx, proj_dim]
+        # 3. Project context tokens through MLP for Epps-Pulley Gaussianity regularization.
+        # Tissue-only filtering (shared helper, parity with VisRegJEPA3D).
+        full_projected = self.projector(context_tokens)  # [B, N_ctx, proj_dim]
+        projected_tokens = filter_tissue_tokens(full_projected, context_tissue_mask)
 
         predictions = []
         targets = []

@@ -1,0 +1,27 @@
+import torch
+
+
+def filter_tissue_tokens(
+    projected_tokens: torch.Tensor,
+    tissue_mask: torch.Tensor | None,
+    min_tokens: int = 32,
+) -> torch.Tensor:
+    r"""Keeps tissue rows of projected tokens for distribution regularization.
+
+    Per-sample rule: sample `b` contributes its masked rows when it holds at
+    least `min_tokens` tissue tokens, otherwise all its `N_ctx` rows (a thin
+    volume must not poison — or starve — the batch). Output is 2D
+    `[N_kept, proj_dim]` when filtering occurs (matching the loss flattening
+    contract); with no (or malformed) mask the input is returned unchanged to
+    preserve legacy `[B, N_ctx, proj_dim]` callers.
+    """
+    if tissue_mask is None:
+        return projected_tokens
+    if tissue_mask.dim() != 2 or tissue_mask.shape != projected_tokens.shape[:2]:
+        return projected_tokens
+    mask = tissue_mask.to(device=projected_tokens.device, dtype=torch.bool)
+    kept = [
+        full_projected_b[m_b] if int(m_b.sum().item()) >= min_tokens else full_projected_b
+        for full_projected_b, m_b in zip(projected_tokens.unbind(0), mask.unbind(0))
+    ]
+    return torch.cat(kept, dim=0)

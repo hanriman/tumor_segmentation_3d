@@ -381,8 +381,9 @@ def test_ood_perturbations_3d():
     assert noisy.shape == img.shape
     assert not torch.isnan(noisy).any()
     assert not torch.allclose(noisy, img)
-    # Background outside brain mask remains zero
-    assert (noisy[:, 0:3, 0:3, 0:3] == 0).all()
+    # Background outside brain mask carries Rayleigh air noise (remediation Step 5)
+    assert (noisy[:, 0:3, 0:3, 0:3] != 0).any()
+    assert (noisy >= 0).all()
 
     # 2. B1 bias field
     biased = apply_b1_bias_field_3d(img, strength=0.3)
@@ -402,7 +403,8 @@ def test_ood_perturbations_explicit_brain_mask_3d():
 
     noisy_4d = apply_rician_noise_3d(img_4d, sigma=0.05, brain_mask=mask_4d)
     assert noisy_4d.shape == img_4d.shape
-    assert (noisy_4d[:, 0:3, 0:3, 0:3] == 0).all()
+    assert (noisy_4d[:, 0:3, 0:3, 0:3] != 0).any()
+    assert (noisy_4d >= 0).all()
     assert not torch.allclose(noisy_4d[:, 4:12, 4:12, 4:12], img_4d[:, 4:12, 4:12, 4:12])
 
     biased_4d = apply_b1_bias_field_3d(img_4d, strength=0.3, brain_mask=mask_4d)
@@ -418,7 +420,7 @@ def test_ood_perturbations_explicit_brain_mask_3d():
 
     noisy_5d = apply_rician_noise_3d(img_5d, sigma=0.05, brain_mask=mask_5d)
     assert noisy_5d.shape == img_5d.shape
-    assert (noisy_5d[:, :, 0:3, 0:3, 0:3] == 0).all()
+    assert (noisy_5d[:, :, 0:3, 0:3, 0:3] != 0).any()
 
     biased_5d = apply_b1_bias_field_3d(img_5d, strength=0.3, brain_mask=mask_5d)
     assert biased_5d.shape == img_5d.shape

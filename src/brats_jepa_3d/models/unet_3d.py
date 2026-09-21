@@ -69,7 +69,19 @@ class BraTS3DUNet(nn.Module):
             self.ds3 = nn.Conv3d(in64, out_channels, kernel_size=1)
 
         # Shape-keyed capture buffer (populated by hooks during forward).
-        self._ds_captured: list[torch.Tensor] = []
+        # Hooks are bound ONCE here with removable handles; see close_hooks().
+        # Buffer holds (module-type-name, tensor) pairs; drained in place every
+        # forward (closures hold this exact list object — never rebind it).
+        self._ds_captured: list[tuple[str, torch.Tensor]] = []
+        self._ds_hook_handles: list[torch.utils.hooks.RemovableHandle] = [
+            mod.register_forward_hook(self._make_hook()) for mod in self.unet.modules()
+        ]
+
+    def close_hooks(self) -> None:
+        """Removes all tap hooks (e.g. before deepcopy/pickle or teardown)."""
+        while self._ds_hook_handles:
+            self._ds_hook_handles.pop().remove()
+        del self._ds_captured[:]
 
     def _make_hook(self):
         buf = self._ds_captured
@@ -84,11 +96,7 @@ class BraTS3DUNet(nn.Module):
         return _hook
 
     def forward(self, x: torch.Tensor) -> torch.Tensor | list[torch.Tensor]:
-        # (Re)bind capture hooks to the current buffer (hooks hold no stale state).
-        if not hasattr(self, "_hooks_bound"):
-            for mod in self.unet.modules():
-                mod.register_forward_hook(self._make_hook())
-            self._hooks_bound = True
+        # Hooks are bound once in __init__; just drain the buffer per forward.
         self._ds_captured.clear()
 
         out = self.unet(x)

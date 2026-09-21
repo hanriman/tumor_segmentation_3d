@@ -56,8 +56,6 @@ class JEPAMaskingTransform3D:
         self.connectivity = connectivity
         self.tissue_token_frac = tissue_token_frac
         self.min_tissue_tokens_per_target = min_tissue_tokens_per_target
-        # Monotonic counter so generator-less calls still vary mask-to-mask.
-        self._call_counter = 0
 
         # Precompute 3D spatial neighbor offsets
         self.neighbor_offsets = self._get_neighbor_offsets(connectivity)
@@ -87,16 +85,21 @@ class JEPAMaskingTransform3D:
         return z, y, x
 
     def _resolve_generator(self, generator: torch.Generator | None) -> torch.Generator:
-        """Worker-safe RNG: explicit generator wins; otherwise derive from torch seed + counter."""
+        """Worker-safe RNG: explicit generator wins; otherwise derive from the global torch RNG.
+
+        The seed draw itself advances global torch state, so successive direct
+        calls vary deterministically under `manual_seed` (no separate counter
+        layer — the dataset owns epoch-freshness via its own counter; see
+        `BraTS3DDataset._mask_counter`). In DataLoader workers the global RNG
+        is worker-seeded, so streams diverge across workers by construction.
+        """
         if generator is not None:
             return generator
-        self._call_counter += 1
-        try:
-            base = torch.initial_seed()
-        except Exception:
-            base = random.randint(0, 2**32 - 1)
         g = torch.Generator()
-        g.manual_seed((int(base) + self._call_counter * 7919) % 2**32)
+        try:
+            g.manual_seed(int(torch.randint(2**31, ()).item()))
+        except Exception:
+            g.manual_seed(random.randint(0, 2**32 - 1))
         return g
 
     @staticmethod
@@ -153,6 +156,40 @@ class JEPAMaskingTransform3D:
                 if best_key is None or key < best_key:
                     best_key = key
                     best_cuboid = candidate
+
+            # Hard zero-overlap guarantee: overlap is a hard constraint, tissue a
+            # soft preference. If stochastic attempts failed a zero-overlap demand,
+            # exhaustively scan all valid origins (generator-shuffled order).
+            if (
+                best_cuboid is not None
+                and self.max_target_overlap == 0
+                and len(best_cuboid & all_target_indices) > 0
+            ):
+                origins = [
+                    (z0, y0, x0)
+                    for z0 in range(gz - cz + 1)
+                    for y0 in range(gy - cy + 1)
+                    for x0 in range(gx - cx + 1)
+                ]
+                perm = torch.randperm(len(origins), generator=gen).tolist()
+                best_cuboid = None
+                for oi in perm:
+                    z0, y0, x0 = origins[oi]
+                    candidate = {
+                        self._coord_to_idx(z0 + dz, y0 + dy, x0 + dx)
+                        for dz in range(cz)
+                        for dy in range(cy)
+                        for dx in range(cx)
+                    }
+                    if not (candidate & all_target_indices):
+                        best_cuboid = candidate
+                        break
+                if best_cuboid is None:
+                    raise RuntimeError(
+                        "JEPAMaskingTransform3D: grid saturated, no zero-overlap "
+                        f"placement for target cuboid {len(target_cuboids)} "
+                        f"({len(all_target_indices)}/{self.num_patches} tokens taken)."
+                    )
 
             if best_cuboid is not None:
                 target_cuboids.append(best_cuboid)

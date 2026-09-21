@@ -110,15 +110,42 @@ def resolve_seg_loss_type(args: object, cli_args: list[str] | None = None) -> st
 
     JEPA model YAMLs reuse the `loss_type` key for the latent prediction loss
     ("smooth_l1"/"l1"/"mse"), and merge_config_with_args copies it into the
-    shared argparse namespace. An explicit CLI --loss_type always wins;
-    otherwise only accept segmentation values and fall back to "dice_bce".
+    shared argparse namespace. Precedence: (1) explicitly passed CLI flags —
+    read from `args._explicit_cli_flags` when present (set by
+    merge_config_with_args), else the `cli_args` parameter; (2) accepted
+    segmentation values; (3) "dice_bce" fallback.
+
+    Passing neither (legacy direct calls) falls back to sniffing `sys.argv`
+    with a VisibleDeprecation-style runtime log — kept only for backward
+    compatibility; trainers should route through merge_config_with_args.
     """
+    import logging
     import sys
 
-    cli = sys.argv[1:] if cli_args is None else cli_args
-    explicit = any(a == "--loss_type" or a.startswith("--loss_type=") for a in cli)
+    explicit: set[str] = set()
+    tracked = getattr(args, "_explicit_cli_flags", None)
+    if tracked is not None:
+        explicit = set(tracked)
+    elif cli_args is not None:
+        cli = cli_args
+        explicit = {
+            a.lstrip("-").split("=")[0].replace("-", "_")
+            for a in cli
+            if a.startswith("-")
+        }
+    else:
+        logging.getLogger(__name__).warning(
+            "resolve_seg_loss_type: no explicit-flag record; sniffing sys.argv "
+            "(deprecated — route trainers through merge_config_with_args)."
+        )
+        cli = sys.argv[1:]
+        explicit = {
+            a.lstrip("-").split("=")[0].replace("-", "_")
+            for a in cli
+            if a.startswith("-")
+        }
     val = getattr(args, "loss_type", "dice_bce")
-    if explicit:
+    if "loss_type" in explicit:
         return val
     return val if val in ("dice_bce", "tversky") else "dice_bce"
 

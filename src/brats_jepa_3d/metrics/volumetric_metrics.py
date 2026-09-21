@@ -260,10 +260,13 @@ def compute_volumetric_metrics_3d(
     tumor_indices = [i for i, h in enumerate(has_tumor_vals) if h]
     dice_tumor = float(np.mean([dice_vals[i] for i in tumor_indices])) if tumor_indices else 1.0
     iou_tumor = float(np.mean([iou_vals[i] for i in tumor_indices])) if tumor_indices else 1.0
+    # NaN (not 0.0) when HD95 was not computed or no tumor volumes exist:
+    # 0.0 would masquerade as a perfect boundary score. Callers must use
+    # nan-aware aggregation (np.nanmean) and render NaN as "n/a".
     hd95_tumor = (
         float(np.nanmean([hd95_vals[i] for i in tumor_indices]))
         if (tumor_indices and compute_hd95)
-        else (0.0 if not compute_hd95 else 0.0)
+        else float("nan")
     )
 
     return {

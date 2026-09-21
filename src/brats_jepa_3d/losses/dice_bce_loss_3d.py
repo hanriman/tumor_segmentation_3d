@@ -75,6 +75,12 @@ class CombinedDiceBCELoss3D(nn.Module):
     Cross-Entropy (`F.cross_entropy`), however, supervises all voxels including background
     (`ignore_index=-100`), ensuring dense voxel-level negative supervision so that
     exploratory foreground predictions on intracranial background are actively penalized.
+
+    Contract decision (audit 2026-09-21): the default `include_background=True`
+    follows MONAI convention. It is a **no-op for our binary whole-tumor task**
+    (`C=1`, guard `C > 1` in `VolumetricDiceLoss`); multi-class users must pass
+    `include_background=False` explicitly to exclude class 0 from Dice. The CE
+    background asymmetry above is intentional and independent of this flag.
     """
 
     def __init__(

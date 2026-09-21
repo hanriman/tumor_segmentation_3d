@@ -86,6 +86,10 @@ class EppsPulleyGaussianityTest(nn.Module):
 class SigRegLoss(nn.Module):
     r"""
     SigReg / LeJEPA Loss: Prediction Loss + Sketched Isotropic Gaussian Regularization.
+
+    Tissue parity: the regularized tokens are tissue-filtered upstream
+    (`filter_tissue_tokens`, same rule as VisReg), so the Epps-Pulley match fits
+    the tissue manifold rather than the air-padding spike.
     """
 
     def __init__(

@@ -500,25 +500,20 @@ class JEPASegmentationModel3D(nn.Module):
             self.encoder.eval()
         return self
 
+    def _encode(self, x: torch.Tensor):
+        """Encoder pass honoring freeze probing (no-grad) without branch duplication."""
+        if self.freeze_encoder:
+            with torch.no_grad():
+                return self.encoder(x, return_intermediate=True)
+        return self.encoder(x, return_intermediate=True)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor | list[torch.Tensor]:
         if self.decoder_type == "multiscale":
-            if self.freeze_encoder:
-                with torch.no_grad():
-                    _, intermediates = self.encoder(x, return_intermediate=True)
-            else:
-                _, intermediates = self.encoder(x, return_intermediate=True)
+            _, intermediates = self._encode(x)
             return self.decoder(intermediates)
         elif self.decoder_type == "unetr_hybrid":
-            if self.freeze_encoder:
-                with torch.no_grad():
-                    _, intermediates = self.encoder(x, return_intermediate=True)
-            else:
-                _, intermediates = self.encoder(x, return_intermediate=True)
+            _, intermediates = self._encode(x)
             return self.decoder(intermediates, raw_volume=x)
         else:
-            if self.freeze_encoder:
-                with torch.no_grad():
-                    tokens = self.encoder(x)
-            else:
-                tokens = self.encoder(x)
+            tokens = self._encode(x)[0]
             return self.decoder(tokens)

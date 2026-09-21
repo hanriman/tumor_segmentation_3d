@@ -5,6 +5,7 @@ from torch import nn
 
 from .predictor_3d import JEPAPredictor3D
 from .vision_transformer_3d import VisionTransformerEncoder3D
+from ._tissue_filter import filter_tissue_tokens
 
 
 class VisRegJEPA3D(nn.Module):
@@ -71,13 +72,19 @@ class VisRegJEPA3D(nn.Module):
         target_indices_list: list[torch.Tensor],
         context_tissue_mask: torch.Tensor | None = None,
     ) -> dict[str, Any]:
-        # 1. Forward encoder on full image without gradients for target representations
+        # 1. Forward encoder on full image without gradients for target representations.
+        # Deterministic targets need dropout disabled; the mode flip is snapshot-
+        # restored in `finally` so forward() has no caller-visible side effect.
+        # (Deliberate minimal fix: restructuring into gradient-free paths without
+        # mode mutation is deferred as a research change.)
         was_training = self.context_encoder.training
         self.context_encoder.eval()
-        with torch.no_grad():
-            target_full_tokens = self.context_encoder(images)  # [B, 512, embed_dim]
-        if was_training:
-            self.context_encoder.train()
+        try:
+            with torch.no_grad():
+                target_full_tokens = self.context_encoder(images)  # [B, 512, embed_dim]
+        finally:
+            if was_training:
+                self.context_encoder.train()
 
         # 2. Forward encoder on ONLY visible context patches WITH gradients
         context_tokens = self.context_encoder(
@@ -85,24 +92,10 @@ class VisRegJEPA3D(nn.Module):
         )  # [B, N_ctx, embed_dim]
 
         # 3. Project context tokens through MLP for VisReg regularization.
-        # Brain-aware filtering: regularize tissue tokens only so the Gaussian
-        # match fits the tissue manifold, not the air-padding spike.
-        # Falls back to all tokens when tissue is scarce (<32 tokens).
+        # Tissue-only filtering (shared helper): the Gaussian match fits the
+        # tissue manifold, not the air-padding spike; per-sample fallback.
         full_projected = self.projector(context_tokens)  # [B, N_ctx, proj_dim]
-        if context_tissue_mask is not None:
-            mask = context_tissue_mask.to(device=full_projected.device)
-            if mask.dim() == 2 and mask.shape == context_tokens.shape[:2]:
-                tissue_counts = mask.sum(dim=1)
-                if bool((tissue_counts >= 32).all()):
-                    projected_tokens = full_projected[mask]  # [N_tissue, proj_dim]
-                else:
-                    projected_tokens = full_projected.reshape(
-                        -1, full_projected.shape[-1]
-                    )
-            else:
-                projected_tokens = full_projected
-        else:
-            projected_tokens = full_projected
+        projected_tokens = filter_tissue_tokens(full_projected, context_tissue_mask)
 
         predictions = []
         targets = []

@@ -84,12 +84,15 @@ def aggregate_master_benchmarks(
     model_col = "Model Architecture" if "Model Architecture" in combined.columns else combined.columns[0]
     dice_col = next((c for c in combined.columns if "dice" in c.lower()), None)
 
-    # Deduplicate keeping the best (or latest) record per model
+    # Deduplicate keeping the best record per model, but record the evidence:
+    # `n_runs` counts merged rows per model so dropped runs stay visible.
     if dice_col:
         combined["_sort_dice"] = combined[dice_col].apply(parse_dice_value)
         combined = combined.sort_values(by="_sort_dice", ascending=False)
+        n_runs = combined.groupby(model_col).size().rename("n_runs")
         combined = combined.drop_duplicates(subset=[model_col], keep="first")
         combined = combined.drop(columns=["_sort_dice"])
+        combined = combined.merge(n_runs, left_on=model_col, right_index=True, how="left")
     else:
         combined = combined.drop_duplicates(subset=[model_col], keep="last")
 
@@ -240,15 +243,21 @@ def export_latex_tables(
     low_data_df: pd.DataFrame | None = None,
     ood_df: pd.DataFrame | None = None,
     output_path: Path | str | None = None,
+    test_n: int | None = None,
 ) -> str:
-    """Generates LaTeX table code snippets matching the paper format."""
+    """Generates LaTeX table code snippets matching the paper format.
+
+    `test_n` fills the held-out test-split size in the master caption instead of
+    a hardcoded constant; when None the caption omits the count.
+    """
     sections = []
 
     if master_df is not None and not master_df.empty:
         sections.append("% --- Table 1: Master 3D Volumetric Benchmark ---")
         sections.append("\\begin{table}[t]")
         sections.append("\\centering")
-        sections.append("\\caption{\\textbf{Master 3D Volumetric Brain Glioma Segmentation Benchmark (BraTS 2024 GLI held-out test split, $N=271$).}}")
+        n_clause = f", $N={test_n}$" if test_n is not None else ""
+        sections.append(f"\\caption{{\\textbf{{Master 3D Volumetric Brain Glioma Segmentation Benchmark (BraTS 2024 GLI held-out test split{n_clause}).}}}}")
         sections.append("\\label{tab:master_benchmark}")
         sections.append("\\resizebox{\\textwidth}{!}{%")
         col_spec = "l" + "c" * (len(master_df.columns) - 1)

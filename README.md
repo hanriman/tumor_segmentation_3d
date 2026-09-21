@@ -33,23 +33,23 @@ Gliomas (glioblastomas and astrocytomas) are intrinsically **three-dimensional, 
 | **Volumetric Continuity** | $\mathbf{X} \in \mathbb{R}^{4 \times 128 \times 128 \times 128}$, $1.0\text{ mm}^3$ isotropic grid. | **Menze et al. (2014)**; **Milletari et al. (2016)**. Preserves 3D spatial continuity across white matter tracts. |
 | **Grid Resampling** | Non-zero brain bounding box $\to$ trilinear resampling to canonical $128^3$ isotropic grid. | **Isensee et al. (2021)** (*Nature Methods*). Prevents anatomical truncation of peripheral cortex. |
 | **Parenchyma Normalization** | $X_{c, \text{norm}}(v) = \frac{X_c(v) - \mu_{c,\text{nz}}}{\sigma_{c,\text{nz}} + \epsilon}$ for non-zero voxels. | **Isensee et al. (2021)**. Harmonizes scanner-dependent intensity drift across institutions. |
-| **Random Modality Dropout** | $m_c \sim \text{Bernoulli}(1 - p_{\text{drop}})$, $p_{\text{drop}}=0.25$, fallback $\sum_c m_c \ge 1$. | **Havaei et al. (2017)**; **Dorent et al. (2019)**. Simulates missing MRI sequences, enforcing representation independence. |
+| **Random Modality Dropout** | $m_c \sim \text{Bernoulli}(1 - p_{\text{drop}})$, $p_{\text{drop}}=0.25$, fallback $\sum_c m_c \ge 1$, kept channels rescaled $C/\text{keep}$ (inverted dropout). | **Havaei et al. (2017)**; **Dorent et al. (2019)**. Simulates missing MRI sequences, enforcing representation independence; rescaling preserves train/test magnitude. |
 | **3D Context / Target Masking** | 4 Target cuboids ($3 \times 3 \times 3$, $N_{\text{tgt}} \approx 108$) + 3D Connected BFS Context ($N_{\text{ctx}} = 192$), **brain-aware**: sampling steered to tissue tokens via `brain_mask`, tissue-only VisReg regularization. | **Assran et al. (2023)** (*CVPR*). Prevents spatial interpolation shortcuts; constant $N_{\text{ctx}}$ maximizes Tensor Core throughput; air-dilution fix (roadmap Phase 8). |
-| **3D Positional Embeddings** | Separable 3D Sinusoidal Coordinate Embeddings $[\text{PE}(z) \,\|\, \text{PE}(y) \,\|\, \text{PE}(x)]$. | **Vaswani et al. (2017)**; **Feichtenhofer et al. (2022)**. Imparts immediate 3D metric spatial topology from step 0. |
+| **3D Positional Embeddings** | Separable 3D Sinusoidal Coordinate Embeddings (frozen, requires_grad=False) $[\text{PE}(z) \,\|\, \text{PE}(y) \,\|\, \text{PE}(x)]$. | **Vaswani et al. (2017)**; **Feichtenhofer et al. (2022)**. Imparts immediate 3D metric spatial topology from step 0. |
 | **Context Gather (Zero Leakage)** | $\mathbf{Z}_{\text{ctx}} = \text{Encoder}(\text{gather}(\mathbf{Z}_0, \text{idx}_{\text{ctx}})) \in \mathbb{R}^{B \times 192 \times 384}$. | **Assran et al. (2023)**. Evaluates strictly visible tokens; reduces self-attention FLOPs by $85.9\%$ ($192^2 / 512^2$). |
 | **Projector MLP** | $z = W_2(\text{GELU}(\text{LN}(W_1 h + b_1))) + b_2: 384 \to 1024 \to 128$. | **Tishby et al. (2000)**; **Balestriero & LeCun (2025)**. Information Bottleneck decouples task representations from Gaussian forces. |
-| **SigReg Gaussianity Test** | $\mathcal{T}_{\text{EP}} = N \int |\hat{\phi}_N(t) - \phi_0(t)|^2 d\mu(t)$ over $M=256$ 1D rays. | **Balestriero & LeCun (2025)**; **Epps & Pulley (1983)**. Sample factor $N$ cancels $1/N$ ECF derivative, yielding $O(1)$ per-sample gradients. |
+| **SigReg Gaussianity Test** | $\mathcal{T}_{\text{EP}} = N \int |\hat{\phi}_N(t) - \phi_0(t)|^2 d\mu(t)$ over $M=256$ 1D rays, tissue-filtered like VisReg (shared helper). | **Balestriero & LeCun (2025)**; **Epps & Pulley (1983)**. Sample factor $N$ cancels $1/N$ ECF derivative, yielding $O(1)$ per-sample gradients. |
 | **VisReg Decoupled Moments** | $\mathcal{L}_{\text{VisReg}} = \mathcal{L}_{\text{JEPA}} + \lambda_{\text{c}} \frac{\|\mu\|_2^2}{D} + \lambda_{\text{sc}} \frac{\sum (1-\sigma_d)^2}{D} + \lambda_{\text{sh}} W_2^2$. | **Wu, Balestriero, & Levine (2026)**; **Villani (2009)**. Stop-gradient on $\sigma$ prevents dimensional collapse; closed-form 1D sort in $O(N \log N)$. |
 | **Hierarchical 3D FPN Decoder** | Lateral skips from $L_2, L_4, L_6, L_8$ with progressive ConvTranspose3d and `GroupNorm`. | **Lin et al. (2017)**; **Hatamizadeh et al. (2022)**; **Wu & He (2018)**. Restores high-frequency boundary gradients; GroupNorm stabilizes small 3D batches ($B \le 4$). |
 | **Supervised 3D Baselines** | MONAI 3D Residual UNet (+ ds1/ds2/ds3 heads) and MONAI 3D DynUNet, both with deep supervision default-ON ($w_s = 2^{-s}/\sum 2^{-j}$); asymmetric Tversky opt-in; 4-fold TTA at eval. | **Ronneberger et al. (2015)**; **Isensee et al. (2021)**; **Lee et al. (2015)**; **Salehi et al. (2017)**. Establishes state-of-the-art supervised benchmark parity. |
-| **Exact 3D HD95 Metric** | $d_{\text{HD95}}^{3\text{D}}$ via 3D 26-connectivity morphological erosion and `cKDTree` in physical mm ($1.0\text{ mm}^3$). | **Huttenlocher et al. (1993)**; **Taha & Hanbury (2015)**; **Powers (2011)**. Guarded zero-division prevents artificial epsilon score inflation. |
+| **Exact 3D HD95 Metric** | $d_{\text{HD95}}^{3\text{D}}$ via 3D 26-connectivity morphological erosion and `cKDTree` in physical mm ($1.0\text{ mm}^3$); `hd95_tumor_only` is NaN (never 0.0) when HD95 is off or the cohort is tumor-free. | **Huttenlocher et al. (1993)**; **Taha & Hanbury (2015)**; **Powers (2011)**. Guarded zero-division prevents artificial epsilon score inflation. |
 | **Effective Rank ($S_k^2$)** | $\text{erank}(Z) = \exp\left(-\sum p_k \ln p_k\right)$, $p_k = S_k^2 / \sum S_j^2$. | **Roy & Vetterli (2007)**. Strictly uses covariance eigenvalues $S_k^2$, preventing linear $S_k$ from masking dimensional collapse. |
 | **Centered Cosine Sim** | $\bar{S}_{\text{centered}} = \frac{1}{N(N-1)} \sum_{i \neq j} \frac{(z_i - \bar{z})^\top (z_j - \bar{z})}{\|z_i - \bar{z}\|_2 \|z_j - \bar{z}\|_2}$. | **Wang & Isola (2020)**. Decouples centroid translation from angular dispersion, diagnosing directional collapse. |
-| **Combined Loss Alignment** | Multi-class Cross-Entropy supervises all voxels including background (`ignore_index=-100`) while Dice excludes background (`include_background=False`). | **Isensee et al. (2021)**; **Milletari et al. (2016)**. Dense CE penalizes false-positive foreground predictions across healthy tissue while Dice prevents background dominance. |
+| **Combined Loss Alignment** | Multi-class Cross-Entropy supervises all voxels including background (`ignore_index=-100`) while Dice default `include_background=True` is a no-op on the binary task (explicit `False` required only for multi-class). | **Isensee et al. (2021)**; **Milletari et al. (2016)**. Dense CE penalizes false-positive foreground predictions across healthy tissue while Dice prevents background dominance. |
 | **Quartile-Stratified Splits** | Low-data tiers ($1\%$ to $50\%$) stratified by tumor volume quartile. | **Isensee et al. (2021)**. Preserves macro- and micro-lesion representation balance across low-data fractions. |
 | **Metric Validation Guard** | Strict single-channel validation ($C=1$) + `from_logits` toggle in `compute_volumetric_metrics_3d`. | **Taha & Hanbury (2015)**. Prevents silent metric computation on background channel 0 and avoids double-sigmoid distortion. |
-| **3D Rician Scanner Noise** | $M = \sqrt{(X + \eta_1)^2 + \eta_2^2}$, $\eta_1, \eta_2 \sim \mathcal{N}(0, \sigma_{\text{noise}}^2)$. | **Gudbjartsson & Patz (1995)**. Accurately simulates MRI magnitude reconstruction from quadrature RF coil channels. |
-| **3D B1 RF Field Bias** | $X_{\text{corrupt}} = X \cdot \left(1 + \sum_{i+j+k \le 2} c_{ijk} x^i y^j z^k\right)$. | **Sled et al. (1998)**; **Lebrun et al. (2021)**. Multiplicative smooth 2nd-order polynomial simulating RF coil field inhomogeneity. |
+| **3D Rician Scanner Noise** | $M = \sqrt{(X_+ + \eta_1)^2 + \eta_2^2}$, $\eta_1, \eta_2 \sim \mathcal{N}(0, \sigma_{\text{noise}}^2)$ on all voxels (tissue Rician + air Rayleigh, zero-clamped baseline). | **Gudbjartsson & Patz (1995)**. Accurately simulates MRI magnitude reconstruction from quadrature RF coil channels. |
+| **3D B1 RF Field Bias** | $X_{\text{corrupt}} = X \cdot \left(1 + \sum_{i+j+k \le 2} c_{ijk} x^i y^j z^k\right)$ with per-call $c_{ijk} \sim \mathcal{N}(0,1)$ (gain clamped to $[0.5,1.5]$). | **Sled et al. (1998)**; **Lebrun et al. (2021)**. Multiplicative smooth 2nd-order polynomial simulating RF coil field inhomogeneity. |
 
 ---
 
@@ -81,6 +81,7 @@ thesis_3d/
 │   ├── 02_train_nnunet_3d.ipynb  # SOTA baseline: 3D DynUNet with deep supervision
 │   ├── 03_train_unet_3d.ipynb    # Classical baseline: 3D Residual UNet
 │   ├── 04_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT ablation
+│   ├── 06_vit_unetr_hybrid_ablation_3d.ipynb # From-scratch ViT + hybrid UNETR ablation (all cells --from_scratch)
 │   └── kaggle_runner_3d.ipynb    # Interactive all-in-one runner with toggles
 │
 ├── configs/                      # Modular YAML configuration hierarchy
@@ -104,7 +105,7 @@ thesis_3d/
 │       ├── data/
 │       │   ├── dataset.py        # BraTS3DDataset with bounded RAM caching & fraction sampling
 │       │   ├── transforms.py     # RandomModalityDropout3D, Rician noise, B1 bias field
-│       │   └── masking.py        # JEPAMaskingTransform3D (brain-aware 3D cuboids + 3D BFS context, worker-safe RNG)
+│       │   └── masking.py        # JEPAMaskingTransform3D (brain-aware 3D cuboids + 3D BFS context, torch-only RNG, hard zero-overlap)
 │       ├── models/
 │       │   ├── vision_transformer_3d.py # PatchEmbed3D + 3D Sincos Pos + ViTEncoder3D
 │       │   ├── predictor_3d.py          # JEPAPredictor3D (4 layers, self-attention)

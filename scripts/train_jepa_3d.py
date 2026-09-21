@@ -327,7 +327,7 @@ def main():
             optimizer.zero_grad()
 
             with get_autocast_context(device, enabled=args.amp):
-                if args.model_type == "visreg_jepa" and "context_tissue_mask" in batch:
+                if args.model_type in ("visreg_jepa", "sigreg_jepa") and "context_tissue_mask" in batch:
                     out = model(
                         images, ctx_idx, tgt_idx_list,
                         context_tissue_mask=batch["context_tissue_mask"].to(device),
@@ -410,7 +410,7 @@ def main():
                 val_tgt_idx_list = [t.to(device) for t in val_batch["target_indices_list"]]
 
                 with get_autocast_context(device, enabled=args.amp):
-                    if args.model_type == "visreg_jepa" and "context_tissue_mask" in val_batch:
+                    if args.model_type in ("visreg_jepa", "sigreg_jepa") and "context_tissue_mask" in val_batch:
                         val_out = model(
                             val_images, val_ctx_idx, val_tgt_idx_list,
                             context_tissue_mask=val_batch["context_tissue_mask"].to(device),
@@ -461,18 +461,26 @@ def main():
             f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {avg_train_loss:.5f}{loss_detail} | Val Loss: {avg_val_loss:.5f} | Duration: {epoch_duration:.2f}s"
         )
 
-        # Compute representation quality metrics at checkpoint intervals
+        # Compute representation quality metrics at checkpoint intervals.
+        # Source: first VAL batch (not the stale leftover train `images`), so the
+        # probe reflects generalization features rather than the last train batch.
         rep_metrics = {}
         if epoch % 10 == 0 or epoch == epochs or args.smoke_test:
             model.eval()
             with torch.no_grad():
-                sample_tokens = model.context_encoder(images[:1])
-                rep_metrics = compute_representation_collapse_metrics(sample_tokens)
-            logger.info(
-                f"Representation Quality - EffRank: {rep_metrics['effective_rank']:.2f} | "
-                f"CenteredCosSim: {rep_metrics['avg_cosine_sim_centered']:.4f} | "
-                f"FeatureVar: {rep_metrics['feature_variance']:.4f}"
-            )
+                val_probe_images = None
+                for _probe_batch in val_loader:
+                    val_probe_images = _probe_batch["images"][:1].to(device)
+                    break
+                if val_probe_images is not None:
+                    sample_tokens = model.context_encoder(val_probe_images)
+                    rep_metrics = compute_representation_collapse_metrics(sample_tokens)
+            if rep_metrics:
+                logger.info(
+                    f"Representation Quality (val) - EffRank: {rep_metrics['effective_rank']:.2f} | "
+                    f"CenteredCosSim: {rep_metrics['avg_cosine_sim_centered']:.4f} | "
+                    f"FeatureVar: {rep_metrics['feature_variance']:.4f}"
+                )
             model.train()
 
         epoch_metrics = {

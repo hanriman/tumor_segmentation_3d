@@ -173,9 +173,12 @@ class VisionTransformerEncoder3D(nn.Module):
         self.grid_size = self.patch_embed.grid_size
         self.embed_dim = embed_dim
 
-        # Initialize 3D sinusoidal coordinate positional embeddings (learnable)
+        # Initialize 3D sinusoidal coordinate positional embeddings.
+        # Frozen (requires_grad=False): the Vaswani/Feichtenhofer metric topology
+        # is fixed from step 0 and must not drift. Kept as nn.Parameter (not a
+        # buffer) so existing checkpoints keep loading with identical keys.
         pe = build_3d_sinusoidal_pos_embedding(self.grid_size, embed_dim)
-        self.pos_embed = nn.Parameter(pe)
+        self.pos_embed = nn.Parameter(pe, requires_grad=False)
 
         self.blocks = nn.ModuleList(
             [

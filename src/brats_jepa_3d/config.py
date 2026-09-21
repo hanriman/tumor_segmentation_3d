@@ -190,4 +190,11 @@ def merge_config_with_args(
     if "BRATS3D_NUM_WORKERS" in os.environ and "num_workers" not in explicit_cli_flags:
         apply_kv("num_workers", int(os.environ["BRATS3D_NUM_WORKERS"]))
 
+    # Record which flags the user passed explicitly so downstream resolvers
+    # (e.g. resolve_seg_loss_type) need not sniff sys.argv.
+    try:
+        setattr(args, "_explicit_cli_flags", set(explicit_cli_flags))
+    except (AttributeError, TypeError):
+        pass
+
     return args

@@ -56,6 +56,7 @@ flowchart TD
     - Add --from_scratch flag in train_downstream_3d.py
     - Isolate checkpoints (*_scratch_best.pt) and metrics
     - Standalone Kaggle Notebook: 04_train_vit_from_scratch_ablation_3d.ipynb
+    - Hybrid variant: 06_vit_unetr_hybrid_ablation_3d.ipynb (same flow with --decoder_type unetr_hybrid throughout)
     - Auto-detection in evaluate_3d.py"]
     
     P3["Phase 3: Fair Downstream Training Suite [COMPLETED]
@@ -178,16 +179,16 @@ flowchart TD
 - Full suite: `pytest tests/ -q` → 108 passed.
 
 ### Phase 8: Brain-Aware JEPA Masking & Tissue-Only VisReg Regularization [IMPLEMENTED LOCALLY / PENDING KAGGLE VALIDATION]
-- **Status**: Code implemented and verified on synthetic proxy + smoke pretrain; real-data validation pending on Kaggle (no local BraTS volumes).
+- **Status (audit 2026-09-21)**: SigReg parity done (shared `filter_tissue_tokens` helper, trainer plumbs mask for both); per-sample fallback done (batch-wide `.all()` removed); mask stream verified fresh across epochs (counter-seeded); hard zero-overlap guarantee added. Prior OOD Rician/B1 tables are **not comparable** post-remediation (air Rayleigh + random fields) — re-baseline required on the Kaggle run.
 - **Root cause** (geometry-only diagnostics, central-ellipsoid brain proxy, 500 masks):
   - 316/512 tokens are air (<10% brain); uniform sampling yields context 54.3% air, targets 35.8% air → only ~29% tissue→tissue pairs.
   - Air constants inflate VisReg `scale` 23× (0.0011→0.0253) and `shape` 19× (0.0043→0.0811) vs tissue-only.
   - BFS contiguity cleared as a suspect (fragmentation only 10/500); connectivity stays 26.
-- **Implemented changes** (VisReg-only):
+- **Implemented changes** (VisReg + SigReg tissue parity since audit):
   1. `src/brats_jepa_3d/data/masking.py`: `__call__(token_brain_frac=None, generator=None)` — tissue = frac ≥ 0.10; target rejection sampling (≥14/27 tissue tokens, 20 attempts, best-attempt fallback preserving overlap control); BFS seed over tissue∖targets with tissue-preferring fallback; `torch.Generator` RNG instead of global `random` (DataLoader-worker safe); collate stacks `context_tissue_mask` [B, 192]. Legacy `T()` call behavior unchanged.
   2. `src/brats_jepa_3d/data/dataset.py`: 8×8×8 token brain-fractions via `avg_pool3d(k=16)` after augmentation; per-sample generator (`initial_seed + idx*7919`); emits `context_tissue_mask`.
   3. `src/brats_jepa_3d/models/visreg_jepa_3d.py`: optional `context_tissue_mask`; `projected_tokens` filtered to tissue rows (<32 tissue → all-token fallback). No loss-weight changes (`center/scale/swd = 1.0`, 256 projections).
-  4. `scripts/train_jepa_3d.py`: passes tissue mask for `visreg_jepa` in train + val loops.
+  4. `scripts/train_jepa_3d.py`: passes tissue mask for `visreg_jepa` and `sigreg_jepa` in train + val loops.
   5. `scripts/diagnose_visreg_3d.py` (new): real-data D1–D3 probe — `python scripts/diagnose_visreg_3d.py --num_volumes 200 [--checkpoint <pretrain>.pt]`.
 - **Local verification**: proxy checks pass (tgt-air 35.8%→25.5% with preserved spatial diversity, disjointness, determinism, collate + forward shapes); `train_jepa_3d.py --smoke_test` end-to-end ok (finite JEPA/Ctr/Scl/Shp, EffRank 174); full suite 87 passed. Note: ctx-air stays ~55% by design (192 requested > ~140 available tissue tokens) — harmless since regularization is tissue-filtered and context air is model input, not loss.
 - **Fairness**: `brain_mask` derives from nonzero voxels (unsupervised, no tumor labels; already used for parenchyma-only noise in `transforms.py`); masking affects SSL pretraining only; downstream splits/augmentations identical across baselines.
