@@ -350,6 +350,14 @@ def main():
 
     records = []
 
+    def _display_name(name: str) -> str:
+        # Decoder-aware column names so hybrid runs add columns instead of
+        # overwriting multiscale columns in the merged summary CSV.
+        dec = getattr(args, "decoder_type", "multiscale")
+        if dec != "multiscale" and ("JEPA" in name or "ViT-FPN" in name):
+            return f"{name} [{dec}]"
+        return name
+
     for frac in fractions:
         logger.info(f"\n--- Evaluating Fraction: {frac * 100:.1f}% Labels ---")
         try:
@@ -383,7 +391,7 @@ def main():
         for name, _ in selected_models:
             m = build_model(name)
             if m is None:
-                row[name] = "N/A"
+                row[_display_name(name)] = "N/A"
                 continue
             dice = train_and_eval(
                 m,
@@ -399,7 +407,7 @@ def main():
                 tta=args.tta,
             )
             logger.info(f"{name} ({frac * 100:.1f}% labels) -> Test Dice: {dice * 100:.2f}%")
-            row[name] = f"{dice * 100:.2f}%"
+            row[_display_name(name)] = f"{dice * 100:.2f}%"
             del m
             gc.collect()
             if device.type == "cuda":

@@ -271,6 +271,10 @@ def main():
             or (args.model_type and args.model_type.lower() in ("vit_scratch", "scratch"))
         )
         label = "3D ViT-FPN (From Scratch)" if (is_scratch and "JEPA" in orig_label) else orig_label
+        # Decoder-aware labels: hybrid and multiscale rows must coexist in the
+        # merged benchmark CSVs instead of overwriting each other by model name.
+        if decoder_type and decoder_type != "multiscale" and "JEPA" in orig_label:
+            label = f"{label} [{decoder_type}]"
         logger.info(f"Evaluating: {label}")
 
         if args.checkpoint and len(models_to_evaluate) == 1:

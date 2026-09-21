@@ -371,19 +371,27 @@ def main():
 
     records = []
 
+    def _display_name(m_name: str) -> str:
+        # Decoder-aware column names so hybrid runs add columns instead of
+        # overwriting multiscale columns in the merged summary CSV.
+        dec = getattr(args, "decoder_type", "multiscale")
+        if dec != "multiscale" and ("JEPA" in m_name or "ViT-FPN" in m_name):
+            return f"{m_name} [{dec}]"
+        return m_name
+
     for p_name, p_fn in perturbations:
         logger.info(f"\n--- Evaluating Regime: {p_name} ---")
         row = {"Regime": p_name}
         for m_name, m in instantiated_models:
             if m is None:
-                row[m_name] = "N/A"
+                row[_display_name(m_name)] = "N/A"
                 continue
             dice = evaluate_perturbation(
                 m, test_loader, device, p_fn, amp=args.amp, smoke_test=args.smoke_test,
                 tta=args.tta,
             )
             logger.info(f"{m_name} -> Dice: {dice * 100:.2f}%")
-            row[m_name] = f"{dice * 100:.2f}%"
+            row[_display_name(m_name)] = f"{dice * 100:.2f}%"
         records.append(row)
 
     new_df = pd.DataFrame(records)
