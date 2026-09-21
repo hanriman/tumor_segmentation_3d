@@ -17,7 +17,7 @@ Gliomas (glioblastomas and astrocytomas) are intrinsically **three-dimensional, 
 3. **Anisotropic Metric Corruption**: Slice-wise evaluation ignores physical millimeter voxel spacing ($1.0 \times 1.0 \times 1.0\text{ mm}^3$), corrupting distance metrics like the 95th percentile Hausdorff Distance (Taha & Hanbury, 2015).
 
 ### The Scientific Thesis
-> **We extend Joint-Embedding Predictive Architectures to full 3D multi-modal brain MRI volumes, investigating whether heuristic-free representation regularizations (SigReg and VisReg) mathematically prevent 3D latent collapse without momentum teacher networks, learning isotropic volumetric anatomical representations that surpass standard 3D I-JEPA, 3D Residual UNet, and 3D nnU-Net under full-data, label-scarce, and scanner-shifted distribution regimes.**
+> **We extend Joint-Embedding Predictive Architectures to full 3D multi-modal brain MRI volumes, investigating whether heuristic-free VisReg regularization mathematically prevents 3D latent collapse without momentum teacher networks. This study benchmarks 3D VisReg JEPA against 3D Residual UNet, 3D nnU-Net (DynUNet), and decoder ablations (bottleneck / multiscale FPN / hybrid UNETR) under full-data, label-scarce, and scanner-shifted regimes. SigReg and standard I-JEPA are implemented in code but not benchmarked here.**
 
 ### Why JEPA Over MAE and Contrastive Learning
 - **Vs. Masked Autoencoders (He et al., 2022; Feichtenhofer et al., 2022)**: MAE reconstructs raw voxels, forcing model capacity to encode high-frequency non-semantic MRI scanner noise (Rician distribution; Gudbjartsson & Patz, 1995) and RF coil bias field inhomogeneities (Sled et al., 1998). JEPA predicts abstract representations in latent space ($\hat{y}_{\text{tgt}} \approx y_{\text{tgt}}$), naturally discarding high-frequency non-semantic noise (LeCun, 2022; Assran et al., 2023).
@@ -218,7 +218,8 @@ python scripts/train_jepa_3d.py --model_type sigreg_jepa --epochs 50 --batch_siz
 # 3D VisReg JEPA (Decoupled Center, Scale, Shape SWD)
 python scripts/train_jepa_3d.py --model_type visreg_jepa --epochs 50 --batch_size 4 --amp
 
-# 3D I-JEPA (EMA Teacher network)
+> **Benchmark scope:** this study reports VisReg vs. UNet / nnU-Net / decoder ablations only. SigReg and standard I-JEPA below are implemented and smoke-tested but **not benchmarked**.
+# 3D I-JEPA (EMA Teacher network -- implemented, not benchmarked)
 python scripts/train_jepa_3d.py --model_type ijepa --epochs 50 --batch_size 4 --amp
 ```
 
@@ -319,19 +320,17 @@ Measured on NVIDIA Tesla T4 GPU (16 GB VRAM) with Automatic Mixed Precision (`--
 ### 6.2 Projected Asymptotic Targets — NOT measured (30 / 50 Epochs, requires full re-run)
 > [!CAUTION]
 > Values below are **unvalidated convergence targets**, not measured results. Do not cite as findings. Only §6.1 is empirical.
-Full-budget asymptotic convergence targets across the five evaluated architectures (EffRank/CosSim columns are per-model collapse diagnostics, not a cross-JEPA ranking):
+Full-budget asymptotic convergence targets across the three benchmarked architectures plus decoder ablations (EffRank/CosSim columns are per-model collapse diagnostics, not cross-method rankings):
 
 | Model Architecture | 3D Dice (%) | 3D IoU (%) | 3D HD95 (mm) | Latency (ms / vol) | EffRank ($S^2$) | Centered CosSim |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **3D SigReg JEPA (FPN)** | $89.6 \pm 2.1$ | $81.2 \pm 2.8$ | $3.82 \pm 0.64$ | $11.3$ | $23.9$ | $0.0201$ |
 | **3D VisReg JEPA (FPN)** | $90.1 \pm 1.8$ | $82.0 \pm 2.5$ | $3.54 \pm 0.58$ | $3.1$ | $82.9$ | $0.0018$ |
-| **3D I-JEPA (FPN)** | $88.9 \pm 2.4$ | $80.1 \pm 3.1$ | $4.15 \pm 0.72$ | $3.2$ | $82.9$ | $0.0019$ |
 | **3D Residual UNet** | $85.4 \pm 3.2$ | $74.8 \pm 3.9$ | $5.68 \pm 1.12$ | $22.1$ | - | - |
 | **3D nnU-Net (DynUNet)** | $89.8 \pm 1.9$ | $81.5 \pm 2.7$ | $3.71 \pm 0.61$ | $15.9$ | - | - |
 
 ### 6.3 Key Scientific Insights & Diagnostic Observations:
-1. **Teacher-Free JEPA Parity & Superiority**: 3D VisReg JEPA and SigReg JEPA match and exceed the segmentation accuracy of standard 3D I-JEPA and supervised 3D nnU-Net while completely eliminating the secondary EMA teacher network ($\approx 40\%$ parameter savings).
-2. **Effective Dimensionality**: The Effective Rank using squared singular values ($S_k^2$) is reported strictly as a binary non-collapse sanity check (not a cross-JEPA ranking; higher rank does not imply better Dice). The value confirms that VisReg preserves a high-dimensional latent isotropic manifold on the projector manifold ($\text{erank} \approx 82.9 / 128$, representing $64.7\%$ spectral capacity utilization; $D_{\text{enc}} = 384$) with near-zero centered cosine similarity ($0.0018$), mathematically verifying collapse prevention.
+1. **Teacher-Free Design**: 3D VisReg JEPA eliminates the secondary EMA teacher network ($\approx 40\%$ parameter savings vs. dual-encoder I-JEPA) via principled optimal-transport regularization. Segmentation is benchmarked against supervised 3D nnU-Net, 3D Residual UNet, and decoder ablations; no accuracy comparison against SigReg or standard I-JEPA is claimed (not run).
+2. **Effective Dimensionality**: The Effective Rank using squared singular values ($S_k^2$) is reported strictly as a binary non-collapse sanity check (not a cross-JEPA ranking; higher rank does not imply better Dice). The value confirms that VisReg preserves a high-dimensional latent isotropic manifold on the projector manifold See the paper Results section for measured encoder geometry (binary non-collapse check); full-pool projector-manifold numbers are pending re-benchmark.
 3. **Hierarchical 3D FPN Advantage**: Multi-scale lateral skips from $L_2, L_4, L_6, L_8$ recover high-frequency spatial gradients, reducing 3D Hausdorff boundary error (HD95) by $\approx 25\%$ compared to bottleneck-only decoders.
 4. **OOD Robustness**: Pre-trained 3D JEPAs maintain higher segmentation stability under 3D Rician scanner noise and RF B1 coil bias field corruption compared to supervised baselines trained from scratch.
 
