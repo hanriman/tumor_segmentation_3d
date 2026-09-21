@@ -35,7 +35,7 @@ class RandomModalityDropout3D(nn.Module):
         super().__init__()
         self.p_drop = p_drop
 
-    def forward(self, image: torch.Tensor) -> torch.Tensor:
+    def forward(self, image: torch.Tensor, generator: torch.Generator | None = None) -> torch.Tensor:
         """
         image: [C=4, D, H, W] or [B, C=4, D, H, W]
         """
@@ -51,10 +51,18 @@ class RandomModalityDropout3D(nn.Module):
 
         for b in range(B):
             # Sample Bernoulli mask for channels
-            mask = torch.bernoulli(torch.full((C,), 1.0 - self.p_drop, device=image.device))
+            if generator is None:
+                mask = torch.bernoulli(torch.full((C,), 1.0 - self.p_drop, device=image.device))
+            else:
+                mask = torch.bernoulli(
+                    torch.full((C,), 1.0 - self.p_drop), generator=generator
+                ).to(image.device)
             if mask.sum() == 0:
                 # Guaranteed active channel fallback using PyTorch PRNG for seed consistency
-                active_idx = torch.randint(0, C, (1,), device=image.device).item()
+                if generator is None:
+                    active_idx = torch.randint(0, C, (1,), device=image.device).item()
+                else:
+                    active_idx = torch.randint(0, C, (1,), generator=generator).item()
                 mask[active_idx] = 1.0
 
             # Inverted-dropout rescaling: preserve expected activation magnitude
@@ -132,7 +140,7 @@ class VolumetricAugmentations3D:
             image = image + noise * parenchyma_mask.float()
 
         # 3. Random Modality Dropout
-        image = self.modality_dropout(image)
+        image = self.modality_dropout(image, generator=generator)
 
         if brain_mask is not None:
             return image, mask, brain_mask

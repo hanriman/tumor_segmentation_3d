@@ -86,10 +86,8 @@ def plot_low_data_efficiency():
         except Exception as e:
             print(f"Notice: using stored values for low-data ({e})")
 
-    unet_std = np.array([1.20, 1.40, 2.45, 2.20, 1.80, 1.50])
-    nnunet_std = np.array([2.50, 2.15, 1.80, 1.45, 1.20, 0.95])
-    visreg_std = np.array([1.80, 1.95, 1.70, 1.50, 1.30, 1.10])
-
+    # No empirical per-fraction stds are available (single-seed runs); plot means
+    # only. Do NOT fabricate shaded bands.
     _fig, ax = plt.subplots(figsize=(7.4, 4.5))
     ax.grid(True, linestyle="--", color="gray", alpha=0.3, zorder=0)
 
@@ -102,14 +100,6 @@ def plot_low_data_efficiency():
         label="3D VisReg JEPA (Multiscale FPN)",
         zorder=5,
     )
-    ax.fill_between(
-        x,
-        visreg_mean - visreg_std,
-        visreg_mean + visreg_std,
-        color=COLOR_VISREG,
-        alpha=0.18,
-        zorder=4,
-    )
 
     # Plot nnU-Net
     ax.plot(
@@ -119,14 +109,6 @@ def plot_low_data_efficiency():
         color=COLOR_NNUNET,
         label="3D nnU-Net Baseline (DynUNet)",
         zorder=3,
-    )
-    ax.fill_between(
-        x,
-        nnunet_mean - nnunet_std,
-        nnunet_mean + nnunet_std,
-        color=COLOR_NNUNET,
-        alpha=0.18,
-        zorder=2,
     )
 
     # Plot UNet
@@ -138,9 +120,6 @@ def plot_low_data_efficiency():
         label="3D Residual UNet Baseline",
         linestyle="--",
         zorder=3,
-    )
-    ax.fill_between(
-        x, unet_mean - unet_std, unet_mean + unet_std, color=COLOR_UNET, alpha=0.15, zorder=1
     )
 
     # Annotate 5% low-data label efficiency (+53.46% absolute margin over standard UNet; 12.4x higher)

@@ -47,7 +47,9 @@ def compute_effective_rank(z: torch.Tensor) -> float:
         return 1.0
 
 
-def compute_representation_collapse_metrics(z: torch.Tensor) -> dict[str, float]:
+def compute_representation_collapse_metrics(
+    z: torch.Tensor, generator: torch.Generator | None = None
+) -> dict[str, float]:
     r"""
     Multi-Faceted Representation Collapse Diagnostic Suite.
     """
@@ -65,7 +67,10 @@ def compute_representation_collapse_metrics(z: torch.Tensor) -> dict[str, float]
 
     # Sample subset for pairwise similarity if token count is very large
     if N_total > 1000:
-        indices = torch.randperm(N_total, device=z_flat.device)[:1000]
+        if generator is None:
+            indices = torch.randperm(N_total, device=z_flat.device)[:1000]
+        else:
+            indices = torch.randperm(N_total, generator=generator)[:1000].to(z_flat.device)
         z_sample = z_flat[indices]
     else:
         z_sample = z_flat

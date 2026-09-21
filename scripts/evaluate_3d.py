@@ -102,6 +102,25 @@ def parse_args():
         default=False,
         help="4-fold orthogonal-reflection test-time augmentation (original + flip X/Y/Z)",
     )
+    parser.add_argument(
+        "--deep_supervision",
+        action="store_true",
+        default=False,
+        help="Model was trained with deep supervision (enables multi-head checkpoint loading)",
+    )
+    parser.add_argument(
+        "--voxel_spacing",
+        type=float,
+        nargs=3,
+        default=(1.0, 1.0, 1.0),
+        help="Physical voxel spacing in mm (dz, dy, dx) for HD95; use nominal grid units if resampled",
+    )
+    parser.add_argument(
+        "--no_write",
+        action="store_true",
+        default=False,
+        help="Skip writing benchmark CSVs (for smoke tests)",
+    )
     return parser.parse_args()
 
 
@@ -112,6 +131,7 @@ def benchmark_model(
     amp: bool = True,
     smoke_test: bool = False,
     tta: bool = False,
+    voxel_spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
 ) -> dict[str, float]:
     model.eval()
     dices, ious, hd95s, latencies = [], [], [], []
@@ -141,7 +161,9 @@ def benchmark_model(
             t1 = time.perf_counter()
             latencies.append((t1 - t0) * 1000.0)  # ms per volume
 
-            metrics = compute_volumetric_metrics_3d(logits, masks)
+            metrics = compute_volumetric_metrics_3d(
+                logits, masks, voxel_spacing=voxel_spacing
+            )
             dices.extend(metrics["dice_per_sample"])
             ious.extend(metrics["iou_per_sample"])
             hd95s.extend(metrics["hd95_per_sample"])
@@ -150,13 +172,13 @@ def benchmark_model(
                 break
 
     return {
-        "dice_mean": float(np.mean(dices)) if dices else 0.0,
-        "dice_std": float(np.std(dices)) if dices else 0.0,
-        "iou_mean": float(np.mean(ious)) if ious else 0.0,
-        "iou_std": float(np.std(ious)) if ious else 0.0,
-        "hd95_mean": float(np.mean(hd95s)) if hd95s else 0.0,
-        "hd95_std": float(np.std(hd95s)) if hd95s else 0.0,
-        "latency_ms": float(np.mean(latencies)) if latencies else 0.0,
+        "dice_mean": float(np.nanmean(dices)) if dices else 0.0,
+        "dice_std": float(np.nanstd(dices)) if dices else 0.0,
+        "iou_mean": float(np.nanmean(ious)) if ious else 0.0,
+        "iou_std": float(np.nanstd(ious)) if ious else 0.0,
+        "hd95_mean": float(np.nanmean(hd95s)) if hd95s else 0.0,
+        "hd95_std": float(np.nanstd(hd95s)) if hd95s else 0.0,
+        "latency_ms": float(np.nanmean(latencies)) if latencies else 0.0,
     }
 
 
@@ -427,7 +449,7 @@ def main():
 
         seg_stats = benchmark_model(
             model, test_loader, device, amp=args.amp, smoke_test=args.smoke_test,
-            tta=args.tta,
+            tta=args.tta, voxel_spacing=tuple(args.voxel_spacing),
         )
 
         results.append(
@@ -475,6 +497,10 @@ def main():
         df = df_new
 
     df = df.dropna(subset=["Model"]).reset_index(drop=True)
+    if args.no_write or args.smoke_test:
+        logger.info("Skipping benchmark CSV writes (--no_write/smoke_test).")
+        print("\n" + df.to_string(index=False) + "\n")
+        return
     df.to_csv(csv_path, index=False)
     df.to_csv(master_csv_path, index=False)
     with open(md_path, "w", encoding="utf-8") as f:

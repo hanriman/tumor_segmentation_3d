@@ -1,3 +1,4 @@
+import logging
 import math
 
 import torch
@@ -5,6 +6,8 @@ import torch.nn.functional as F
 from torch import nn
 
 from .ijepa_loss import IJEPALoss
+
+logger = logging.getLogger(__name__)
 
 
 class EppsPulleyGaussianityTest(nn.Module):
@@ -127,6 +130,11 @@ class SigRegLoss(nn.Module):
     ) -> dict[str, torch.Tensor]:
         j_loss = self.jepa_loss(predictions, targets)
 
+        if tokens is not None and projected_tokens is not None:
+            logger.warning(
+                "SigRegLoss: both `tokens` and `projected_tokens` given — "
+                "using `tokens` (encoder space). Prefer `projected_tokens` only."
+            )
         reg_tokens = (
             tokens
             if tokens is not None

@@ -362,6 +362,8 @@ def main():
             split_map[pid] = "train"
     elif split_map is None:
         # Very small subset (e.g. limit=1 or 2 for debugging/smoke test)
+        # WARNING: DEBUG ONLY — same patients are duplicated across train/val/test,
+        # so any metric on this split is inflated. Never report beyond smoke.
         split_map = {pid: "train" for pid in pids}
         # Duplicate rows for val and test so loaders find records
         val_df = df.copy()

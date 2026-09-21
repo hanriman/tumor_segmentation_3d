@@ -303,6 +303,8 @@ def main():
     )
 
     tracker = MetricTracker()
+    reg_generator = torch.Generator()
+    reg_generator.manual_seed(args.seed ^ 0x9E3779B9)
     logger.info(
         f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}"
     )
@@ -343,6 +345,7 @@ def main():
                         out["predictions"],
                         out["targets"],
                         projected_tokens=out["projected_tokens"],
+                        generator=reg_generator,
                     )
                     loss = loss_dict["loss"]
 
@@ -425,6 +428,7 @@ def main():
                             val_out["predictions"],
                             val_out["targets"],
                             projected_tokens=val_out["projected_tokens"],
+                            generator=reg_generator,
                         )
                         v_loss = v_loss_dict["loss"]
 

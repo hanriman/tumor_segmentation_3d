@@ -55,6 +55,11 @@ class BraTS3DnnUNet(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor | list[torch.Tensor]:
         out = self.dynunet(x)
         if isinstance(out, torch.Tensor) and out.dim() == 6:
+            # Contract: MONAI DynUNet stacks heads dim-1 with index 0 = full
+            # resolution; assert rather than silently misassigning DS weights.
+            assert out.shape[1] == (self.dynunet.deep_supr_num + 1) if self.deep_supervision else True, (
+                f"DynUNet head count {out.shape[1]} unexpected; verify MONAI version ordering."
+            )
             if self.training and self.deep_supervision:
                 return [out[:, i] for i in range(out.shape[1])]
             return out[:, 0]

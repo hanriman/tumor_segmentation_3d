@@ -19,6 +19,6 @@ augmentations:
 masking:
   num_target_cuboids: 4
   target_cuboid_size: [3, 3, 3]    # 27 patches each
-  max_target_overlap: 0.25
+  max_target_overlap: 0.0
   context_num_patches: 192         # Exactly 192 tokens (37.5% of 512)
   context_connectivity: 26         # 3D BFS connectivity

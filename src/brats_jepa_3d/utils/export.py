@@ -137,8 +137,9 @@ def export_artifacts(
 
     target_zip.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(target_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _, files in os.walk(target_export_dir):
-            for f in files:
+        for root, dirs, files in os.walk(target_export_dir):
+            dirs.sort()
+            for f in sorted(files):
                 fp = Path(root) / f
                 arcname = fp.relative_to(target_export_dir)
                 zf.write(fp, arcname=arcname)

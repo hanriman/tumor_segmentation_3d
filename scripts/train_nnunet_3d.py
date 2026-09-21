@@ -77,6 +77,13 @@ def parse_args():
     )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     parser.add_argument(
+        "--deep_supervision",
+        action="store_true",
+        default=True,
+        help="Enable deep supervision (default: ON)",
+    )
+    parser.add_argument("--no_deep_supervision", action="store_false", dest="deep_supervision")
+    parser.add_argument(
         "--loss_type", type=str, default="dice_bce", choices=["dice_bce", "tversky"],
         help="Overlap loss: symmetric Dice+BCE (default) or asymmetric Tversky(beta=0.7)+BCE",
     )
@@ -205,7 +212,7 @@ def main():
 
     criterion = build_segmentation_criterion(
         resolve_seg_loss_type(args),
-        deep_supervision=True,  # DeepSupervisionLoss3D degrades gracefully to base loss on single tensors
+        deep_supervision=args.deep_supervision,
         tversky_alpha=getattr(args, "tversky_alpha", 0.3),
         tversky_beta=getattr(args, "tversky_beta", 0.7),
     )

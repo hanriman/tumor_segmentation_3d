@@ -58,6 +58,12 @@ def parse_args():
         action="store_true",
         help="Skip building paper_artifacts.zip.",
     )
+    parser.add_argument(
+        "--test_n",
+        type=int,
+        default=None,
+        help="Held-out test split size for LaTeX caption (e.g. 242).",
+    )
     return parser.parse_args()
 
 
@@ -121,6 +127,7 @@ def main():
         low_data_df=low_data_df if not low_data_df.empty else None,
         ood_df=ood_df if not ood_df.empty else None,
         output_path=latex_path,
+        test_n=args.test_n,
     )
     print(f"✓ Saved LaTeX tables to: {latex_path}")
 
@@ -179,8 +186,9 @@ def main():
         if zip_path.exists():
             zip_path.unlink()
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for root, _, files in os.walk(staging_dir):
-                for f in files:
+            for root, dirs, files in os.walk(staging_dir):
+                dirs.sort()
+                for f in sorted(files):
                     fp = Path(root) / f
                     zf.write(fp, arcname=fp.relative_to(staging_dir))
 

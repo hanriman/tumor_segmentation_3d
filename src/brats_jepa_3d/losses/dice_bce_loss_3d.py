@@ -43,7 +43,11 @@ class VolumetricDiceLoss(nn.Module):
             else:
                 targets_long = targets.long()
             # Clamp to valid range
-            targets_long = targets_long.clamp(0, C - 1)
+            if targets_long.min() < 0 or targets_long.max() >= C:
+                raise ValueError(
+                    f"Target labels out of range [0, {C - 1}]: "
+                    f"got min={int(targets_long.min())}, max={int(targets_long.max())}."
+                )
             targets_bin = F.one_hot(targets_long, num_classes=C)  # [B, D, H, W, C]
             targets_bin = targets_bin.permute(0, 4, 1, 2, 3).float()  # [B, C, D, H, W]
 
@@ -119,7 +123,11 @@ class CombinedDiceBCELoss3D(nn.Module):
                 targets_long = targets[:, 0].long()
             else:
                 targets_long = targets.long()
-            targets_long = targets_long.clamp(0, C - 1)
+            if targets_long.min() < 0 or targets_long.max() >= C:
+                raise ValueError(
+                    f"Target labels out of range [0, {C - 1}]: "
+                    f"got min={int(targets_long.min())}, max={int(targets_long.max())}."
+                )
             # Mathematical Alignment: Supervise all voxels including background to penalize false positives
             ce = F.cross_entropy(logits, targets_long, ignore_index=-100)
 

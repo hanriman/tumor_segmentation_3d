@@ -1,3 +1,4 @@
+import logging
 import math
 
 import torch
@@ -5,6 +6,8 @@ import torch.nn.functional as F
 from torch import nn
 
 from .ijepa_loss import IJEPALoss
+
+logger = logging.getLogger(__name__)
 
 
 class VisRegLoss(nn.Module):
@@ -82,12 +85,12 @@ class VisRegLoss(nn.Module):
 
     def _center_loss(self, z: torch.Tensor) -> torch.Tensor:
         r"""Center regularization: (1/D) * ||mu_z||_2^2."""
-        mu = z.mean(dim=0)
+        mu = z.float().mean(dim=0)
         return torch.mean(mu**2)
 
     def _scale_loss(self, z: torch.Tensor) -> torch.Tensor:
         r"""Scale regularization: enforces coordinate-wise target standard deviation."""
-        std_z = torch.sqrt(z.var(dim=0, unbiased=False) + 1e-6)
+        std_z = torch.sqrt(z.float().var(dim=0, unbiased=False) + 1e-6)
         if self.scale_loss_type == "hinge":
             return torch.mean(F.relu(self.target_std - std_z))
         return torch.mean((self.target_std - std_z) ** 2)
@@ -143,6 +146,11 @@ class VisRegLoss(nn.Module):
     ) -> dict[str, torch.Tensor]:
         j_loss = self.jepa_loss(predictions, targets)
 
+        if tokens is not None and projected_tokens is not None:
+            logger.warning(
+                "VisRegLoss: both `tokens` and `projected_tokens` given — "
+                "using `tokens` (encoder space). Prefer `projected_tokens` only."
+            )
         reg_tokens = (
             tokens
             if tokens is not None

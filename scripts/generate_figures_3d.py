@@ -328,14 +328,9 @@ def main():
         fig_path = out_dir / "orthogonal_multi_planar_figure.png"
         plot_orthogonal_slices(vol, mask, pred_1ch=None, save_path=fig_path, patient_id=pid)
     else:
-        synth_vol = np.random.randn(4, 128, 128, 128).astype(np.float32)
-        synth_mask = np.zeros((1, 128, 128, 128), dtype=np.uint8)
-        synth_mask[0, 50:75, 50:75, 50:75] = 1
-        synth_pred = np.zeros((1, 128, 128, 128), dtype=np.uint8)
-        synth_pred[0, 52:77, 48:73, 50:75] = 1
-        fig_path = out_dir / "orthogonal_multi_planar_figure.png"
-        plot_orthogonal_slices(
-            synth_vol, synth_mask, synth_pred, save_path=fig_path, patient_id="Synthetic Volume"
+        raise FileNotFoundError(
+            "No processed volumes found for orthogonal figure — refusing to "
+            "render a synthetic publication figure. Run prepare_data_3d.py first."
         )
 
     # 2. Benchmark metric plots

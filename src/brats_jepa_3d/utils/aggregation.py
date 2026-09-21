@@ -35,12 +35,23 @@ def discover_experiment_directories(base_dir: Path | str | None = None) -> list[
 
 
 def parse_dice_value(val: Any) -> float:
-    """Extracts numeric mean Dice from strings like '69.62 ± 16.34' or '82.52%'."""
-    if pd.isna(val):
-        return 0.0
+    """Extracts numeric mean Dice from strings like '69.62 ± 16.34' or '82.52%'.
+
+    Unparseable / missing values return NaN so they sort last and never
+    outrank real measurements.
+    """
+    import math
+
+    if val is None:
+        return float("nan")
+    try:
+        if pd.isna(val):
+            return float("nan")
+    except (TypeError, ValueError):
+        pass
     val_str = str(val).strip()
     match = re.search(r"(\d+(?:\.\d+)?)", val_str)
-    return float(match.group(1)) if match else 0.0
+    return float(match.group(1)) if match else float("nan")
 
 
 def aggregate_master_benchmarks(
@@ -92,7 +103,7 @@ def aggregate_master_benchmarks(
     # dropped rows are logged so no run disappears silently.
     if dice_col:
         combined["_sort_dice"] = combined[dice_col].apply(parse_dice_value)
-        combined = combined.sort_values(by="_sort_dice", ascending=False)
+        combined = combined.sort_values(by="_sort_dice", ascending=False, na_position="last")
         grouped = combined.groupby(model_col)["_sort_dice"]
         n_runs = grouped.size().rename("n_runs")
         dice_std = grouped.std(ddof=0).fillna(0.0).rename("dice_std")
@@ -253,6 +264,23 @@ def aggregate_ood_summaries(
     return merged_df
 
 
+def _latex_escape(val: Any) -> str:
+    """Escapes LaTeX special characters in table cells."""
+    s = str(val)
+    return (
+        s.replace("\\", "\\textbackslash{}")
+        .replace("&", "\\&")
+        .replace("%", "\\%")
+        .replace("$", "\\$")
+        .replace("#", "\\#")
+        .replace("_", "\\_")
+        .replace("{", "\\{")
+        .replace("}", "\\}")
+        .replace("~", "\\textasciitilde{}")
+        .replace("^", "\\textasciicircum{}")
+    )
+
+
 def export_latex_tables(
     master_df: pd.DataFrame | None = None,
     low_data_df: pd.DataFrame | None = None,
@@ -278,11 +306,11 @@ def export_latex_tables(
         col_spec = "l" + "c" * (len(master_df.columns) - 1)
         sections.append(f"\\begin{{tabular}}{{{col_spec}}}")
         sections.append("\\toprule")
-        header_cols = [f"\\textbf{{{c}}}" for c in master_df.columns]
+        header_cols = [f"\\textbf{{{_latex_escape(c)}}}" for c in master_df.columns]
         sections.append(" & ".join(header_cols) + " \\\\")
         sections.append("\\midrule")
         for _, row in master_df.iterrows():
-            row_str = " & ".join(str(val) for val in row.values) + " \\\\"
+            row_str = " & ".join(_latex_escape(val) for val in row.values) + " \\\\"
             sections.append(row_str)
         sections.append("\\bottomrule")
         sections.append("\\end{tabular}%")
@@ -298,11 +326,11 @@ def export_latex_tables(
         col_spec = "l" + "c" * (len(low_data_df.columns) - 1)
         sections.append(f"\\begin{{tabular}}{{{col_spec}}}")
         sections.append("\\toprule")
-        header_cols = [f"\\textbf{{{c}}}" for c in low_data_df.columns]
+        header_cols = [f"\\textbf{{{_latex_escape(c)}}}" for c in low_data_df.columns]
         sections.append(" & ".join(header_cols) + " \\\\")
         sections.append("\\midrule")
         for _, row in low_data_df.iterrows():
-            row_str = " & ".join(str(val) for val in row.values) + " \\\\"
+            row_str = " & ".join(_latex_escape(val) for val in row.values) + " \\\\"
             sections.append(row_str)
         sections.append("\\bottomrule")
         sections.append("\\end{tabular}")
@@ -318,11 +346,11 @@ def export_latex_tables(
         col_spec = "l" + "c" * (len(ood_df.columns) - 1)
         sections.append(f"\\begin{{tabular}}{{{col_spec}}}")
         sections.append("\\toprule")
-        header_cols = [f"\\textbf{{{c}}}" for c in ood_df.columns]
+        header_cols = [f"\\textbf{{{_latex_escape(c)}}}" for c in ood_df.columns]
         sections.append(" & ".join(header_cols) + " \\\\")
         sections.append("\\midrule")
         for _, row in ood_df.iterrows():
-            row_str = " & ".join(str(val) for val in row.values) + " \\\\"
+            row_str = " & ".join(_latex_escape(val) for val in row.values) + " \\\\"
             sections.append(row_str)
         sections.append("\\bottomrule")
         sections.append("\\end{tabular}%")

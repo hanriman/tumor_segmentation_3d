@@ -178,9 +178,9 @@ To isolate non-collapse regularization from spatial representations, context tok
     \begin{equation}
         \mathcal{L}_{\text{scale}}(\mathbf{Z}) = \frac{1}{d_p} \sum_{d=1}^{d_p} (1.0 - \sigma_d)^2
     \end{equation}
-    \item \textbf{Feature Standardization}: Tokens are standardized with a stop-gradient operator on the scale:
+    \item \textbf{Feature Standardization}: Tokens are standardized with stop-gradient on both mean and scale (center is handled only by $\mathcal{L}_{\text{center}}$):
     \begin{equation}
-        \mathbf{z}_{s, i, d} = \frac{z_{c, i, d}}{\text{sg}(\sigma_d) + \epsilon}
+        \mathbf{z}_{s, i, d} = \frac{\mathbf{z}_i - \text{sg}(\boldsymbol{\mu}_z)}{\text{sg}(\sigma_d) + \epsilon}
     \end{equation}
     ensuring $\mathbb{E}[\mathbf{z}_s] = \mathbf{0}$ and $\text{diag}(\text{Cov}(\mathbf{z}_s)) = \mathbf{I}_{d_p}$, completely isolating shape from scale.
     \item \textbf{Distributional Shape Regularization ($\mathcal{L}_{\text{shape}}$)}: $M = 256$ random 1D unit vectors $\mathbf{u}_m \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{d_p}) / \|\mathbf{u}_m\|_2$ are sampled. Standardized tokens are projected ($y_{i, m} = \mathbf{z}_{s, i}^T \mathbf{u}_m$) and sorted into order statistics $y_{(1), m} \le \dots \le y_{(T), m}$. The 1D Sliced-Wasserstein Distance against standard Gaussian quantiles is evaluated analytically:
@@ -317,7 +317,7 @@ Table~\ref{tab:low_data_results} and Figure~\ref{fig:low_data_efficiency} docume
 \begin{figure}[ht]
 \centering
 \includegraphics[width=0.82\textwidth]{figures/low_data_label_efficiency.pdf}
-\caption{\textbf{Downstream Volumetric Label Efficiency Benchmark.} 3D Volumetric Dice curves across 6 annotation tiers ($1\%$ to $100\%$ labels) with shaded error bands. At $5\%$ labels ($63$ volumes), 3D VisReg JEPA achieves a $+53.46\%$ absolute Dice gain over 3D Residual UNet ($58.16\%$ vs.\ $4.70\%$), and $+43.23\%$ at $1\%$ labels ($47.21\%$ vs.\ $3.98\%$), demonstrating that self-supervised latent pre-training effectively prevents background collapse in low-data regimes, though deeply supervised DynUNet achieves the highest Dice across all tiers ($56.65\%$ at $1\%$).}
+\caption{\textbf{Downstream Volumetric Label Efficiency Benchmark.} 3D Volumetric Dice means across 6 annotation tiers ($1\%$ to $100\%$ labels; single-seed, no error bands). At $5\%$ labels ($63$ volumes), 3D VisReg JEPA achieves a $+53.46\%$ absolute Dice gain over 3D Residual UNet ($58.16\%$ vs.\ $4.70\%$), and $+43.23\%$ at $1\%$ labels ($47.21\%$ vs.\ $3.98\%$), demonstrating that self-supervised latent pre-training effectively prevents background collapse in low-data regimes, though deeply supervised DynUNet achieves the highest Dice across all tiers ($56.65\%$ at $1\%$).}
 \label{fig:low_data_efficiency}
 \end{figure}
 
@@ -360,7 +360,7 @@ B1 Bias Field Inhomogeneity & 3D VisReg JEPA (FPN) & $59.98 \pm 18.20$ & $47.30 
 \begin{figure}[ht]
 \centering
 \includegraphics[width=0.92\textwidth]{figures/ood_domain_generalization.pdf}
-\caption{\textbf{Synthetic Scanner Shift Robustness.} (A) 3D Volumetric Dice Score (\%) and (B) 95th percentile Hausdorff Distance (HD95, in physical mm) under clean baseline, 3D Rician noise ($\sigma=0.08$), and quadratic $B_1$ bias fields.}
+\caption{\textbf{Synthetic Scanner Shift Robustness.} (A) 3D Volumetric Dice Score (\%) and (B) 95th percentile Hausdorff Distance (HD95, nominal grid units) under clean baseline, 3D Rician noise ($\sigma=0.08$), and quadratic $B_1$ bias fields.}
 \label{fig:ood_synthetic}
 \end{figure}
 

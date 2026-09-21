@@ -133,7 +133,11 @@ class BraTS3DDataset(Dataset):
 
         # Apply 3D spatial and modality dropout augmentations
         if self.augmentations is not None:
-            aug_res = self.augmentations(image, mask, brain_mask=brain_mask)
+            _aug_gen = torch.Generator()
+            _aug_gen.manual_seed(
+                (torch.initial_seed() + idx * 104729 + self._mask_counter * 7919) % 2**32
+            )
+            aug_res = self.augmentations(image, mask, brain_mask=brain_mask, generator=_aug_gen)
             if len(aug_res) == 3:
                 image, mask, brain_mask = aug_res
             else:

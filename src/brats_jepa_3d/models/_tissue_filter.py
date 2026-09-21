@@ -1,4 +1,8 @@
+import logging
+
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 def filter_tissue_tokens(
@@ -26,8 +30,18 @@ def filter_tissue_tokens(
             f"filter_tissue_tokens expects 3D [B, N_ctx, proj_dim], got {tuple(projected_tokens.shape)}."
         )
     if tissue_mask is None:
+        logger.warning(
+            "filter_tissue_tokens: tissue_mask is None — regularizer sees unfiltered "
+            "tokens including air padding."
+        )
         return projected_tokens
     if tissue_mask.dim() != 2 or tissue_mask.shape != projected_tokens.shape[:2]:
+        logger.warning(
+            "filter_tissue_tokens: malformed tissue_mask %s vs tokens %s — "
+            "returning unfiltered tokens.",
+            tuple(tissue_mask.shape),
+            tuple(projected_tokens.shape),
+        )
         return projected_tokens
     mask = tissue_mask.to(device=projected_tokens.device, dtype=torch.bool)
     kept = [

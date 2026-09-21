@@ -229,8 +229,8 @@ class HybridUNETRDecoder3D(nn.Module):
 
     Stages 1-2, all ViT lateral skips, DS heads, and train/eval conventions are
     identical to MultiScaleViTSegmentationDecoder3D, so pre-trained FPN weights
-    transfer with strict=False (only fuse3/up4/fuse4/head differ in shape and
-    re-initialize; the stem is always trained fresh during finetuning).
+    transfer with strict=False (only fuse3/fuse4 differ in shape plus the fresh
+    stem; up4/head are shape-identical to the multiscale decoder and transfer).
     """
 
     def __init__(
@@ -377,8 +377,10 @@ class HybridUNETRDecoder3D(nn.Module):
         else:
             B = x2.shape[0]
             dev, dt = x2.device, x2.dtype
-            f64 = torch.zeros(B, 32, 64, 64, 64, device=dev, dtype=dt)
-            f128 = torch.zeros(B, 16, 128, 128, 128, device=dev, dtype=dt)
+            s64 = x2.shape[-3:]
+            s128 = (s64[0] * 2, s64[1] * 2, s64[2] * 2)
+            f64 = torch.zeros(B, 32, *s64, device=dev, dtype=dt)
+            f128 = torch.zeros(B, 16, *s128, device=dev, dtype=dt)
 
         # Stage 3: 32^3 -> 64^3 with stem fusion
         x3 = self.up3(x2)
@@ -455,6 +457,12 @@ class JEPASegmentationModel3D(nn.Module):
         if freeze_encoder:
             for p in self.encoder.parameters():
                 p.requires_grad = False
+        if decoder_type == "bottleneck" and deep_supervision:
+            import logging as _logging
+
+            _logging.getLogger(__name__).warning(
+                "bottleneck decoder has no DS heads — training without deep supervision."
+            )
 
     def load_pretrained_encoder(self, state_dict: dict):
         r"""

@@ -20,7 +20,14 @@ def set_seed(seed: int | None = None, deterministic: bool = True) -> None:
     """
     if seed is None:
         seed = int(os.environ.get("BRATS3D_SEED", "42"))
-    elif seed == 42 and "BRATS3D_SEED" in os.environ:
+    elif "BRATS3D_SEED" in os.environ and int(os.environ["BRATS3D_SEED"]) != seed:
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "BRATS3D_SEED=%s overrides explicit seed=%d; using env value.",
+            os.environ["BRATS3D_SEED"],
+            seed,
+        )
         seed = int(os.environ["BRATS3D_SEED"])
 
     random.seed(seed)
