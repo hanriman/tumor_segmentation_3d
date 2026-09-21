@@ -223,3 +223,108 @@ def test_residual_tissue_filter_rejects_non3d():
 
     with pytest.raises(ValueError):
         filter_tissue_tokens(torch.randn(100, 128), torch.ones(1, 8, dtype=torch.bool))
+
+
+def test_f1_dropout_disabled_restores_probs():
+    """dropout_disabled preserves mode and restores Dropout/Attention probs."""
+    from brats_jepa_3d.models import VisRegJEPA3D
+    from brats_jepa_3d.models.vision_transformer_3d import dropout_disabled
+
+    torch.manual_seed(0)
+    model = VisRegJEPA3D()
+    for block in model.context_encoder.blocks:
+        for m in block.modules():
+            if isinstance(m, torch.nn.Dropout):
+                m.p = 0.5
+            if isinstance(m, torch.nn.MultiheadAttention):
+                m.dropout = 0.2
+    model.train()
+    B, N_ctx, N_tgt = 1, 8, 4
+    images = torch.randn(B, 4, 128, 128, 128)
+    ctx = torch.randint(0, 512, (B, N_ctx))
+    tgt = [torch.randint(0, 512, (B, N_tgt))]
+    with dropout_disabled(model.context_encoder):
+        for m in model.context_encoder.modules():
+            if isinstance(m, torch.nn.Dropout):
+                assert m.p == 0.0
+    out = model(images, ctx, tgt)
+    assert model.training and model.context_encoder.training
+    for block in model.context_encoder.blocks:
+        for m in block.modules():
+            if isinstance(m, torch.nn.Dropout):
+                assert m.p == 0.5
+            if isinstance(m, torch.nn.MultiheadAttention):
+                assert float(m.dropout) == 0.2
+    out["predictions"][0].mean().backward()
+
+
+def test_f3_ood_preserves_negatives():
+    """Sign-preserving OOD: tissue negatives survive Rician/B1; air models differ."""
+    neg = -1.5 * torch.ones(2, 4, 8, 8, 8)
+    neg[:, :, 0:2] = 0.0
+    bm = torch.ones_like(neg)
+    bm[:, :, 0:2] = 0.0
+    torch.manual_seed(0)
+    r = apply_rician_noise_3d(neg, sigma=0.05, brain_mask=bm)
+    assert (r[bm > 0] < 0).any().item(), "Rician rectified all negatives"
+    assert (r[bm == 0] != 0).any().item(), "air must carry Rayleigh noise"
+    b = apply_b1_bias_field_3d(neg, strength=0.3, brain_mask=bm)
+    assert (b[bm > 0] < 0).any().item(), "B1 must preserve negative contrast"
+    assert (b[bm == 0] == 0).all().item(), "B1 air stays zero"
+
+
+def test_f10_tversky_include_background_flag():
+    """Raw Tversky honors include_background for multi-class; binary invariant."""
+    from brats_jepa_3d.losses import VolumetricTverskyLoss
+
+    torch.manual_seed(0)
+    logits_m = torch.randn(2, 4, 8, 8, 8)
+    target_m = torch.randint(0, 4, (2, 1, 8, 8, 8)).float()
+    t_true = VolumetricTverskyLoss(include_background=True)(logits_m, target_m).item()
+    t_false = VolumetricTverskyLoss(include_background=False)(logits_m, target_m).item()
+    assert t_true != t_false
+    logits_b = torch.randn(2, 1, 8, 8, 8)
+    target_b = (torch.rand(2, 1, 8, 8, 8) > 0.9).float()
+    b_true = VolumetricTverskyLoss(include_background=True)(logits_b, target_b).item()
+    b_false = VolumetricTverskyLoss(include_background=False)(logits_b, target_b).item()
+    assert b_true == b_false
+
+
+def test_f9_aggregation_reports_dice_std(tmp_path):
+    """Master aggregation keeps best row but reports n_runs + dice_std."""
+    import pandas as pd
+
+    from brats_jepa_3d.utils.aggregation import aggregate_master_benchmarks
+
+    for i, dice in enumerate(["70.0 ± 1.0", "80.0 ± 1.0"]):
+        d = tmp_path / f"exp{i}"
+        (d / "metrics").mkdir(parents=True)
+        pd.DataFrame([{"Model Architecture": "3D VisReg JEPA (FPN)", "Dice (%)": dice}]).to_csv(
+            d / "metrics" / "master_3d_benchmark.csv", index=False
+        )
+    df = aggregate_master_benchmarks([tmp_path / "exp0", tmp_path / "exp1"])
+    assert len(df) == 1
+    assert df.iloc[0]["n_runs"] == 2
+    assert df.iloc[0]["dice_std"] >= 0.0
+    assert "80.0" in str(df.iloc[0]["Dice (%)"])
+
+
+def test_f5_hd95_per_volume_determinism():
+    """Same pair reproducible; different volumes valid; cap keeps it fast."""
+    import numpy as np
+    import time
+
+    from brats_jepa_3d.metrics import compute_hd95_3d
+
+    rng = np.random.default_rng(0)
+    a = (rng.random((32, 32, 32)) > 0.7).astype(np.float32)
+    b = (rng.random((32, 32, 32)) > 0.7).astype(np.float32)
+    h1 = compute_hd95_3d(a, b)
+    h2 = compute_hd95_3d(a, b)
+    assert h1 == h2
+    c = (rng.random((48, 48, 48)) > 0.7).astype(np.float32)
+    d = (rng.random((48, 48, 48)) > 0.7).astype(np.float32)
+    t0 = time.perf_counter()
+    h3 = compute_hd95_3d(c, d)
+    assert time.perf_counter() - t0 < 10.0
+    assert np.isfinite(h3)
