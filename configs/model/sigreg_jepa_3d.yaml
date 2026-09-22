@@ -17,3 +17,4 @@ num_projections: 256
 t_max: 3.0
 n_knots: 17
 loss_type: "smooth_l1"
+out_channels: 5

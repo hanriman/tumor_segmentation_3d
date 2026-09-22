@@ -20,3 +20,4 @@ target_std: 1.0
 swd_metric: "mse"         # "mse" for W_2^2, "l1" for W_1
 scale_loss_type: "squared" # Two-sided squared variance penalty
 loss_type: "smooth_l1"
+out_channels: 5

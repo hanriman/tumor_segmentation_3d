@@ -1,6 +1,6 @@
 # Plan: Migrate from Binary Whole-Tumor to BraTS Three-Region Segmentation (WT/TC/ET)
 
-**Status:** Phase 0 + Phase 1 done (branch `feat/multiregion-wt-tc-et`); Phase 2 (UNet end-to-end) next, needs GPU. Tracked on branch `feat/multiregion-wt-tc-et` (cut after committing the 01/07/08 notebook split on main).
+**Status:** Phase 0 + Phase 1 done, Phase 2 code (out_channels/configs/eval-region rows) done on branch `feat/multiregion-wt-tc-et`; UNet full-data gate training needs GPU. Tracked on branch `feat/multiregion-wt-tc-et` (cut after committing the 01/07/08 notebook split on main).
 **Motivation:** the current pipeline segments binary whole-tumor (tumor yes/no); the BraTS community standard scores three overlapping regions (WT/TC/ET). See the Task Scope discussion: WT-only blocks leaderboard comparability and hides ET-specific failure modes.
 **Representativeness note:** this is a supervised-side-only migration. SSL pretraining is label-free and untouched; the 100-epoch encoder investment is preserved.
 
@@ -60,8 +60,8 @@ This is the community-standard recipe. Consequences:
 
 **Files:** `scripts/train_downstream_3d.py` (plus UNet/nnU-Net trainers), `configs/`, `scripts/evaluate_*.py`
 
-- [ ] Thread `out_channels=5` (via config, not hardcoded) through `JEPASegmentationModel3D`, `BraTS3DUNet`, `BraTS3DnnUNet` — deep-supervision heads adapt automatically (1×1×1 convolutions). Old C=1 checkpoints will not load into C=5 heads: expected, document it, no compatibility shim.
-- [ ] Rewire the three eval scripts to region evaluation (WT/TC/ET tables instead of a single Dice). Keep CSV shapes aggregation-friendly: one row per (model, region) or region-suffixed columns — decide once, since `combine_and_generate_paper_artifacts.py` must parse it.
+- [x] Thread `out_channels=5` (via config, not hardcoded) through `JEPASegmentationModel3D`, `BraTS3DUNet`, `BraTS3DnnUNet` — deep-supervision heads adapt automatically (1×1×1 convolutions). Old C=1 checkpoints will not load into C=5 heads: expected, document it, no compatibility shim. Configs set on-branch; `num_classes` threaded through criterion factory + low-data; validation reports WT-region score for model selection.
+- [x] Rewire the three eval scripts to region evaluation: `evaluate_3d` emits one row per (model, region) (`Model [WT/TC/ET]`); low-data/OOD report WT-region score (tiers/regimes stay comparable). `tta_predict_logits` dispatches binary/multiclass TTA by output channels.
 - [ ] Train **UNet only**, full data, and confirm: sane WT (≈ current 87%), TC lower, ET lowest with higher variance. If ET collapses (tiny-structure instability), add region-weighted Dice or per-region Tversky *before* touching other arms.
 - [ ] Gate: UNet 3-region results plausible → proceed; otherwise fix loss weighting, not architectures.
 

@@ -37,6 +37,7 @@ class BraTS3DnnUNet(nn.Module):
             filters = [32, 64, 128, 256, 512]
 
         self.deep_supervision = deep_supervision
+        self.out_channels = out_channels
         self.dynunet = DynUNet(
             spatial_dims=3,
             in_channels=in_channels,

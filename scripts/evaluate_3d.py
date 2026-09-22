@@ -27,6 +27,7 @@ from brats_jepa_3d.config import (
 )
 from brats_jepa_3d.data import BraTS3DDataset
 from brats_jepa_3d.metrics import (
+    compute_brats_regions_3d,
     compute_representation_collapse_metrics,
     compute_volumetric_metrics_3d,
 )
@@ -38,7 +39,7 @@ from brats_jepa_3d.models import (
 from brats_jepa_3d.utils import (
     get_autocast_context,
     get_device,
-    predict_with_tta_3d,
+    tta_predict_logits,
     set_seed,
     setup_logger,
     sort_checkpoints_by_epoch,
@@ -135,6 +136,7 @@ def benchmark_model(
 ) -> dict[str, float]:
     model.eval()
     dices, ious, hd95s, latencies = [], [], [], []
+    region_acc: dict[str, dict[str, list]] | None = None
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(loader, desc="Evaluating", leave=False)):
@@ -149,7 +151,7 @@ def benchmark_model(
 
             with get_autocast_context(device, enabled=amp):
                 if tta:
-                    logits = predict_with_tta_3d(model, images)
+                    logits = tta_predict_logits(model, images)
                 else:
                     out = model(images)
                     logits = out[0] if isinstance(out, (list, tuple)) else out
@@ -161,15 +163,47 @@ def benchmark_model(
             t1 = time.perf_counter()
             latencies.append((t1 - t0) * 1000.0)  # ms per volume
 
-            metrics = compute_volumetric_metrics_3d(
-                logits, masks, voxel_spacing=voxel_spacing
-            )
-            dices.extend(metrics["dice_per_sample"])
-            ious.extend(metrics["iou_per_sample"])
-            hd95s.extend(metrics["hd95_per_sample"])
+            metrics = None
+            if logits.shape[1] == 1:
+                metrics = compute_volumetric_metrics_3d(
+                    logits, masks, voxel_spacing=voxel_spacing
+                )
+                dices.extend(metrics["dice_per_sample"])
+                ious.extend(metrics["iou_per_sample"])
+                hd95s.extend(metrics["hd95_per_sample"])
+            else:
+                # Multi-class protocol: accumulate per-region sample metrics.
+                if region_acc is None:
+                    region_acc = {}
+                res = compute_brats_regions_3d(
+                    logits, masks, voxel_spacing=voxel_spacing
+                )
+                for rname, rmet in res.items():
+                    acc = region_acc.setdefault(
+                        rname, {"dice": [], "iou": [], "hd95": []}
+                    )
+                    acc["dice"].extend(rmet["dice_per_sample"])
+                    acc["iou"].extend(rmet["iou_per_sample"])
+                    acc["hd95"].extend(rmet["hd95_per_sample"])
 
             if smoke_test and batch_idx >= 1:
                 break
+
+    if region_acc is not None:
+        out: dict[str, float] = {
+            "latency_ms": float(np.nanmean(latencies)) if latencies else 0.0,
+            "regions": {},
+        }
+        for rname, acc in region_acc.items():
+            out["regions"][rname] = {
+                "dice_mean": float(np.nanmean(acc["dice"])) if acc["dice"] else 0.0,
+                "dice_std": float(np.nanstd(acc["dice"])) if acc["dice"] else 0.0,
+                "iou_mean": float(np.nanmean(acc["iou"])) if acc["iou"] else 0.0,
+                "iou_std": float(np.nanstd(acc["iou"])) if acc["iou"] else 0.0,
+                "hd95_mean": float(np.nanmean(acc["hd95"])) if acc["hd95"] else 0.0,
+                "hd95_std": float(np.nanstd(acc["hd95"])) if acc["hd95"] else 0.0,
+            }
+        return out
 
     return {
         "dice_mean": float(np.nanmean(dices)) if dices else 0.0,
@@ -452,17 +486,35 @@ def main():
             tta=args.tta, voxel_spacing=tuple(args.voxel_spacing),
         )
 
-        results.append(
-            {
-                "Model": label,
-                "Dice (%)": f"{seg_stats['dice_mean'] * 100:.2f} ± {seg_stats['dice_std'] * 100:.2f}",
-                "IoU (%)": f"{seg_stats['iou_mean'] * 100:.2f} ± {seg_stats['iou_std'] * 100:.2f}",
-                "HD95 (mm)": f"{seg_stats['hd95_mean']:.2f} ± {seg_stats['hd95_std']:.2f}",
-                "Latency (ms)": f"{seg_stats['latency_ms']:.2f}",
-                "EffRank (S²)": erank,
-                "Centered CosSim": cossim,
-            }
-        )
+        if "regions" in seg_stats:
+            # Multi-class protocol: one row per (model, region); WT first.
+            for rname in ("WT", "TC", "ET"):
+                if rname not in seg_stats["regions"]:
+                    continue
+                rs = seg_stats["regions"][rname]
+                results.append(
+                    {
+                        "Model": f"{label} [{rname}]",
+                        "Dice (%)": f"{rs['dice_mean'] * 100:.2f} ± {rs['dice_std'] * 100:.2f}",
+                        "IoU (%)": f"{rs['iou_mean'] * 100:.2f} ± {rs['iou_std'] * 100:.2f}",
+                        "HD95 (mm)": f"{rs['hd95_mean']:.2f} ± {rs['hd95_std']:.2f}",
+                        "Latency (ms)": f"{seg_stats['latency_ms']:.2f}",
+                        "EffRank (S²)": erank,
+                        "Centered CosSim": cossim,
+                    }
+                )
+        else:
+            results.append(
+                {
+                    "Model": label,
+                    "Dice (%)": f"{seg_stats['dice_mean'] * 100:.2f} ± {seg_stats['dice_std'] * 100:.2f}",
+                    "IoU (%)": f"{seg_stats['iou_mean'] * 100:.2f} ± {seg_stats['iou_std'] * 100:.2f}",
+                    "HD95 (mm)": f"{seg_stats['hd95_mean']:.2f} ± {seg_stats['hd95_std']:.2f}",
+                    "Latency (ms)": f"{seg_stats['latency_ms']:.2f}",
+                    "EffRank (S²)": erank,
+                    "Centered CosSim": cossim,
+                }
+            )
 
         del model
         gc.collect()

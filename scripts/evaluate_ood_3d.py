@@ -34,7 +34,7 @@ from brats_jepa_3d.data import (
     apply_b1_bias_field_3d,
     apply_rician_noise_3d,
 )
-from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
+from brats_jepa_3d.metrics import compute_volumetric_metrics_3d, validation_dice_iou
 from brats_jepa_3d.models import (
     BraTS3DnnUNet,
     BraTS3DUNet,
@@ -45,7 +45,7 @@ from brats_jepa_3d.utils import (
     dataset_fingerprint,
     get_autocast_context,
     get_device,
-    predict_with_tta_3d,
+    tta_predict_logits,
     set_seed,
     setup_logger,
     sort_checkpoints_by_epoch,
@@ -101,13 +101,17 @@ def evaluate_perturbation(
 
             with get_autocast_context(device, enabled=amp):
                 if tta:
-                    logits = predict_with_tta_3d(model, images)
+                    logits = tta_predict_logits(model, images)
                 else:
                     out = model(images)
                     logits = out[0] if isinstance(out, (list, tuple)) else out
 
-            metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
-            dices.extend(metrics["dice_per_sample"])
+            if logits.shape[1] == 1:
+                metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
+                dices.extend(metrics["dice_per_sample"])
+            else:
+                # Multi-class protocol: WT-region score keeps regimes comparable.
+                dices.append(validation_dice_iou(logits, masks)[0])
             if smoke_test and batch_idx >= 1:
                 break
     return float(np.mean(dices)) if dices else 0.0

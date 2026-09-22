@@ -11,6 +11,33 @@ def _model_logits(model: torch.nn.Module, volume: torch.Tensor) -> torch.Tensor:
     return out[0] if isinstance(out, (list, tuple)) else out
 
 
+def model_out_channels(model: torch.nn.Module) -> int | None:
+    """Best-effort output-channel probe for TTA dispatch (None if unknown)."""
+    for obj in (model, getattr(model, "decoder", None), getattr(model, "unet", None),
+                getattr(model, "dynunet", None)):
+        if obj is None:
+            continue
+        head = getattr(obj, "head", None)
+        if head is not None and hasattr(head, "out_channels"):
+            return int(head.out_channels)
+        if hasattr(obj, "out_channels") and isinstance(obj.out_channels, int):
+            return int(obj.out_channels)
+    return None
+
+
+def tta_predict_logits(model: torch.nn.Module, volume: torch.Tensor) -> torch.Tensor:
+    """TTA dispatch: binary flipped-sigmoid average for C=1, softmax average
+    for multi-class. Channel count comes from the model when known, else from
+    a single probe forward (no grad)."""
+    n_ch = model_out_channels(model)
+    if n_ch is None:
+        with torch.no_grad():
+            n_ch = _model_logits(model, volume[:1]).shape[1]
+    if n_ch == 1:
+        return predict_with_tta_3d(model, volume)
+    return predict_with_tta_multiclass_3d(model, volume)
+
+
 def predict_with_tta_3d(
     model: torch.nn.Module, volume: torch.Tensor
 ) -> torch.Tensor:

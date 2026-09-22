@@ -111,3 +111,62 @@ def test_tta_multiclass_contract_and_binary_guard():
             predict_with_tta_3d(_Fixed(4).eval(), vol)
         with pytest.raises(ValueError, match="C>=2"):
             predict_with_tta_multiclass_3d(m1, vol)
+
+
+def test_factory_num_classes_threading():
+    from brats_jepa_3d.losses import build_segmentation_criterion
+    legacy = build_segmentation_criterion("dice_bce", True)
+    assert legacy.base_loss.num_classes == 4
+    v2 = build_segmentation_criterion("dice_bce", True, num_classes=5)
+    assert v2.base_loss.num_classes == 5
+    torch.manual_seed(0)
+    logits = torch.randn(1, 5, 8, 8, 8, requires_grad=True)
+    target = torch.randint(0, 5, (1, 1, 8, 8, 8)).float()
+    loss = v2([logits], target)["loss"]
+    loss.backward()
+    assert torch.isfinite(loss).item()
+
+
+def test_models_out_channels_5():
+    from brats_jepa_3d.models import BraTS3DUNet, JEPASegmentationModel3D
+    torch.manual_seed(0)
+    unet = BraTS3DUNet(channels=(8, 16, 32, 64, 128), num_res_units=1, out_channels=5)
+    unet.train()
+    with torch.no_grad():
+        outs = unet(torch.randn(1, 4, 32, 32, 32))
+    assert [tuple(o.shape) for o in outs] == [
+        (1, 5, 32, 32, 32), (1, 5, 16, 16, 16), (1, 5, 8, 8, 8), (1, 5, 4, 4, 4)]
+    seg = JEPASegmentationModel3D(
+        img_size=(32, 32, 32), patch_size=(16, 16, 16), encoder_depth=1,
+        decoder_type="multiscale", out_channels=5)
+    seg.eval()
+    with torch.no_grad():
+        y = seg(torch.randn(1, 4, 32, 32, 32))
+    assert tuple(y.shape) == (1, 5, 32, 32, 32)
+
+
+def test_benchmark_model_region_rows():
+    import sys
+    sys.path.insert(0, "scripts")
+    from torch.utils.data import DataLoader
+
+    import evaluate_3d
+
+    torch.manual_seed(0)
+    base = torch.randn(1, 5, 16, 16, 16)
+
+    class _M(torch.nn.Module):
+        def forward(self, x):
+            return base.expand(x.shape[0], -1, -1, -1, -1)
+
+    data = [
+        {"image": torch.randn(4, 16, 16, 16),
+         "mask": torch.randint(0, 5, (1, 16, 16, 16)).float()}
+        for _ in range(2)
+    ]
+    loader = DataLoader(data, batch_size=1)
+    stats = evaluate_3d.benchmark_model(
+        _M().eval(), loader, torch.device("cpu"), amp=False, smoke_test=True)
+    assert set(stats["regions"]) == {"WT", "TC", "ET"}
+    assert stats["regions"]["WT"]["dice_mean"] >= 0.0
+    assert stats["latency_ms"] >= 0.0

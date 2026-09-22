@@ -22,14 +22,14 @@ from brats_jepa_3d.config import (
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
 from brats_jepa_3d.losses import build_segmentation_criterion, resolve_seg_loss_type
-from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
+from brats_jepa_3d.metrics import compute_volumetric_metrics_3d, validation_dice_iou
 from brats_jepa_3d.models import BraTS3DnnUNet, BraTS3DUNet, JEPASegmentationModel3D
 from brats_jepa_3d.utils import (
     check_pool_match,
     dataset_fingerprint,
     get_autocast_context,
     get_device,
-    predict_with_tta_3d,
+    tta_predict_logits,
     set_seed,
     setup_logger,
     sort_checkpoints_by_epoch,
@@ -99,11 +99,13 @@ def train_and_eval(
     loss_type: str = "dice_bce",
     tversky_alpha: float = 0.3,
     tversky_beta: float = 0.7,
+    num_classes: int | None = None,
     tta: bool = False,
 ) -> float:
     use_deep_supervision = getattr(model, "deep_supervision", False)
     criterion = build_segmentation_criterion(
-        loss_type, use_deep_supervision, tversky_alpha, tversky_beta
+        loss_type, use_deep_supervision, tversky_alpha, tversky_beta,
+        num_classes=num_classes,
     )
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=3e-4, weight_decay=1e-4)
@@ -164,12 +166,16 @@ def train_and_eval(
             masks = batch["mask"].to(device)
             with get_autocast_context(device, enabled=amp):
                 if tta:
-                    logits = predict_with_tta_3d(model, images)
+                    logits = tta_predict_logits(model, images)
                 else:
                     out = model(images)
                     logits = out[0] if isinstance(out, (list, tuple)) else out
-            metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
-            test_dices.extend(metrics["dice_per_sample"])
+            if logits.shape[1] == 1:
+                metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
+                test_dices.extend(metrics["dice_per_sample"])
+            else:
+                # Multi-class protocol: WT-region score keeps tiers comparable.
+                test_dices.append(validation_dice_iou(logits, masks)[0])
             if smoke_test and batch_idx >= 1:
                 break
 
@@ -264,7 +270,8 @@ def main():
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
                 decoder_type=args.decoder_type,
                 deep_supervision=True,
-            ).to(device)
+                out_channels=jepa_cfg.get("out_channels", 1),
+            ).to(device), jepa_cfg.get("out_channels", 1)
 
         jepa_prefixes = {
             "3D VisReg JEPA (FPN)": "visreg_jepa",
@@ -317,7 +324,9 @@ def main():
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
                 decoder_type=args.decoder_type,
                 deep_supervision=ds_flag,
+                out_channels=jepa_cfg.get("out_channels", 1),
             )
+            n_classes = jepa_cfg.get("out_channels", 1)
             ckpt = torch.load(ckpt_path, map_location=device)
             check_pool_match(
                 ckpt.get("pool_fingerprint"),
@@ -328,7 +337,7 @@ def main():
             logger.info(
                 f"Initialized {name} with pre-trained encoder weights from: {ckpt_path.name} ({res['loaded_keys']} keys)"
             )
-            return m.to(device)
+            return m.to(device), n_classes
 
         elif name == "3D nnU-Net":
             nnunet_cfg_path = CONFIGS_DIR / "model" / "nnunet_3d.yaml"
@@ -339,7 +348,7 @@ def main():
                 deep_supervision=nnunet_cfg.get("deep_supervision", True),
                 deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
                 res_block=nnunet_cfg.get("res_block", True),
-            ).to(device)
+            ).to(device), nnunet_cfg.get("out_channels", 1)
 
         elif name == "3D UNet":
             unet_cfg_path = CONFIGS_DIR / "model" / "unet_3d.yaml"
@@ -351,7 +360,7 @@ def main():
                 strides=tuple(unet_cfg.get("strides", (2, 2, 2, 2))),
                 num_res_units=unet_cfg.get("num_res_units", 2),
                 dropout=unet_cfg.get("dropout", 0.1),
-            ).to(device)
+            ).to(device), unet_cfg.get("out_channels", 1)
 
         else:
             raise ValueError(f"Unknown model name: {name}")
@@ -397,10 +406,11 @@ def main():
 
         row = {"Fraction": f"{frac * 100:.1f}%"}
         for name, _ in selected_models:
-            m = build_model(name)
-            if m is None:
+            built = build_model(name)
+            if built is None:
                 row[_display_name(name)] = "N/A"
                 continue
+            m, n_classes = built
             dice = train_and_eval(
                 m,
                 train_loader,
@@ -412,6 +422,7 @@ def main():
                 loss_type=resolve_seg_loss_type(args),
                 tversky_alpha=getattr(args, "tversky_alpha", 0.3),
                 tversky_beta=getattr(args, "tversky_beta", 0.7),
+                num_classes=n_classes,
                 tta=args.tta,
             )
             logger.info(f"{name} ({frac * 100:.1f}% labels) -> Test Dice: {dice * 100:.2f}%")

@@ -58,6 +58,7 @@ def compute_brats_regions_3d(
     target: torch.Tensor,
     regions: dict[str, tuple[int, ...]] | None = None,
     compute_hd95: bool = True,
+    voxel_spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
 ) -> dict[str, dict]:
     """Evaluates each BraTS region by calling the guarded binary metric suite
     once per region — inheriting NaN semantics, HD95, and nanmean aggregation
@@ -67,7 +68,20 @@ def compute_brats_regions_3d(
     tgt_masks = brats_region_masks_from_target(target, regions)
     return {
         name: compute_volumetric_metrics_3d(
-            pred_masks[name], tgt_masks[name], from_logits=False, compute_hd95=compute_hd95
+            pred_masks[name], tgt_masks[name], from_logits=False,
+            compute_hd95=compute_hd95, voxel_spacing=voxel_spacing,
         )
         for name in regions
     }
+
+
+def validation_dice_iou(
+    logits: torch.Tensor, masks: torch.Tensor
+) -> tuple[float, float]:
+    """Model-selection score honoring output channels: binary path as before,
+    multi-class path reports the WT region (comparable across protocols)."""
+    if logits.shape[1] == 1:
+        m = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
+        return float(m["dice"]), float(m["iou"])
+    res = compute_brats_regions_3d(logits, masks, compute_hd95=False)["WT"]
+    return float(res["dice"]), float(res["iou"])

@@ -5,6 +5,7 @@ from .regions import (
     brats_region_masks_from_logits,
     brats_region_masks_from_target,
     compute_brats_regions_3d,
+    validation_dice_iou,
 )
 from .volumetric_metrics import (
     compute_dice_score_3d,
@@ -25,4 +26,5 @@ __all__ = [
     "compute_iou_score_3d",
     "compute_representation_collapse_metrics",
     "compute_volumetric_metrics_3d",
+    "validation_dice_iou",
 ]

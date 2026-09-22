@@ -166,21 +166,28 @@ def build_segmentation_criterion(
     deep_supervision: bool = True,
     tversky_alpha: float = 0.3,
     tversky_beta: float = 0.7,
+    num_classes: int | None = None,
 ) -> nn.Module:
     """Shared criterion factory for all supervised 3D trainers (fair-benchmark parity).
 
     loss_type="dice_bce" (default) preserves the exact pre-existing behavior;
     loss_type="tversky" swaps the overlap term for the asymmetric Tversky loss
     while keeping BCE, DS weighting, and return-key contracts identical.
+
+    num_classes sets the multi-class width of the Dice term (one-hot size).
+    None keeps the legacy default (4); pass 5 for the BraTS 2024 region
+    protocol. Irrelevant for binary (C=1) logits. Tversky derives widths from
+    the logits themselves and needs no count.
     """
     if loss_type not in ("dice_bce", "tversky"):
         raise ValueError(f"Unknown loss_type: {loss_type}")
+    nc = num_classes if (num_classes and num_classes > 1) else 4
     if loss_type == "tversky":
         base: nn.Module = CombinedTverskyBCEWithLogitsLoss3D(
             alpha=tversky_alpha, beta=tversky_beta
         )
     else:
-        base = CombinedDiceBCELoss3D()
+        base = CombinedDiceBCELoss3D(num_classes=nc)
     if deep_supervision:
         return DeepSupervisionLoss3D(base_loss=base)
     return base

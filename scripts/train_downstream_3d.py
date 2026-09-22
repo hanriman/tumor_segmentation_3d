@@ -24,7 +24,7 @@ from brats_jepa_3d.config import (
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
 from brats_jepa_3d.losses import build_segmentation_criterion, resolve_seg_loss_type
-from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
+from brats_jepa_3d.metrics import compute_volumetric_metrics_3d, validation_dice_iou
 from brats_jepa_3d.models import JEPASegmentationModel3D
 from brats_jepa_3d.utils import (
     MetricTracker,
@@ -127,9 +127,16 @@ def evaluate(model, loader, device, amp: bool = True, smoke_test: bool = False) 
                 if isinstance(logits, (list, tuple)):
                     logits = logits[0]
 
-            metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
-            all_dices.extend(metrics["dice_per_sample"])
-            all_ious.extend(metrics["iou_per_sample"])
+            if logits.shape[1] == 1:
+                metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
+                all_dices.extend(metrics["dice_per_sample"])
+                all_ious.extend(metrics["iou_per_sample"])
+            else:
+                # Multi-class protocol: WT-region score keeps model selection
+                # comparable across protocols.
+                d, i = validation_dice_iou(logits, masks)
+                all_dices.append(d)
+                all_ious.append(i)
 
             if smoke_test and batch_idx >= 1:
                 break
@@ -301,6 +308,7 @@ def main():
         deep_supervision=args.deep_supervision,
         tversky_alpha=getattr(args, "tversky_alpha", 0.3),
         tversky_beta=getattr(args, "tversky_beta", 0.7),
+        num_classes=getattr(args, "out_channels", 1),
     )
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(

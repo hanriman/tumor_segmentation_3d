@@ -15,3 +15,4 @@ ema_start_momentum: 0.996
 ema_end_momentum: 1.0
 ema_anneal_epochs: 50
 loss_type: "smooth_l1"
+out_channels: 5
