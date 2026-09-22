@@ -88,6 +88,14 @@ def parse_args():
         default=42,
         help="Random seed for deterministic train/val/test patient splitting",
     )
+    parser.add_argument(
+        "--label_protocol",
+        type=str,
+        default="wt",
+        choices=["wt", "multiregion"],
+        help="wt: binary whole-tumor mask (legacy); multiregion: integer labels "
+        "0-4 + has_et/num_voxels_et (BraTS 2024 regions)",
+    )
     return parser.parse_args()
 
 
@@ -111,10 +119,15 @@ def zscore_normalize_non_zero(volume: np.ndarray, mask: np.ndarray | None = None
 
 
 def resample_3d_volume(
-    volume: np.ndarray, target_shape: tuple[int, int, int], is_mask: bool = False
+    volume: np.ndarray,
+    target_shape: tuple[int, int, int],
+    is_mask: bool = False,
+    preserve_labels: bool = False,
 ) -> np.ndarray:
     """
     Resamples 3D volume [D, H, W] to target_shape using trilinear (image) or nearest-neighbor (mask).
+    With preserve_labels=True (multiregion protocol), nearest-neighbor output is
+    rounded back to exact integers instead of binarized, preserving BraTS labels.
     """
     # Convert to torch tensor [1, 1, D, H, W]
     t = torch.from_numpy(volume).unsqueeze(0).unsqueeze(0).float()
@@ -133,14 +146,35 @@ def resample_3d_volume(
     )
 
     if is_mask:
+        if preserve_labels:
+            return np.rint(resampled.numpy()).astype(np.uint8)
         return (resampled > 0.5).to(torch.uint8).numpy()
     return resampled.numpy().astype(np.float32)
 
 
+#: Valid BraTS 2024 GLI labels: 0=background, 1=NCR, 2=ED, 3=NET, 4=ET.
+#: Verified on the full 1,350-volume training pool (Sep 2026).
+BRATS_GLI_LABELS = (0, 1, 2, 3, 4)
+#: Enhancing-tumor label for `has_et` / ET-region derivation.
+ET_LABEL = 4
+
+
 def process_patient(
-    patient_dir: Path, output_dir: Path, target_size: int = 128, dtype: str = "float16"
+    patient_dir: Path,
+    output_dir: Path,
+    target_size: int = 128,
+    dtype: str = "float16",
+    label_protocol: str = "wt",
 ) -> dict | None:
-    """Processes a single patient's 4 MRI sequences + segmentation into a 128^3 .npz."""
+    """Processes a single patient's 4 MRI sequences + segmentation into a 128^3 .npz.
+
+    label_protocol="wt" (default): binary whole-tumor mask `(seg > 0)` — legacy behavior.
+    label_protocol="multiregion": integer labels 0-4 preserved (nearest-neighbor +
+    round), raw values asserted to be within BRATS_GLI_LABELS (fail loud), and
+    `has_et` / `num_voxels_et` recorded. `num_voxels_tumor` stays the WT count in
+    both modes; every binary consumer uses `(mask > 0)`, so new files remain
+    backward compatible.
+    """
     pid = patient_dir.name
 
     # Find the 4 MRI sequence files and 1 segmentation file
@@ -192,7 +226,25 @@ def process_patient(
     t1c_resampled = resample_3d_volume(t1c_crop, target_shape, is_mask=False)
     t2w_resampled = resample_3d_volume(t2w_crop, target_shape, is_mask=False)
     t2f_resampled = resample_3d_volume(t2f_crop, target_shape, is_mask=False)
-    seg_resampled = resample_3d_volume(seg_crop, target_shape, is_mask=True)
+    if label_protocol == "multiregion":
+        raw_labels = set(np.unique(seg_crop).tolist())
+        unexpected = {v for v in raw_labels if v not in BRATS_GLI_LABELS}
+        if unexpected:
+            raise ValueError(
+                f"{pid}: unexpected segmentation labels {sorted(unexpected)} "
+                f"(expected subset of {BRATS_GLI_LABELS})."
+            )
+        seg_resampled = resample_3d_volume(
+            seg_crop, target_shape, is_mask=True, preserve_labels=True
+        )
+        out_labels = set(np.unique(seg_resampled).tolist())
+        unexpected_out = {v for v in out_labels if v not in BRATS_GLI_LABELS}
+        if unexpected_out:
+            raise ValueError(
+                f"{pid}: resampling produced invalid labels {sorted(unexpected_out)}."
+            )
+    else:
+        seg_resampled = resample_3d_volume(seg_crop, target_shape, is_mask=True)
 
     # Clean trilinear interpolation bleed outside the resampled brain mask (CUT-A)
     t1n_resampled = np.where(brain_mask_resampled, t1n_resampled, 0.0)
@@ -209,7 +261,10 @@ def process_patient(
     # Stack channels: [4, 128, 128, 128]
     np_dtype = np.float16 if dtype == "float16" else np.float32
     image_4ch = np.stack([t1n_norm, t1c_norm, t2w_norm, t2f_norm], axis=0).astype(np_dtype)
-    mask_1ch = np.expand_dims((seg_resampled > 0).astype(np.uint8), axis=0)  # [1, 128, 128, 128]
+    if label_protocol == "multiregion":
+        mask_1ch = np.expand_dims(seg_resampled.astype(np.uint8), axis=0)  # int labels 0-4
+    else:
+        mask_1ch = np.expand_dims((seg_resampled > 0).astype(np.uint8), axis=0)  # binary WT
     brain_mask_1ch = np.expand_dims(brain_mask_resampled.astype(np.uint8), axis=0)  # [1, 128, 128, 128]
 
     # Save compressed .npz with anatomical brain_mask (CUT-B)
@@ -224,13 +279,15 @@ def process_patient(
     num_voxels_brain = int(np.sum(brain_mask_resampled))
     num_voxels_tumor = int(np.sum(mask_1ch > 0))
     has_tumor = bool(num_voxels_tumor > 0)
+    num_voxels_et = int(np.sum(mask_1ch == ET_LABEL)) if label_protocol == "multiregion" else 0
+    has_et = bool(num_voxels_et > 0) if label_protocol == "multiregion" else has_tumor
 
     try:
         rel_path = str(out_file.relative_to(output_dir.parent.parent))
     except ValueError:
         rel_path = f"{output_dir.name}/{out_file.name}"
 
-    return {
+    record = {
         "patient_id": pid,
         "file_name": out_file.name,
         "rel_path": rel_path,
@@ -241,13 +298,20 @@ def process_patient(
         "orig_y_span": int(y_max - y_min),
         "orig_x_span": int(x_max - x_min),
     }
+    if label_protocol == "multiregion":
+        record["num_voxels_et"] = num_voxels_et
+        record["has_et"] = has_et
+    return record
 
 
 def _process_patient_worker(args_tuple):
     """Worker function for ProcessPoolExecutor with isolated thread count."""
-    patient_dir, output_dir, target_size, dtype = args_tuple
+    patient_dir, output_dir, target_size, dtype, label_protocol = args_tuple
     torch.set_num_threads(1)
-    return process_patient(patient_dir, output_dir, target_size=target_size, dtype=dtype)
+    return process_patient(
+        patient_dir, output_dir, target_size=target_size, dtype=dtype,
+        label_protocol=label_protocol,
+    )
 
 
 def main():
@@ -300,7 +364,10 @@ def main():
 
     records = []
     if args.num_workers > 1 and len(patient_dirs) > 1:
-        tasks = [(pdir, output_dir, args.target_size, args.dtype) for pdir in patient_dirs]
+        tasks = [
+            (pdir, output_dir, args.target_size, args.dtype, args.label_protocol)
+            for pdir in patient_dirs
+        ]
         with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
             for rec in tqdm(
                 executor.map(_process_patient_worker, tasks),
@@ -312,7 +379,8 @@ def main():
     else:
         for pdir in tqdm(patient_dirs, desc="Processing 3D Volumes"):
             rec = process_patient(
-                pdir, output_dir, target_size=args.target_size, dtype=args.dtype
+                pdir, output_dir, target_size=args.target_size, dtype=args.dtype,
+                label_protocol=args.label_protocol,
             )
             if rec is not None:
                 records.append(rec)
