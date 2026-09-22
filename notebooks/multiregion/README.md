@@ -8,13 +8,15 @@ tables with v1 binary whole-tumor results.
 
 | Notebook | Purpose |
 |---|---|
+| `01_train_visreg_3d.ipynb` | SSL pretraining (label-free; identical on either pool — prefer v2 attachment so fingerprints match downstream). |
+| `02_train_nnunet_3d.ipynb` | nnU-Net v2 baseline (5-class via config). |
 | `03_train_unet_3d.ipynb` | Phase 2 gate: UNet full-data on v2 (sane WT → lower TC → lowest ET). ET-collapse fallback: `--loss_type tversky`. |
+| `04_train_vit_from_scratch_ablation_3d.ipynb` | From-scratch multiscale ablation (v2). |
+| `06_vit_unetr_hybrid_ablation_3d.ipynb` | From-scratch hybrid ablation (v2). |
 | `07_finetune_visreg_multiscale_3d.ipynb` | VisReg FPN finetune on the shared SSL encoder + full battery. |
 | `08_finetune_visreg_unetr_3d.ipynb` | VisReg hybrid finetune on the shared SSL encoder + full battery. |
 
-Deliberately absent: 02 (nnU-Net follows the gate), 04/06 (scratch ablations join
-the Phase 3 battery), 01/05 (SSL pretraining is label-free — no v2 copy needed),
-runner (deferred until the battery shape is known).
+Deliberately absent: 05 (diagnose ran on v1; SSL-side, rerun only if masking code changes) and `kaggle_runner_3d` (v1 orchestrator; multiregion runs per-notebook until the battery shape is known).
 
 ## Requirements
 
