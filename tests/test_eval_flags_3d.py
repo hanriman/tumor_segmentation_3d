@@ -47,28 +47,31 @@ def test_low_data_train_and_eval_tversky_tta():
     m = _load_script("evaluate_low_data_3d")
     device = torch.device("cpu")
     model = BraTS3DUNet(channels=(8, 16, 32, 64, 128), num_res_units=1, dropout=0.0)
-    dice = m.train_and_eval(
+    scores = m.train_and_eval(
         model, _tiny_loader(), _tiny_loader(), device, epochs=1, amp=False,
         smoke_test=True, loss_type="tversky", tta=True,
     )
-    assert 0.0 <= dice <= 1.0
+    assert set(scores) == {"mean"}  # binary C=1 keeps legacy scalar shape
+    assert 0.0 <= scores["mean"] <= 1.0
 
 
 def test_low_data_train_and_eval_dice_no_tta():
     m = _load_script("evaluate_low_data_3d")
     device = torch.device("cpu")
     model = BraTS3DUNet(channels=(8, 16, 32, 64, 128), num_res_units=1, dropout=0.0)
-    dice = m.train_and_eval(
+    scores = m.train_and_eval(
         model, _tiny_loader(), _tiny_loader(), device, epochs=1, amp=False, smoke_test=True,
     )
-    assert 0.0 <= dice <= 1.0
+    assert set(scores) == {"mean"}
+    assert 0.0 <= scores["mean"] <= 1.0
 
 
 def test_ood_perturbation_tta():
     m = _load_script("evaluate_ood_3d")
     device = torch.device("cpu")
     model = BraTS3DUNet(channels=(8, 16, 32, 64, 128), num_res_units=1, dropout=0.0)
-    dice = m.evaluate_perturbation(
+    scores = m.evaluate_perturbation(
         model, _tiny_loader(), device, None, amp=False, smoke_test=True, tta=True,
     )
-    assert 0.0 <= dice <= 1.0
+    assert set(scores) == {"mean"}
+    assert 0.0 <= scores["mean"] <= 1.0

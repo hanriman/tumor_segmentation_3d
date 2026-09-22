@@ -16,6 +16,16 @@ tables with v1 binary whole-tumor results.
 | `07_finetune_visreg_multiscale_3d.ipynb` | VisReg FPN finetune on the shared SSL encoder + full battery. |
 | `08_finetune_visreg_unetr_3d.ipynb` | VisReg hybrid finetune on the shared SSL encoder + full battery. |
 
+## Battery reporting (v2 regions protocol)
+
+Test (`evaluate_3d`), low-data (`evaluate_low_data_3d`), and OOD
+(`evaluate_ood_3d`) all emit one column/row per `(model, region)`:
+`Model [WT]`, `[TC]`, `[ET]`, plus `[mean]` (average of the three, for
+tier/regime comparability with v1 tables). Binary (C=1) runs keep the legacy
+single-column shape. Aggregation merges on column names, so region columns
+flow through `aggregate_low_data_summaries` / `aggregate_ood_summaries`
+untouched.
+
 Deliberately absent: 05 (diagnose ran on v1; SSL-side, rerun only if masking code changes) and `kaggle_runner_3d` (v1 orchestrator; multiregion runs per-notebook until the battery shape is known).
 
 ## Requirements

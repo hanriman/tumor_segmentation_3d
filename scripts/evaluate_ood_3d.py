@@ -34,7 +34,10 @@ from brats_jepa_3d.data import (
     apply_b1_bias_field_3d,
     apply_rician_noise_3d,
 )
-from brats_jepa_3d.metrics import compute_volumetric_metrics_3d, validation_dice_iou
+from brats_jepa_3d.metrics import (
+    compute_brats_regions_3d,
+    compute_volumetric_metrics_3d,
+)
 from brats_jepa_3d.models import (
     BraTS3DnnUNet,
     BraTS3DUNet,
@@ -87,9 +90,16 @@ def parse_args():
 def evaluate_perturbation(
     model, loader, device, perturb_fn, amp: bool = True, smoke_test: bool = False,
     tta: bool = False,
-) -> float:
+) -> dict[str, float]:
+    """Scores one perturbation regime.
+
+    Returns {"mean": dice} for binary (C=1) models (legacy v1 shape), else
+    per-region {"WT", "TC", "ET", "mean"} macro Dice so regime tables resolve
+    the T1c/FLAIR asymmetry per region (e.g. ET preserved T1c-only).
+    """
     model.eval()
-    dices = []
+    region_dices: dict[str, list[float]] | None = None
+    binary_dices: list[float] = []
     with torch.no_grad():
         for batch_idx, batch in enumerate(loader):
             images = batch["image"].to(device)
@@ -109,14 +119,22 @@ def evaluate_perturbation(
 
             if logits.shape[1] == 1:
                 metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
-                dices.extend(metrics["dice_per_sample"])
+                binary_dices.extend(metrics["dice_per_sample"])
             else:
-                # Multi-class protocol: mean WT/TC/ET score (WT-only is blind
-                # to ET collapse; see validation_dice_iou).
-                dices.append(validation_dice_iou(logits, masks)[0])
+                # Multi-class protocol: accumulate per-region sample Dice.
+                if region_dices is None:
+                    region_dices = {"WT": [], "TC": [], "ET": []}
+                res = compute_brats_regions_3d(logits, masks, compute_hd95=False)
+                for rname in ("WT", "TC", "ET"):
+                    region_dices[rname].extend(res[rname]["dice_per_sample"])
             if smoke_test and batch_idx >= 1:
                 break
-    return float(np.mean(dices)) if dices else 0.0
+    if region_dices is None:
+        return {"mean": float(np.mean(binary_dices)) if binary_dices else 0.0}
+    out_scores = {r: float(np.nanmean(v)) if v else 0.0 for r, v in region_dices.items()}
+    out_scores["mean"] = float(
+        sum(out_scores[r] for r in ("WT", "TC", "ET")) / 3.0)
+    return out_scores
 
 
 def main():
@@ -407,12 +425,23 @@ def main():
             if m is None:
                 row[_display_name(m_name)] = "N/A"
                 continue
-            dice = evaluate_perturbation(
+            scores = evaluate_perturbation(
                 m, test_loader, device, p_fn, amp=args.amp, smoke_test=args.smoke_test,
                 tta=args.tta,
             )
-            logger.info(f"{m_name} -> Dice: {dice * 100:.2f}%")
-            row[_display_name(m_name)] = f"{dice * 100:.2f}%"
+            dname = _display_name(m_name)
+            if set(scores) == {"mean"}:
+                # Binary legacy: single column as before (v1 WT-only).
+                logger.info(f"{m_name} -> Dice: {scores['mean'] * 100:.2f}%")
+                row[dname] = f"{scores['mean'] * 100:.2f}%"
+            else:
+                # v2 regions protocol: one column per region + mean.
+                logger.info(
+                    f"{m_name} -> WT {scores['WT'] * 100:.2f}% / "
+                    f"TC {scores['TC'] * 100:.2f}% / ET {scores['ET'] * 100:.2f}% "
+                    f"(mean {scores['mean'] * 100:.2f}%)")
+                for r in ("WT", "TC", "ET", "mean"):
+                    row[f"{dname} [{r}]"] = f"{scores[r] * 100:.2f}%"
         records.append(row)
 
     new_df = pd.DataFrame(records)

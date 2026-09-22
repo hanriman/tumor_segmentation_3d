@@ -22,7 +22,10 @@ from brats_jepa_3d.config import (
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
 from brats_jepa_3d.losses import build_segmentation_criterion, resolve_seg_loss_type
-from brats_jepa_3d.metrics import compute_volumetric_metrics_3d, validation_dice_iou
+from brats_jepa_3d.metrics import (
+    compute_brats_regions_3d,
+    compute_volumetric_metrics_3d,
+)
 from brats_jepa_3d.models import BraTS3DnnUNet, BraTS3DUNet, JEPASegmentationModel3D
 from brats_jepa_3d.utils import (
     check_pool_match,
@@ -104,7 +107,14 @@ def train_and_eval(
     num_classes: int | None = None,
     tta: bool = False,
     include_background: bool | None = None,
-) -> float:
+) -> dict[str, float]:
+    """Trains on the fraction loader, then scores the test set.
+
+    Returns {"mean": dice} for binary (C=1) models (legacy v1 shape), else
+    per-region {"WT", "TC", "ET", "mean"} macro Dice (nan-aware over samples;
+    ET-free volumes score 1.0 when correctly empty, matching evaluate_3d).
+    "mean" is the average of the three regions for tier comparability.
+    """
     use_deep_supervision = getattr(model, "deep_supervision", False)
     criterion = build_segmentation_criterion(
         loss_type, use_deep_supervision, tversky_alpha, tversky_beta,
@@ -160,9 +170,10 @@ def train_and_eval(
         if smoke_test:
             break
 
-    # Evaluate on test set
+    # Evaluate on test set (per-region for C>1, scalar for C=1).
     model.eval()
-    test_dices = []
+    region_dices: dict[str, list[float]] | None = None
+    binary_dices: list[float] = []
     with torch.no_grad():
         for batch_idx, batch in enumerate(test_loader):
             images = batch["image"].to(device)
@@ -175,15 +186,24 @@ def train_and_eval(
                     logits = out[0] if isinstance(out, (list, tuple)) else out
             if logits.shape[1] == 1:
                 metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
-                test_dices.extend(metrics["dice_per_sample"])
+                binary_dices.extend(metrics["dice_per_sample"])
             else:
-                # Multi-class protocol: mean WT/TC/ET score (WT-only is blind
-                # to ET collapse; see validation_dice_iou).
-                test_dices.append(validation_dice_iou(logits, masks)[0])
+                # Multi-class protocol: accumulate per-region sample Dice so
+                # tiers report WT/TC/ET separately (ET-first collapse visible).
+                if region_dices is None:
+                    region_dices = {"WT": [], "TC": [], "ET": []}
+                res = compute_brats_regions_3d(logits, masks, compute_hd95=False)
+                for rname in ("WT", "TC", "ET"):
+                    region_dices[rname].extend(res[rname]["dice_per_sample"])
             if smoke_test and batch_idx >= 1:
                 break
 
-    return float(np.mean(test_dices)) if test_dices else 0.0
+    if region_dices is None:
+        return {"mean": float(np.mean(binary_dices)) if binary_dices else 0.0}
+    out_scores = {r: float(np.nanmean(v)) if v else 0.0 for r, v in region_dices.items()}
+    out_scores["mean"] = float(
+        sum(out_scores[r] for r in ("WT", "TC", "ET")) / 3.0)
+    return out_scores
 
 
 def main():
@@ -415,7 +435,7 @@ def main():
                 row[_display_name(name)] = "N/A"
                 continue
             m, n_classes = built
-            dice = train_and_eval(
+            scores = train_and_eval(
                 m,
                 train_loader,
                 test_loader,
@@ -430,8 +450,19 @@ def main():
                 tta=args.tta,
                 include_background=getattr(args, "include_background", None),
             )
-            logger.info(f"{name} ({frac * 100:.1f}% labels) -> Test Dice: {dice * 100:.2f}%")
-            row[_display_name(name)] = f"{dice * 100:.2f}%"
+            dname = _display_name(name)
+            if set(scores) == {"mean"}:
+                # Binary legacy: single column as before (v1 WT-only).
+                logger.info(f"{name} ({frac * 100:.1f}% labels) -> Test Dice: {scores['mean'] * 100:.2f}%")
+                row[dname] = f"{scores['mean'] * 100:.2f}%"
+            else:
+                # v2 regions protocol: one column per region + mean.
+                logger.info(
+                    f"{name} ({frac * 100:.1f}% labels) -> "
+                    f"WT {scores['WT'] * 100:.2f}% / TC {scores['TC'] * 100:.2f}% / "
+                    f"ET {scores['ET'] * 100:.2f}% (mean {scores['mean'] * 100:.2f}%)")
+                for r in ("WT", "TC", "ET", "mean"):
+                    row[f"{dname} [{r}]"] = f"{scores[r] * 100:.2f}%"
             del m
             gc.collect()
             if device.type == "cuda":
