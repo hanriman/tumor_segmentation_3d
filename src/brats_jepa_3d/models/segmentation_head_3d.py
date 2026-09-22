@@ -371,13 +371,15 @@ class HybridUNETRDecoder3D(nn.Module):
         x2 = self.fuse2(torch.cat([x2, s2], dim=1))
 
         # Native stem features (zeros when raw volume is unavailable, e.g. probing).
+        # Fallback shapes must match the FUSED stages (x3 at 2x, x4 at 4x of x2),
+        # not x2 itself.
         if raw_volume is not None:
             f128 = self.stem_128(raw_volume)
             f64 = self.stem_64(f128)
         else:
             B = x2.shape[0]
             dev, dt = x2.device, x2.dtype
-            s64 = x2.shape[-3:]
+            s64 = (x2.shape[-3] * 2, x2.shape[-2] * 2, x2.shape[-1] * 2)
             s128 = (s64[0] * 2, s64[1] * 2, s64[2] * 2)
             f64 = torch.zeros(B, 32, *s64, device=dev, dtype=dt)
             f128 = torch.zeros(B, 16, *s128, device=dev, dtype=dt)

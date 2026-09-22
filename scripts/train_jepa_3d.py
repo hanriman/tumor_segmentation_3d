@@ -19,6 +19,7 @@ from brats_jepa_3d.config import (
     CONFIGS_DIR,
     LOGS_DIR,
     ensure_directories,
+    get_dataset_dir,
     load_yaml_config,
     merge_config_with_args,
 )
@@ -33,6 +34,7 @@ from brats_jepa_3d.metrics import compute_representation_collapse_metrics
 from brats_jepa_3d.models import IJEPA3D, SigRegJEPA3D, VisRegJEPA3D
 from brats_jepa_3d.utils import (
     MetricTracker,
+    dataset_fingerprint,
     get_autocast_context,
     get_device,
     set_seed,
@@ -512,6 +514,7 @@ def main():
                     "optimizer_state_dict": optimizer.state_dict(),
                     "loss": avg_train_loss,
                     "val_loss": avg_val_loss,
+                    "pool_fingerprint": dataset_fingerprint(get_dataset_dir()),
                 },
                 best_ckpt_path,
             )
@@ -529,6 +532,7 @@ def main():
                     "optimizer_state_dict": optimizer.state_dict(),
                     "loss": avg_train_loss,
                     "val_loss": avg_val_loss,
+                    "pool_fingerprint": dataset_fingerprint(get_dataset_dir()),
                 },
                 ckpt_path,
             )

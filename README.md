@@ -77,11 +77,13 @@ thesis_3d/
 │   └── kaggle_guide.md                  # End-to-end Kaggle GPU execution guide
 │
 ├── notebooks/
-│   ├── 01_train_visreg_3d.ipynb  # Primary method: VisReg pre-training, diagnose cell, FPN + hybrid finetune
+│   ├── 01_train_visreg_3d.ipynb  # SSL pre-training only (100ep) + diagnose; exports visreg_pretrain_outputs.zip consumed by 07/08
 │   ├── 02_train_nnunet_3d.ipynb  # SOTA baseline: 3D DynUNet with deep supervision
 │   ├── 03_train_unet_3d.ipynb    # Classical baseline: 3D Residual UNet
 │   ├── 04_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT ablation
 │   ├── 06_vit_unetr_hybrid_ablation_3d.ipynb # From-scratch ViT + hybrid UNETR ablation (all cells --from_scratch)
+│   ├── 07_finetune_visreg_multiscale_3d.ipynb # VisReg + multiscale FPN downstream (fail-loud ckpt intake from 01)
+│   ├── 08_finetune_visreg_unetr_3d.ipynb # VisReg + hybrid UNETR downstream (same encoder as 07; controlled decoder ablation)
 │   └── kaggle_runner_3d.ipynb    # Interactive all-in-one runner with toggles
 │
 ├── configs/                      # Modular YAML configuration hierarchy
@@ -281,10 +283,11 @@ python scripts/run_full_pipeline_3d.py --model_type all
 For zero-setup cloud execution on free NVIDIA Tesla T4 GPUs (16 GB):
 1. **Package Data**: Run `python scripts/package_for_kaggle.py` and upload `dist_kaggle/brats_3d_full.zip` to Kaggle as a dataset named `brats-3d-full` (1,621 scans, grouped split: train 1,144 / val 235 / test 242).
 2. **Train Models in Parallel**:
-   - Run `notebooks/01_train_visreg_3d.ipynb` and `notebooks/02_train_nnunet_3d.ipynb` (and `03_train_unet_3d.ipynb`) across concurrent GPU sessions.
-   - Each model notebook evaluates its own test split performance, low-data label efficiency, and OOD robustness self-contained on the GPU before exporting.
+   - Run `notebooks/02_train_nnunet_3d.ipynb` and `notebooks/03_train_unet_3d.ipynb` across concurrent GPU sessions.
+   - For VisReg JEPA, run `notebooks/01_train_visreg_3d.ipynb` once (SSL pre-training, 100 epochs), publish its `visreg_pretrain_outputs.zip` checkpoint as a Kaggle dataset input, then run `notebooks/07_finetune_visreg_multiscale_3d.ipynb` and `notebooks/08_finetune_visreg_unetr_3d.ipynb` in parallel on the identical encoder (controlled decoder ablation).
+   - Each downstream/baseline notebook evaluates its own test split performance, low-data label efficiency, and OOD robustness self-contained on the GPU before exporting.
 3. **1-Click Local Aggregation (Zero Cloud Re-Upload)**:
-   - Download the 3 output archives into `outputs/<experiment_name>/` (e.g. `outputs/kaggle_visreg_5_epoch`, `outputs/kaggle_nnunet_5_epoch`, `outputs/kaggle_unet_5_epoch`).
+   - Download the output archives into `outputs/<experiment_name>/` (e.g. `outputs/kaggle_visreg_multiscale`, `outputs/kaggle_visreg_unetr`, `outputs/kaggle_nnunet_5_epoch`, `outputs/kaggle_unet_5_epoch`).
    - Run the local aggregator script:
      ```bash
      python scripts/combine_and_generate_paper_artifacts.py

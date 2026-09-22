@@ -23,14 +23,16 @@ To eliminate the hassle of downloading gigabytes of checkpoints only to re-uploa
 
 ```text
 thesis_3d/notebooks/
-├── 01_train_visreg_3d.ipynb          [~1h 09m (5 ep) / ~4.8 hrs (80 ep)]  Primary Method (SSL Pre-train + FPN + Test Eval + Low-Data + OOD)
+├── 01_train_visreg_3d.ipynb          SSL pre-training only (100 ep) + diagnose; exports visreg_pretrain_outputs.zip (published as Kaggle dataset input for 07/08)
 ├── 02_train_nnunet_3d.ipynb          [~1h 13m (5 ep) / ~4.0 hrs (30 ep)]  SOTA Baseline (DynUNet with Deep Supervision + Test Eval + Low-Data + OOD)
 └── 03_train_unet_3d.ipynb            [~50 mins (5 ep) / ~2.5 hrs (30 ep)] Classical Baseline (MONAI Residual UNet + Test Eval + Low-Data + OOD)
+├── 07_finetune_visreg_multiscale_3d.ipynb  Downstream FPN on notebook 01's encoder (fail-loud ckpt intake + Test Eval + Low-Data + OOD)
+└── 08_finetune_visreg_unetr_3d.ipynb       Downstream hybrid UNETR on the same encoder (controlled decoder ablation)
 ```
 
 ### Why This Workflow is 10x Faster:
-1. **Self-Contained Evaluation on Kaggle**: Each model notebook (01, 02, 03) evaluates its own checkpoints directly on the GPU (test split evaluation, low-data label efficiency, and OOD stress test) *before* exporting.
-2. **Zero Cloud Re-Upload**: You download the 3 output archives (`visreg_outputs.zip`, `nnunet_outputs.zip`, `unet_outputs.zip`) directly to your local workstation.
+1. **Self-Contained Evaluation on Kaggle**: Each downstream/baseline notebook (07, 08, 02, 03) evaluates its own checkpoints directly on the GPU (test split evaluation, low-data label efficiency, and OOD stress test) *before* exporting.
+2. **Zero Cloud Re-Upload**: You download the output archives (`visreg_pretrain_outputs.zip`, `visreg_multiscale_outputs.zip`, `visreg_unetr_outputs.zip`, `nnunet_outputs.zip`, `unet_outputs.zip`) directly to your local workstation.
 3. **1-Click Local Aggregator**: Running `python scripts/combine_and_generate_paper_artifacts.py` aggregates all benchmarks, renders publication-grade vector PDF/PNG figures, formats LaTeX tables, and creates `paper_artifacts.zip` locally in **2 seconds**!
 
 ---
@@ -68,12 +70,17 @@ This extracts non-zero bounding boxes and resamples volumes to canonical $128^3$
 
 ### Step 2: Running the Parallel Model Training Suite
 
-#### Job 1 (GPU Session A): Run 3D VisReg JEPA
+#### Job 1 (GPU Session A): 3D VisReg JEPA Pre-training (run once)
 1. In Kaggle, click **Create** -> **New Notebook** -> **File** -> **Import Notebook** -> Upload [`notebooks/01_train_visreg_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/01_train_visreg_3d.ipynb).
 2. Attach dataset via **+ Add Input** -> `brats-3d-full`.
 3. Set Accelerator to **GPU T4 x1** and turn **Internet ON**.
 4. Click **Run All** (or **Save Version** -> **Run all with Save** to execute in the background).
-5. Output: `visreg_outputs.zip` containing `visreg_jepa_best.pt`, downstream FPN weights, test split evaluations, low-data label efficiency curves, and OOD stress test metrics.
+5. Output: `visreg_pretrain_outputs.zip` containing `visreg_jepa_3d_best.pt` (SSL encoder), pre-training logs, and probe metrics. Publish this archive as a Kaggle dataset (e.g. `visreg-pretrain`) for Jobs 1b/1c.
+
+#### Job 1b / 1c (GPU Sessions, in Parallel): VisReg Downstream Decoders
+1. Import [`notebooks/07_finetune_visreg_multiscale_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/07_finetune_visreg_multiscale_3d.ipynb) (FPN) and [`notebooks/08_finetune_visreg_unetr_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/08_finetune_visreg_unetr_3d.ipynb) (hybrid UNETR) in two sessions.
+2. Attach `brats-3d-full` **and** the `visreg-pretrain` checkpoint dataset. The §5 intake cell copies the encoder into `outputs/checkpoints/` and **aborts when absent** (never silently trains from random init).
+3. Click **Run All**. Outputs: `visreg_multiscale_outputs.zip` / `visreg_unetr_outputs.zip` with finetuned weights, test split evaluations, low-data label efficiency curves, and OOD stress test metrics — a controlled decoder ablation on the identical encoder.
 
 #### Job 2 (GPU Session B): Run 3D nnU-Net Baseline (in Parallel!)
 1. Open a second Kaggle tab: **New Notebook** -> Import [`notebooks/02_train_nnunet_3d.ipynb`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/notebooks/02_train_nnunet_3d.ipynb).
@@ -89,8 +96,8 @@ This extracts non-zero bounding boxes and resamples volumes to canonical $128^3$
 
 ### Step 3: Combine Results Locally & Generate Paper Artifacts (1-Click!)
 
-Once Jobs 1, 2, and 3 are finished:
-1. Download the three `.zip` files from Kaggle (`visreg_outputs.zip`, `nnunet_outputs.zip`, `unet_outputs.zip`).
+Once the jobs are finished:
+1. Download the `.zip` files from Kaggle (`visreg_pretrain_outputs.zip`, `visreg_multiscale_outputs.zip`, `visreg_unetr_outputs.zip`, `nnunet_outputs.zip`, `unet_outputs.zip`).
 2. Unpack them into your project's `outputs/` directory by experiment name:
    ```text
    outputs/
@@ -128,7 +135,9 @@ Once Jobs 1, 2, and 3 are finished:
 
 | Task / Notebook | Measured Per-Epoch Duration | Total Duration (5-Epoch Verification) | Projected Duration (Full 30 / 50 Ep Budget) | Peak VRAM |
 | :--- | :---: | :---: | :---: | :---: |
-| **01: 3D VisReg JEPA** (Pretrain + FPN + Low-Data + Eval) | Pretrain: $3.0\text{ min}$<br/>FPN: $3.5\text{ min}$ | **$1\text{h }09\text{m}$** | $\approx 4.5 - 5.0\text{ hours}$ ($50\text{ ep} + 30\text{ ep}$) | $\approx 7.8\text{ GB}$ |
+| **01: 3D VisReg JEPA Pre-training** (SSL 100ep + Diagnose; downstream moved to 07/08) | Pretrain: $3.0\text{ min}$ | **$\approx 5\text{h }00\text{m}$** (projected: $100 \times 3.0\text{ min}$) | $\approx 7.8\text{ GB}$ |
+| **07: VisReg + Multiscale FPN downstream** (30ep finetune + Low-Data + Eval + OOD) | FPN: $3.5\text{ min}$ | **$\approx 2.5\text{–}3\text{h}$** (est. from FPN rate + eval battery) | $\approx 7.8\text{ GB}$ |
+| **08: VisReg + Hybrid UNETR downstream** (30ep finetune + Low-Data + Eval + OOD) | TBD (stem overhead) | **TBD on first run** (heavier than 07; fits 12h limit) | $\le 16\text{ GB}$ |
 | **02: 3D nnU-Net** (DynUNet + Deep Supervision + Low-Data + Eval) | $7.1\text{ min}$ | **$1\text{h }13\text{m}$** | $\approx 3.8 - 4.2\text{ hours}$ ($30\text{ ep}$) | $\approx 10.5\text{ GB}$ |
 | **03: 3D Residual UNet** (MONAI UNet + Low-Data + Eval) | $3.5 - 3.7\text{ min}$ | **$50\text{ mins}$** | $\approx 2.5\text{ hours}$ ($30\text{ ep}$) | $\approx 8.4\text{ GB}$ |
 | **Local Master Aggregator** (`combine_and_generate_paper_artifacts.py`) | - | **$\approx 2.2\text{ seconds}$** | $\approx 2.5\text{ seconds}$ | CPU |

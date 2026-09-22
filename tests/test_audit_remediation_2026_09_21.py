@@ -328,3 +328,25 @@ def test_f5_hd95_per_volume_determinism():
     h3 = compute_hd95_3d(c, d)
     assert time.perf_counter() - t0 < 10.0
     assert np.isfinite(h3)
+
+
+def test_pool_fingerprint_stable_and_mismatch(tmp_path):
+    """Same pool -> identical fingerprint; edited pool -> mismatch; legacy -> unverifiable."""
+    from brats_jepa_3d.utils import check_pool_match, dataset_fingerprint
+
+    meta = tmp_path / "pool"
+    meta.mkdir()
+    (meta / "metadata.csv").write_text(
+        "patient_id,file_name,split\np1,a.npz,train\np2,b.npz,val\n"
+    )
+    fp1 = dataset_fingerprint(meta)
+    fp2 = dataset_fingerprint(meta)
+    assert fp1 == fp2 and fp1["n_rows"] == 2
+    assert check_pool_match({"metadata_sha1": fp1["metadata_sha1"]}, fp1, "t") == "match"
+    (meta / "metadata.csv").write_text(
+        "patient_id,file_name,split\np1,a.npz,train\np2,b.npz,test\n"
+    )
+    fp3 = dataset_fingerprint(meta)
+    assert check_pool_match({"metadata_sha1": fp1["metadata_sha1"]}, fp3, "t") == "mismatch"
+    assert check_pool_match({}, fp3, "t") == "unverifiable"
+    assert check_pool_match(None, fp3, "t") == "unverifiable"

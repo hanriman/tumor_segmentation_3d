@@ -7,6 +7,7 @@ from .aggregation import (
 )
 from .device import get_autocast_context, get_device
 from .export import export_artifacts, import_artifacts, resolve_outputs_source_dir
+from .fingerprint import check_pool_match, dataset_fingerprint
 from .logging import MetricTracker, setup_logger, sort_checkpoints_by_epoch
 from .seed import set_seed
 from .tta import TTA_FLIP_DIMS, predict_with_tta_3d
@@ -14,9 +15,11 @@ from .tta import TTA_FLIP_DIMS, predict_with_tta_3d
 __all__ = [
     "MetricTracker",
     "TTA_FLIP_DIMS",
+    "check_pool_match",
     "aggregate_low_data_summaries",
     "aggregate_master_benchmarks",
     "aggregate_ood_summaries",
+    "dataset_fingerprint",
     "discover_experiment_directories",
     "export_artifacts",
     "export_latex_tables",

@@ -73,7 +73,7 @@ flowchart TD
     - Grouped 70/15/15 split, 0 leakage, brats_3d_full.zip (11 GB)"]
     
     P6["Phase 6: Kaggle Notebooks Synchronization [COMPLETED]
-    - All 5 notebooks: brats-3d-full slug, N=242 test, new tier counts
+    - All notebooks (01–08): brats-3d-full slug, N=242 test, new tier counts
     - --tta in all eval cells, --deep_supervision on finetunes
     - 01 gains brain-aware note + 5b diagnose cell"]
     
@@ -168,7 +168,7 @@ flowchart TD
 ---
 
 ### Phase 6: Kaggle Notebooks Synchronization [COMPLETED]
-- All 5 notebooks synced: `brats-3d-full` dataset slug, N=242 test / 11/57/114/286/572/1,144 low-data tiers, `--tta` in all eval cells, `--deep_supervision` on finetunes, brain-aware note + 5b diagnose cell in 01.
+- All notebooks synced (`brats-3d-full` slug, N=242 test / 11/57/114/286/572/1,144 low-data tiers, `--tta` in all eval cells, `--deep_supervision` on finetunes, brain-aware note + 5b diagnose cell in 01). 01 is pretrain-only (publishes encoder); 07/08 consume it for a controlled multiscale-vs-hybrid decoder ablation with fail-loud checkpoint intake.
 - Pending: re-run on Kaggle post-upload (single consolidated session).
 
 ---

@@ -26,6 +26,7 @@ from brats_jepa_3d.config import (
     CONFIGS_DIR,
     METRICS_DIR,
     ensure_directories,
+    get_dataset_dir,
     load_yaml_config,
 )
 from brats_jepa_3d.data import (
@@ -40,6 +41,8 @@ from brats_jepa_3d.models import (
     JEPASegmentationModel3D,
 )
 from brats_jepa_3d.utils import (
+    check_pool_match,
+    dataset_fingerprint,
     get_autocast_context,
     get_device,
     predict_with_tta_3d,
@@ -252,8 +255,13 @@ def main():
                 deep_supervision=ds_flag,
             )
             if ckpt and ckpt.exists():
-                sd = torch.load(ckpt, map_location=device)
-                sd = sd.get("model_state_dict", sd)
+                ckpt_raw = torch.load(ckpt, map_location=device)
+                check_pool_match(
+                    ckpt_raw.get("pool_fingerprint"),
+                    dataset_fingerprint(get_dataset_dir()),
+                    f"ood/{name}",
+                )
+                sd = ckpt_raw.get("model_state_dict", ckpt_raw)
                 has_downstream = any(k.startswith("encoder.") for k in sd) or any(k.startswith("decoder.") for k in sd)
                 has_pretrain = any(k.startswith("context_encoder.") for k in sd)
                 if has_downstream:
@@ -274,8 +282,13 @@ def main():
                 pretrain_ckpts = [p for p in sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{prefix}*epoch*.pt"))) if "scratch" not in p.name.lower()]
                 if pretrain_ckpts:
                     ckpt = pretrain_ckpts[-1]
-                    sd = torch.load(ckpt, map_location=device)
-                    sd = sd.get("model_state_dict", sd)
+                    ckpt_raw = torch.load(ckpt, map_location=device)
+                    check_pool_match(
+                        ckpt_raw.get("pool_fingerprint"),
+                        dataset_fingerprint(get_dataset_dir()),
+                        f"ood/{name}",
+                    )
+                    sd = ckpt_raw.get("model_state_dict", ckpt_raw)
                     res = m.load_pretrained_encoder(sd)
                     logger.warning(
                         f"Loaded pre-trained encoder weights for {name} from {ckpt.name} ({res['loaded_keys']} keys), "

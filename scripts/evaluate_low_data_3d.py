@@ -17,6 +17,7 @@ from brats_jepa_3d.config import (
     CONFIGS_DIR,
     METRICS_DIR,
     ensure_directories,
+    get_dataset_dir,
     load_yaml_config,
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
@@ -24,6 +25,8 @@ from brats_jepa_3d.losses import build_segmentation_criterion, resolve_seg_loss_
 from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
 from brats_jepa_3d.models import BraTS3DnnUNet, BraTS3DUNet, JEPASegmentationModel3D
 from brats_jepa_3d.utils import (
+    check_pool_match,
+    dataset_fingerprint,
     get_autocast_context,
     get_device,
     predict_with_tta_3d,
@@ -316,6 +319,11 @@ def main():
                 deep_supervision=ds_flag,
             )
             ckpt = torch.load(ckpt_path, map_location=device)
+            check_pool_match(
+                ckpt.get("pool_fingerprint"),
+                dataset_fingerprint(get_dataset_dir()),
+                f"low-data/{name}",
+            )
             res = m.load_pretrained_encoder(ckpt)
             logger.info(
                 f"Initialized {name} with pre-trained encoder weights from: {ckpt_path.name} ({res['loaded_keys']} keys)"

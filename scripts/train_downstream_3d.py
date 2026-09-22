@@ -18,6 +18,7 @@ from brats_jepa_3d.config import (
     CONFIGS_DIR,
     LOGS_DIR,
     ensure_directories,
+    get_dataset_dir,
     load_yaml_config,
     merge_config_with_args,
 )
@@ -27,6 +28,8 @@ from brats_jepa_3d.metrics import compute_volumetric_metrics_3d
 from brats_jepa_3d.models import JEPASegmentationModel3D
 from brats_jepa_3d.utils import (
     MetricTracker,
+    check_pool_match,
+    dataset_fingerprint,
     get_autocast_context,
     get_device,
     set_seed,
@@ -274,6 +277,11 @@ def main():
 
     if not args.from_scratch and ckpt_path and ckpt_path.exists():
         ckpt = torch.load(ckpt_path, map_location=device)
+        check_pool_match(
+            ckpt.get("pool_fingerprint"),
+            dataset_fingerprint(get_dataset_dir()),
+            "downstream",
+        )
         res = model.load_pretrained_encoder(ckpt)
         logger.info(
             f"Loaded pre-trained encoder weights from {ckpt_path} ({res['loaded_keys']} keys matched)"
