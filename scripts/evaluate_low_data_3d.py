@@ -6,6 +6,7 @@ Evaluates model performance under extreme label scarcity (1% to 100% volumetric 
 
 import argparse
 import gc
+import sys
 
 import numpy as np
 import pandas as pd
@@ -443,7 +444,7 @@ def main():
                 epochs=epochs,
                 amp=args.amp,
                 smoke_test=args.smoke_test,
-                loss_type=resolve_seg_loss_type(args),
+                loss_type=resolve_seg_loss_type(args, sys.argv[1:]),
                 tversky_alpha=getattr(args, "tversky_alpha", 0.3),
                 tversky_beta=getattr(args, "tversky_beta", 0.7),
                 num_classes=n_classes,
