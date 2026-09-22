@@ -45,8 +45,10 @@ def get_dataset_dir(dataset_name: str = "brats_gli_3d") -> Path:
     # 2. Check Kaggle input mounts
     if Path("/kaggle/input").exists():
         # Known dataset directory variants, newest full pool first.
+        # v2 (integer masks) ships as brats_gli_3d_v2; accept it alongside the
+        # legacy brats_gli_3d_full folder so either Kaggle packaging resolves.
         name_variants = [dataset_name]
-        for alias in ("brats_gli_3d_full", "brats_gli_3d"):
+        for alias in ("brats_gli_3d_v2", "brats_gli_3d_full", "brats_gli_3d"):
             if alias not in name_variants:
                 name_variants.append(alias)
         for variant in name_variants:
