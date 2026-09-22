@@ -64,6 +64,10 @@ def parse_args():
     parser.add_argument("--tversky_alpha", type=float, default=0.3)
     parser.add_argument("--tversky_beta", type=float, default=0.7)
     parser.add_argument("--config", type=str, default=None, help="Path to base YAML config")
+    parser.add_argument("--include_background", action="store_true", default=None,
+        help="Include background in overlap loss (default: auto → excluded for C>1, included for C=1)")
+    parser.add_argument("--no_include_background", action="store_false", dest="include_background",
+        help="Exclude background from overlap loss")
     parser.add_argument("--model_config", type=str, default=None, help="Path to model YAML config")
     parser.add_argument(
         "--dataset_config", type=str, default=None, help="Path to dataset YAML config"
@@ -132,8 +136,8 @@ def evaluate(model, loader, device, amp: bool = True, smoke_test: bool = False) 
                 all_dices.extend(metrics["dice_per_sample"])
                 all_ious.extend(metrics["iou_per_sample"])
             else:
-                # Multi-class protocol: WT-region score keeps model selection
-                # comparable across protocols.
+                # Multi-class protocol: mean over WT/TC/ET keeps model selection
+                # honest (WT-only is blind to ET collapse).
                 d, i = validation_dice_iou(logits, masks)
                 all_dices.append(d)
                 all_ious.append(i)
@@ -309,6 +313,7 @@ def main():
         tversky_alpha=getattr(args, "tversky_alpha", 0.3),
         tversky_beta=getattr(args, "tversky_beta", 0.7),
         num_classes=getattr(args, "out_channels", 1),
+        include_background=getattr(args, "include_background", None),
     )
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(

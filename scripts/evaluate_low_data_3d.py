@@ -84,6 +84,8 @@ def parse_args():
         "--tta", action="store_true", default=False,
         help="4-fold orthogonal-reflection test-time augmentation on test eval",
     )
+    parser.add_argument("--include_background", action="store_true", default=None)
+    parser.add_argument("--no_include_background", action="store_false", dest="include_background")
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
 
@@ -101,11 +103,12 @@ def train_and_eval(
     tversky_beta: float = 0.7,
     num_classes: int | None = None,
     tta: bool = False,
+    include_background: bool | None = None,
 ) -> float:
     use_deep_supervision = getattr(model, "deep_supervision", False)
     criterion = build_segmentation_criterion(
         loss_type, use_deep_supervision, tversky_alpha, tversky_beta,
-        num_classes=num_classes,
+        num_classes=num_classes, include_background=include_background,
     )
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=3e-4, weight_decay=1e-4)
@@ -174,7 +177,8 @@ def train_and_eval(
                 metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
                 test_dices.extend(metrics["dice_per_sample"])
             else:
-                # Multi-class protocol: WT-region score keeps tiers comparable.
+                # Multi-class protocol: mean WT/TC/ET score (WT-only is blind
+                # to ET collapse; see validation_dice_iou).
                 test_dices.append(validation_dice_iou(logits, masks)[0])
             if smoke_test and batch_idx >= 1:
                 break
@@ -424,6 +428,7 @@ def main():
                 tversky_beta=getattr(args, "tversky_beta", 0.7),
                 num_classes=n_classes,
                 tta=args.tta,
+                include_background=getattr(args, "include_background", None),
             )
             logger.info(f"{name} ({frac * 100:.1f}% labels) -> Test Dice: {dice * 100:.2f}%")
             row[_display_name(name)] = f"{dice * 100:.2f}%"

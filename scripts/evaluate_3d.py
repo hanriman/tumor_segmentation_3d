@@ -173,7 +173,9 @@ def benchmark_model(
                 ious.extend(metrics["iou_per_sample"])
                 hd95s.extend(metrics["hd95_per_sample"])
             else:
-                # Multi-class protocol: accumulate per-region sample metrics.
+                # Multi-class protocol: accumulate per-region sample metrics plus
+                # batch-level tumor-only means (ET-free volumes score 1.0 when
+                # correctly empty in dice_mean; dice_tumor_only excludes them).
                 if region_acc is None:
                     region_acc = {}
                 res = compute_brats_regions_3d(
@@ -181,11 +183,14 @@ def benchmark_model(
                 )
                 for rname, rmet in res.items():
                     acc = region_acc.setdefault(
-                        rname, {"dice": [], "iou": [], "hd95": []}
+                        rname, {"dice": [], "iou": [], "hd95": [],
+                                "dice_tumor": [], "iou_tumor": []}
                     )
                     acc["dice"].extend(rmet["dice_per_sample"])
                     acc["iou"].extend(rmet["iou_per_sample"])
                     acc["hd95"].extend(rmet["hd95_per_sample"])
+                    acc["dice_tumor"].append(rmet["dice_tumor_only"])
+                    acc["iou_tumor"].append(rmet["iou_tumor_only"])
 
             if smoke_test and batch_idx >= 1:
                 break
@@ -203,6 +208,10 @@ def benchmark_model(
                 "iou_std": float(np.nanstd(acc["iou"])) if acc["iou"] else 0.0,
                 "hd95_mean": float(np.nanmean(acc["hd95"])) if acc["hd95"] else 0.0,
                 "hd95_std": float(np.nanstd(acc["hd95"])) if acc["hd95"] else 0.0,
+                "dice_tumor_only": float(np.nanmean(acc["dice_tumor"]))
+                if acc["dice_tumor"] else float("nan"),
+                "iou_tumor_only": float(np.nanmean(acc["iou_tumor"]))
+                if acc["iou_tumor"] else float("nan"),
             }
         return out
 
@@ -489,14 +498,19 @@ def main():
 
         if "regions" in seg_stats:
             # Multi-class protocol: one row per (model, region); WT first.
+            # Protocol column keeps v1 WT-only rows unmixable with v2 rows.
             for rname in ("WT", "TC", "ET"):
                 if rname not in seg_stats["regions"]:
                     continue
                 rs = seg_stats["regions"][rname]
+                dt = rs.get("dice_tumor_only", float("nan"))
                 results.append(
                     {
                         "Model": f"{label} [{rname}]",
+                        "Protocol": "v2 WT/TC/ET",
                         "Dice (%)": f"{rs['dice_mean'] * 100:.2f} ± {rs['dice_std'] * 100:.2f}",
+                        "Dice_tumor_only (%)": (
+                            f"{dt * 100:.2f}" if dt == dt else "n/a"),
                         "IoU (%)": f"{rs['iou_mean'] * 100:.2f} ± {rs['iou_std'] * 100:.2f}",
                         "HD95 (mm)": f"{rs['hd95_mean']:.2f} ± {rs['hd95_std']:.2f}",
                         "Latency (ms)": f"{seg_stats['latency_ms']:.2f}",
@@ -508,6 +522,7 @@ def main():
             results.append(
                 {
                     "Model": label,
+                    "Protocol": "v1 WT-only",
                     "Dice (%)": f"{seg_stats['dice_mean'] * 100:.2f} ± {seg_stats['dice_std'] * 100:.2f}",
                     "IoU (%)": f"{seg_stats['iou_mean'] * 100:.2f} ± {seg_stats['iou_std'] * 100:.2f}",
                     "HD95 (mm)": f"{seg_stats['hd95_mean']:.2f} ± {seg_stats['hd95_std']:.2f}",

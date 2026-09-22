@@ -40,7 +40,7 @@ This is the community-standard recipe. Consequences:
 - [ ] Verify the BraTS-2024 label convention in the raw data (expect exactly {0,1,2,3,4} with 1=NCR, 2=ED, 3=NET, 4=ET — confirmed on 1,350 vols, Sep 2026) and fail loud on any other value.
 - [ ] Extend `metadata.csv`: keep `num_voxels_tumor` (WT, preserves stratification), add `has_et` / `num_voxels_et` — some cases lack enhancing tumor, and evaluation must know that.
 - [ ] Re-run `prepare_data_3d.py` (full pool, not `--limit`). Cost: one-time, CPU-only, minutes with workers. Upload the result as a **new version (v2) of the existing `brats-3d-full` Kaggle dataset** — do not create a second dataset. In Kaggle notebooks, set the dataset attachment to latest (attachments pin versions; a stale pin silently mounts v1 binary masks).
-- [ ] Regression test: integer masks round-trip through `BraTS3DDataset` with values ⊆ {0, 1, 2, 3}; `(mask > 0)` reproduces the old binary masks exactly. Upload v2 only after these pass.
+- [ ] Regression test: integer masks round-trip through `BraTS3DDataset` with values ⊆ {0, 1, 2, 3, 4}; `(mask > 0)` reproduces the old binary masks exactly. Upload v2 only after these pass.
 
 ---
 
@@ -49,9 +49,9 @@ This is the community-standard recipe. Consequences:
 **Files:** `src/brats_jepa_3d/losses/*`, `src/brats_jepa_3d/metrics/volumetric_metrics.py`, `src/brats_jepa_3d/utils/tta.py`, `tests/`
 
 - [ ] **Losses**: activate and test the existing multi-class branches — `VolumetricDiceLoss` with explicit `include_background=False`, `CombinedDiceBCELoss3D` multi-class CE path, `VolumetricTverskyLoss` per-class path. Decide the Tversky-BCE wrapper: extend to multi-class CE or keep it binary-only (document either way; do not leave a silent middle ground).
-- [ ] **Region derivation helper** (new, small, pure function): `(logits[B,4,...]) → {WT, TC, ET}` binary masks via `argmax → union`. Unit-test against hand-built volumes.
+- [ ] **Region derivation helper** (new, small, pure function): `(logits[B,5,...]) → {WT, TC, ET}` binary masks via `argmax → union`. Unit-test against hand-built volumes.
 - [ ] **Metrics**: keep `compute_volumetric_metrics_3d` binary-only (correct and tested); add a thin `compute_brats_regions_3d` wrapper that calls it **once per region** — this inherits all guarded NaN semantics, HD95, and `nanmean` aggregation for free, including ET-missing cohorts.
-- [ ] **TTA**: add a multiclass path alongside `predict_with_tta_3d` (average softmax probabilities across flips, then back to logits). The current sigmoid roundtrip is binary-only and must not silently run on 4-channel outputs; assert on channel count.
+- [ ] **TTA**: add a multiclass path alongside `predict_with_tta_3d` (average softmax probabilities across flips, then back to logits). The current sigmoid roundtrip is binary-only and must not silently run on 5-channel outputs; assert on channel count.
 - [ ] Tests: region derivation, per-region NaN on ET-free cohorts, Tversky/Dice equivalence on binarized inputs, multiclass TTA shape contract.
 
 ---

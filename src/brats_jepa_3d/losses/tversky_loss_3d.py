@@ -93,11 +93,16 @@ class CombinedTverskyBCEWithLogitsLoss3D(nn.Module):
         alpha: float = 0.3,
         beta: float = 0.7,
         smooth: float = 1e-5,
+        include_background: bool = False,
     ):
         super().__init__()
         self.tversky_weight = tversky_weight
         self.bce_weight = bce_weight
-        self.tversky_loss = VolumetricTverskyLoss(alpha=alpha, beta=beta, smooth=smooth)
+        self.include_background = include_background
+        self.tversky_loss = VolumetricTverskyLoss(
+            alpha=alpha, beta=beta, smooth=smooth,
+            include_background=include_background,
+        )
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> dict[str, torch.Tensor]:
         tversky = self.tversky_loss(logits, targets)
@@ -112,7 +117,11 @@ class CombinedTverskyBCEWithLogitsLoss3D(nn.Module):
                 targets_long = targets[:, 0].long()
             else:
                 targets_long = targets.long()
-            targets_long = targets_long.clamp(0, C - 1)
+            if targets_long.min() < 0 or targets_long.max() >= C:
+                raise ValueError(
+                    f"Target labels out of range [0, {C - 1}]: "
+                    f"got min={int(targets_long.min())}, max={int(targets_long.max())}."
+                )
             ce = F.cross_entropy(logits, targets_long, ignore_index=-100)
         total = self.tversky_weight * tversky + self.bce_weight * ce
         return {
@@ -167,6 +176,7 @@ def build_segmentation_criterion(
     tversky_alpha: float = 0.3,
     tversky_beta: float = 0.7,
     num_classes: int | None = None,
+    include_background: bool | None = None,
 ) -> nn.Module:
     """Shared criterion factory for all supervised 3D trainers (fair-benchmark parity).
 
@@ -178,16 +188,25 @@ def build_segmentation_criterion(
     None keeps the legacy default (4); pass 5 for the BraTS 2024 region
     protocol. Irrelevant for binary (C=1) logits. Tversky derives widths from
     the logits themselves and needs no count.
+
+    include_background: whether the overlap (Dice/Tversky) term averages over
+    the background channel. None (default) → False for multi-class
+    (num_classes > 1, v2 WT/TC/ET protocol) so tiny ET is not diluted 1/5 by
+    ~98.5% background voxels, True for binary (legacy WT-only behavior
+    unchanged). Pass explicitly to override. CE always supervises all voxels
+    including background.
     """
     if loss_type not in ("dice_bce", "tversky"):
         raise ValueError(f"Unknown loss_type: {loss_type}")
     nc = num_classes if (num_classes and num_classes > 1) else 4
+    is_multiclass = bool(num_classes and num_classes > 1)
+    ib = include_background if include_background is not None else (not is_multiclass)
     if loss_type == "tversky":
         base: nn.Module = CombinedTverskyBCEWithLogitsLoss3D(
-            alpha=tversky_alpha, beta=tversky_beta
+            alpha=tversky_alpha, beta=tversky_beta, include_background=ib,
         )
     else:
-        base = CombinedDiceBCELoss3D(num_classes=nc)
+        base = CombinedDiceBCELoss3D(num_classes=nc, include_background=ib)
     if deep_supervision:
         return DeepSupervisionLoss3D(base_loss=base)
     return base

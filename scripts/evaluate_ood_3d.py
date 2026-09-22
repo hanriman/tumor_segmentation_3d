@@ -111,7 +111,8 @@ def evaluate_perturbation(
                 metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
                 dices.extend(metrics["dice_per_sample"])
             else:
-                # Multi-class protocol: WT-region score keeps regimes comparable.
+                # Multi-class protocol: mean WT/TC/ET score (WT-only is blind
+                # to ET collapse; see validation_dice_iou).
                 dices.append(validation_dice_iou(logits, masks)[0])
             if smoke_test and batch_idx >= 1:
                 break

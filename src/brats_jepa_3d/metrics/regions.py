@@ -79,7 +79,25 @@ def validation_dice_iou(
     logits: torch.Tensor, masks: torch.Tensor
 ) -> tuple[float, float]:
     """Model-selection score honoring output channels: binary path as before,
-    multi-class path reports the WT region (comparable across protocols)."""
+    multi-class path reports the mean over WT/TC/ET region Dice/IoU.
+
+    WT-only selection is blind to ET collapse (WT is ED-dominated, so WT can
+    stay ~87% while ET=0). Averaging all three regions keeps the gate honest;
+    per-region scores remain available via compute_brats_regions_3d."""
+    if logits.shape[1] == 1:
+        m = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
+        return float(m["dice"]), float(m["iou"])
+    res = compute_brats_regions_3d(logits, masks, compute_hd95=False)
+    dice = float(sum(float(res[r]["dice"]) for r in ("WT", "TC", "ET")) / 3.0)
+    iou = float(sum(float(res[r]["iou"]) for r in ("WT", "TC", "ET")) / 3.0)
+    return dice, iou
+
+
+def validation_dice_iou_wt(
+    logits: torch.Tensor, masks: torch.Tensor
+) -> tuple[float, float]:
+    """Legacy WT-only score (protocol-comparability logging only, NOT for
+    checkpoint selection on v2)."""
     if logits.shape[1] == 1:
         m = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
         return float(m["dice"]), float(m["iou"])
