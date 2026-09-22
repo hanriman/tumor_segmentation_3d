@@ -170,3 +170,22 @@ def test_benchmark_model_region_rows():
     assert set(stats["regions"]) == {"WT", "TC", "ET"}
     assert stats["regions"]["WT"]["dice_mean"] >= 0.0
     assert stats["latency_ms"] >= 0.0
+
+
+def test_channel_mismatch_raises_actionable_error():
+    import pytest
+
+    from brats_jepa_3d.models import JEPASegmentationModel3D, load_downstream_state_dict
+    torch.manual_seed(0)
+    c1 = JEPASegmentationModel3D(
+        img_size=(32, 32, 32), patch_size=(16, 16, 16), encoder_depth=1,
+        decoder_type="multiscale", out_channels=1)
+    c5 = JEPASegmentationModel3D(
+        img_size=(32, 32, 32), patch_size=(16, 16, 16), encoder_depth=1,
+        decoder_type="multiscale", out_channels=5)
+    sd1 = c1.state_dict()
+    with pytest.raises(RuntimeError, match="out_channels mismatch"):
+        load_downstream_state_dict(c5, sd1, "test-model")
+    # matching channels load cleanly
+    missing, _ = load_downstream_state_dict(c5, c5.state_dict(), "test-model")
+    assert missing == []

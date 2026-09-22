@@ -39,6 +39,7 @@ from brats_jepa_3d.models import (
     BraTS3DnnUNet,
     BraTS3DUNet,
     JEPASegmentationModel3D,
+    load_downstream_state_dict,
 )
 from brats_jepa_3d.utils import (
     check_pool_match,
@@ -213,10 +214,11 @@ def main():
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
                 decoder_type=args.decoder_type,
                 deep_supervision=ds_flag,
+                out_channels=jepa_cfg.get("out_channels", 1),
             )
             sd = torch.load(ckpt, map_location=device)
             sd = sd.get("model_state_dict", sd)
-            missing, _unexpected = m.load_state_dict(sd, strict=False)
+            missing, _unexpected = load_downstream_state_dict(m, sd, name)
             matched = [k for k in m.state_dict() if k not in missing]
             logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             return m.to(device)
@@ -257,6 +259,7 @@ def main():
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
                 decoder_type=args.decoder_type,
                 deep_supervision=ds_flag,
+                out_channels=jepa_cfg.get("out_channels", 1),
             )
             if ckpt and ckpt.exists():
                 ckpt_raw = torch.load(ckpt, map_location=device)
@@ -269,7 +272,7 @@ def main():
                 has_downstream = any(k.startswith("encoder.") for k in sd) or any(k.startswith("decoder.") for k in sd)
                 has_pretrain = any(k.startswith("context_encoder.") for k in sd)
                 if has_downstream:
-                    missing, _unexpected = m.load_state_dict(sd, strict=False)
+                    missing, _unexpected = load_downstream_state_dict(m, sd, name)
                     matched = [k for k in m.state_dict() if k not in missing]
                     logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
                 elif has_pretrain:
@@ -279,7 +282,7 @@ def main():
                         f"but decoder is randomly initialized."
                     )
                 else:
-                    missing, _unexpected = m.load_state_dict(sd, strict=False)
+                    missing, _unexpected = load_downstream_state_dict(m, sd, name)
                     matched = [k for k in m.state_dict() if k not in missing]
                     logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             else:

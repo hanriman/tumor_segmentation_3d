@@ -35,6 +35,7 @@ from brats_jepa_3d.models import (
     BraTS3DnnUNet,
     BraTS3DUNet,
     JEPASegmentationModel3D,
+    load_downstream_state_dict,
 )
 from brats_jepa_3d.utils import (
     get_autocast_context,
@@ -449,7 +450,7 @@ def main():
                 encoder_depth=jepa_cfg.get("encoder_depth", 8),
                 num_heads=jepa_cfg.get("num_heads", 6),
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                out_channels=1,
+                out_channels=jepa_cfg.get("out_channels", 1),
                 decoder_type=decoder_type or "multiscale",
                 deep_supervision=ds_flag,
             ).to(device)
@@ -458,7 +459,7 @@ def main():
             has_downstream = any(k.startswith("encoder.") for k in sd) or any(k.startswith("decoder.") for k in sd)
             has_pretrain = any(k.startswith("context_encoder.") for k in sd)
             if has_downstream:
-                missing, _unexpected = model.load_state_dict(sd, strict=False)
+                missing, _unexpected = load_downstream_state_dict(model, sd, label)
                 matched = [k for k in model.state_dict() if k not in missing]
                 logger.info(f"Loaded downstream fine-tuned weights from {ckpt_file.name} ({len(matched)} matched keys)")
             elif has_pretrain:
@@ -468,7 +469,7 @@ def main():
                     f"but decoder is randomly initialized."
                 )
             else:
-                missing, _unexpected = model.load_state_dict(sd, strict=False)
+                missing, _unexpected = load_downstream_state_dict(model, sd, label)
                 matched = [k for k in model.state_dict() if k not in missing]
                 logger.info(f"Loaded weights from {ckpt_file.name} ({len(matched)} matched keys)")
 

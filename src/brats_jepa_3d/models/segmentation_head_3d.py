@@ -399,6 +399,26 @@ class HybridUNETRDecoder3D(nn.Module):
         return out
 
 
+def load_downstream_state_dict(
+    model: torch.nn.Module, sd: dict, label: str = "model"
+) -> tuple[list, list]:
+    """strict=False load with a loud channel-mismatch guard.
+
+    C=1 checkpoints cannot load into C=5 heads (size mismatch still raises
+    under strict=False); surface that as an actionable error naming the
+    likely cause instead of a raw shape traceback.
+    """
+    try:
+        return model.load_state_dict(sd, strict=False)
+    except RuntimeError as e:
+        raise RuntimeError(
+            f"{label}: checkpoint incompatible with model architecture — most "
+            f"often an out_channels mismatch (e.g. C=1 weights into a C=5 "
+            f"model): retrain with matching config or point at the matching "
+            f"checkpoint. Underlying error: {e}"
+        ) from e
+
+
 class JEPASegmentationModel3D(nn.Module):
     r"""
     Unified Downstream 3D Volumetric Segmentation Architecture.

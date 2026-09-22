@@ -6,6 +6,7 @@ from .segmentation_head_3d import (
     JEPASegmentationModel3D,
     MultiScaleViTSegmentationDecoder3D,
     ViTSegmentationDecoder3D,
+    load_downstream_state_dict,
 )
 from .sigreg_jepa_3d import SigRegJEPA3D
 from .unet_3d import BraTS3DUNet
@@ -21,6 +22,7 @@ __all__ = [
     "JEPASegmentationModel3D",
     "MultiScaleViTSegmentationDecoder3D",
     "PatchEmbed3D",
+    "load_downstream_state_dict",
     "SigRegJEPA3D",
     "ViTSegmentationDecoder3D",
     "VisRegJEPA3D",
