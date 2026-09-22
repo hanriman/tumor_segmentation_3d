@@ -1,6 +1,6 @@
 # Plan: Migrate from Binary Whole-Tumor to BraTS Three-Region Segmentation (WT/TC/ET)
 
-**Status:** planned, not started. Tracked on branch `feat/multiregion-wt-tc-et` (cut after committing the 01/07/08 notebook split on main).
+**Status:** Phase 0 + Phase 1 done (branch `feat/multiregion-wt-tc-et`); Phase 2 (UNet end-to-end) next, needs GPU. Tracked on branch `feat/multiregion-wt-tc-et` (cut after committing the 01/07/08 notebook split on main).
 **Motivation:** the current pipeline segments binary whole-tumor (tumor yes/no); the BraTS community standard scores three overlapping regions (WT/TC/ET). See the Task Scope discussion: WT-only blocks leaderboard comparability and hides ET-specific failure modes.
 **Representativeness note:** this is a supervised-side-only migration. SSL pretraining is label-free and untouched; the 100-epoch encoder investment is preserved.
 

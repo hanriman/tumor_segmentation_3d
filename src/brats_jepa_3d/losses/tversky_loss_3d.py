@@ -74,15 +74,16 @@ class VolumetricTverskyLoss(nn.Module):
 
 class CombinedTverskyBCEWithLogitsLoss3D(nn.Module):
     r"""
-    Combined Volumetric 3D Tversky + BCE Loss.
+    Combined Volumetric 3D Tversky + cross-entropy Loss.
 
     Returns the same key contract as CombinedDiceBCELoss3D
     ({"loss", "dice_loss", "bce_loss"}) with the Tversky term reported under
     "dice_loss" (plus an explicit "tversky_loss" alias), so DeepSupervisionLoss3D
     aggregation and training-log formatting work unchanged.
 
-    Note: the BCE term is binary-only (C=1 whole-tumor task); multi-class logits
-    raise an explicit ValueError rather than silently miscomputing.
+    Multi-class (C>1): Tversky averages per-class exactly like VolumetricDiceLoss,
+    and the CE term mirrors CombinedDiceBCELoss3D (softmax CE over all voxels
+    including background).
     """
 
     def __init__(
@@ -99,16 +100,20 @@ class CombinedTverskyBCEWithLogitsLoss3D(nn.Module):
         self.tversky_loss = VolumetricTverskyLoss(alpha=alpha, beta=beta, smooth=smooth)
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> dict[str, torch.Tensor]:
-        if logits.shape[1] != 1:
-            raise ValueError(
-                f"CombinedTverskyBCEWithLogitsLoss3D is binary-only (C=1); got C={logits.shape[1]}. "
-                "Use VolumetricTverskyLoss directly for multi-class logits."
-            )
         tversky = self.tversky_loss(logits, targets)
-        targets_bin = (targets > 0).float()
-        if targets_bin.dim() == 4:
-            targets_bin = targets_bin.unsqueeze(1)
-        ce = F.binary_cross_entropy_with_logits(logits, targets_bin)
+        C = logits.shape[1]
+        if C == 1:
+            targets_bin = (targets > 0).float()
+            if targets_bin.dim() == 4:
+                targets_bin = targets_bin.unsqueeze(1)
+            ce = F.binary_cross_entropy_with_logits(logits, targets_bin)
+        else:
+            if targets.dim() == 5 and targets.shape[1] == 1:
+                targets_long = targets[:, 0].long()
+            else:
+                targets_long = targets.long()
+            targets_long = targets_long.clamp(0, C - 1)
+            ce = F.cross_entropy(logits, targets_long, ignore_index=-100)
         total = self.tversky_weight * tversky + self.bce_weight * ce
         return {
             "loss": total,

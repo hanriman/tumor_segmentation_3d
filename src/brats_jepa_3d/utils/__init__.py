@@ -10,7 +10,7 @@ from .export import export_artifacts, import_artifacts, resolve_outputs_source_d
 from .fingerprint import check_pool_match, dataset_fingerprint
 from .logging import MetricTracker, setup_logger, sort_checkpoints_by_epoch
 from .seed import set_seed
-from .tta import TTA_FLIP_DIMS, predict_with_tta_3d
+from .tta import TTA_FLIP_DIMS, predict_with_tta_3d, predict_with_tta_multiclass_3d
 
 __all__ = [
     "MetricTracker",
@@ -27,6 +27,7 @@ __all__ = [
     "get_device",
     "import_artifacts",
     "predict_with_tta_3d",
+    "predict_with_tta_multiclass_3d",
     "resolve_outputs_source_dir",
     "set_seed",
     "setup_logger",
