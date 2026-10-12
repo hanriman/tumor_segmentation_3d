@@ -40,3 +40,6 @@ Thumbs.db
 *.synctex.gz
 *.toc
 texput.log
+
+# Reference Literature Sources
+paper/references/

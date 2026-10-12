@@ -27,6 +27,8 @@ from brats_jepa_3d.config import (
 )
 from brats_jepa_3d.data import BraTS3DDataset
 from brats_jepa_3d.metrics import (
+    BRATS_REGIONS,
+    brats_region_masks_from_target,
     compute_brats_regions_3d,
     compute_representation_collapse_metrics,
     compute_volumetric_metrics_3d,
@@ -181,6 +183,7 @@ def benchmark_model(
                 res = compute_brats_regions_3d(
                     logits, masks, voxel_spacing=voxel_spacing
                 )
+                tgt_masks = brats_region_masks_from_target(masks, BRATS_REGIONS)
                 for rname, rmet in res.items():
                     acc = region_acc.setdefault(
                         rname, {"dice": [], "iou": [], "hd95": [],
@@ -189,8 +192,12 @@ def benchmark_model(
                     acc["dice"].extend(rmet["dice_per_sample"])
                     acc["iou"].extend(rmet["iou_per_sample"])
                     acc["hd95"].extend(rmet["hd95_per_sample"])
-                    acc["dice_tumor"].append(rmet["dice_tumor_only"])
-                    acc["iou_tumor"].append(rmet["iou_tumor_only"])
+                    # Accumulate sample-level values where target has tumor to prevent Simpson's paradox
+                    has_t = [v > 0 for v in tgt_masks[rname].flatten(1).sum(dim=1).tolist()]
+                    for i, ht in enumerate(has_t):
+                        if ht and i < len(rmet["dice_per_sample"]):
+                            acc["dice_tumor"].append(rmet["dice_per_sample"][i])
+                            acc["iou_tumor"].append(rmet["iou_per_sample"][i])
 
             if smoke_test and batch_idx >= 1:
                 break
@@ -472,10 +479,10 @@ def main():
                 matched = [k for k in model.state_dict() if k not in missing]
                 logger.info(f"Loaded downstream fine-tuned weights from {ckpt_file.name} ({len(matched)} matched keys)")
             elif has_pretrain:
-                res = model.load_pretrained_encoder(sd)
-                logger.warning(
-                    f"Loaded pre-trained encoder weights from {ckpt_file.name} ({res['loaded_keys']} keys), "
-                    f"but decoder is randomly initialized."
+                raise RuntimeError(
+                    f"{label}: Checkpoint {ckpt_file.name} contains only pre-trained encoder weights. "
+                    f"Evaluating a randomly initialized downstream decoder produces invalid benchmark numbers. "
+                    f"Train downstream model with train_downstream_3d.py first."
                 )
             else:
                 missing, _unexpected = load_downstream_state_dict(model, sd, label)

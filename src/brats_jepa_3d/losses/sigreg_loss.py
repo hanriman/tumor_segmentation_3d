@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from .ijepa_loss import IJEPALoss
+from .token_queue import FIFOTokenQueue
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,8 @@ class SigRegLoss(nn.Module):
         t_max: float = 3.0,
         n_knots: int = 17,
         normalize_measure: bool = True,
+        use_token_queue: bool = False,
+        queue_capacity_tokens: int = 24576,
     ):
         super().__init__()
         self.jepa_loss = IJEPALoss(loss_type=loss_type)
@@ -118,6 +121,11 @@ class SigRegLoss(nn.Module):
             n_knots=n_knots,
             normalize_measure=normalize_measure,
         )
+        self.token_queue = (
+            FIFOTokenQueue(max_tokens=queue_capacity_tokens)
+            if use_token_queue
+            else None
+        )
 
     def forward(
         self,
@@ -127,6 +135,7 @@ class SigRegLoss(nn.Module):
         tokens: torch.Tensor | None = None,
         projected_tokens: torch.Tensor | None = None,
         generator: torch.Generator | None = None,
+        reg_scale: float = 1.0,
     ) -> dict[str, torch.Tensor]:
         j_loss = self.jepa_loss(predictions, targets)
 
@@ -144,11 +153,17 @@ class SigRegLoss(nn.Module):
             raise ValueError("SigRegLoss requires regularized token representations.")
 
         # Flatten tokens across batch and patch dimensions: [N, D]
-        z = reg_tokens.reshape(-1, reg_tokens.shape[-1])
-        if z.dim() != 2 or z.shape[0] < 1 or z.shape[1] < 1:
+        z_batch = reg_tokens.reshape(-1, reg_tokens.shape[-1])
+        if z_batch.dim() != 2 or z_batch.shape[0] < 1 or z_batch.shape[1] < 1:
             raise ValueError(
-                f"SigRegLoss expects non-empty [N, D] tokens after flatten, got {tuple(z.shape)}."
+                f"SigRegLoss expects non-empty [N, D] tokens after flatten, got {tuple(z_batch.shape)}."
             )
+
+        # Buffer integration: concatenate with detached representations from preceding steps
+        if self.token_queue is not None:
+            z = self.token_queue.get_all(z_batch)
+        else:
+            z = z_batch
         D = z.shape[-1]
 
         # Sample M random projection directions on unit hypersphere in float32
@@ -168,10 +183,16 @@ class SigRegLoss(nn.Module):
         proj = z.float() @ A
 
         sigreg_val = self.ep_test(proj)
-        total_loss = j_loss + self.sigreg_weight * sigreg_val.to(dtype=j_loss.dtype)
+
+        # Update FIFO queue with detached current batch representations during training
+        if self.token_queue is not None and self.training:
+            self.token_queue.update(z_batch)
+
+        total_loss = j_loss + reg_scale * self.sigreg_weight * sigreg_val.to(dtype=j_loss.dtype)
 
         return {
             "loss": total_loss,
             "jepa_loss": j_loss,
             "sigreg_loss": sigreg_val,
+            "reg_scale": torch.tensor(reg_scale, device=j_loss.device),
         }

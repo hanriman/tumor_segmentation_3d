@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from .ijepa_loss import IJEPALoss
+from .token_queue import FIFOTokenQueue
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,8 @@ class VisRegLoss(nn.Module):
         target_std: float = 1.0,
         swd_metric: str = "mse",
         scale_loss_type: str = "squared",
+        use_token_queue: bool = False,
+        queue_capacity_tokens: int = 24576,
     ):
         super().__init__()
         self.jepa_loss = IJEPALoss(loss_type=loss_type)
@@ -82,6 +85,11 @@ class VisRegLoss(nn.Module):
                 f"Unknown scale_loss_type: {scale_loss_type}. Must be 'squared' or 'hinge'."
             )
         self.scale_loss_type = scale_loss_type
+        self.token_queue = (
+            FIFOTokenQueue(max_tokens=queue_capacity_tokens)
+            if use_token_queue
+            else None
+        )
 
     def _center_loss(self, z: torch.Tensor) -> torch.Tensor:
         r"""Center regularization: (1/D) * ||mu_z||_2^2."""
@@ -143,6 +151,7 @@ class VisRegLoss(nn.Module):
         tokens: torch.Tensor | None = None,
         projected_tokens: torch.Tensor | None = None,
         generator: torch.Generator | None = None,
+        reg_scale: float = 1.0,
     ) -> dict[str, torch.Tensor]:
         j_loss = self.jepa_loss(predictions, targets)
 
@@ -160,22 +169,32 @@ class VisRegLoss(nn.Module):
             raise ValueError("VisRegLoss requires regularized token representations.")
 
         # Flatten across batch and patch dimensions: [N, D]
-        z = reg_tokens.reshape(-1, reg_tokens.shape[-1])
-        if z.dim() != 2 or z.shape[0] < 1 or z.shape[1] < 1:
+        z_batch = reg_tokens.reshape(-1, reg_tokens.shape[-1])
+        if z_batch.dim() != 2 or z_batch.shape[0] < 1 or z_batch.shape[1] < 1:
             raise ValueError(
-                f"VisRegLoss expects non-empty [N, D] tokens after flatten, got {tuple(z.shape)}."
+                f"VisRegLoss expects non-empty [N, D] tokens after flatten, got {tuple(z_batch.shape)}."
             )
+
+        # Buffer integration: concatenate with detached representations from preceding steps
+        if self.token_queue is not None:
+            z = self.token_queue.get_all(z_batch)
+        else:
+            z = z_batch
 
         center_loss = self._center_loss(z)
         scale_loss = self._scale_loss(z)
         swd_loss = self._sliced_wasserstein_distance(z, generator=generator)
 
-        total_loss = (
-            j_loss
-            + self.center_weight * center_loss
+        # Update FIFO queue with detached current batch representations during training
+        if self.token_queue is not None and self.training:
+            self.token_queue.update(z_batch)
+
+        reg_term = (
+            self.center_weight * center_loss
             + self.scale_weight * scale_loss
             + self.swd_weight * swd_loss
         )
+        total_loss = j_loss + reg_scale * reg_term
         return {
             "loss": total_loss,
             "jepa_loss": j_loss,
@@ -183,4 +202,5 @@ class VisRegLoss(nn.Module):
             "scale_loss": scale_loss,
             "shape_loss": swd_loss,
             "swd_loss": swd_loss,
+            "reg_scale": torch.tensor(reg_scale, device=j_loss.device),
         }

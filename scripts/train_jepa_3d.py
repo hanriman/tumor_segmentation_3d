@@ -82,6 +82,37 @@ def parse_args():
     parser.add_argument(
         "--smoke_test", action="store_true", help="Run 1 epoch with 2 batches for fast verification"
     )
+    # Tier 2: FIFO Token Memory Queue & Cosine Regularizer Annealing
+    parser.add_argument(
+        "--use_token_queue",
+        action="store_true",
+        default=True,
+        help="Enable FIFO Token Memory Queue for statistical regularizers (default: True)",
+    )
+    parser.add_argument(
+        "--no_token_queue",
+        action="store_false",
+        dest="use_token_queue",
+        help="Disable FIFO Token Memory Queue",
+    )
+    parser.add_argument(
+        "--queue_patient_capacity",
+        type=int,
+        default=128,
+        help="Number of patient volumes buffered in FIFO Token Queue (default: 128)",
+    )
+    parser.add_argument(
+        "--reg_warmup_epochs",
+        type=int,
+        default=15,
+        help="Warmup epochs with reg_scale=1.0 before cosine annealing (default: 15)",
+    )
+    parser.add_argument(
+        "--reg_min_scale",
+        type=float,
+        default=0.10,
+        help="Minimum regularizer scale after cosine annealing (default: 0.10)",
+    )
     return parser.parse_args()
 
 
@@ -128,17 +159,22 @@ def main():
     )
 
     # Initialize 3D Data Pipeline with config parameters
-    target_cuboid_size = getattr(args, "target_cuboid_size", (3, 3, 3))
+    target_cuboid_sizes = getattr(args, "target_cuboid_sizes", None)
+    if isinstance(target_cuboid_sizes, list):
+        target_cuboid_sizes = tuple(tuple(int(x) for x in s) for s in target_cuboid_sizes)
+    target_cuboid_size = getattr(args, "target_cuboid_size", None)
     if isinstance(target_cuboid_size, list):
-        target_cuboid_size = tuple(target_cuboid_size)
+        target_cuboid_size = tuple(int(x) for x in target_cuboid_size)
+    num_target_cuboids = getattr(args, "num_target_cuboids", None)
     grid_size = getattr(args, "grid_size", (8, 8, 8))
     if isinstance(grid_size, list):
         grid_size = tuple(grid_size)
 
     masking_tf = JEPAMaskingTransform3D(
         grid_size=grid_size,
-        num_target_cuboids=getattr(args, "num_target_cuboids", 4),
+        num_target_cuboids=num_target_cuboids,
         target_cuboid_size=target_cuboid_size,
+        target_cuboid_sizes=target_cuboid_sizes,
         max_target_overlap=getattr(args, "max_target_overlap", 0.0),
         context_num_patches=getattr(args, "context_num_patches", 192),
         connectivity=getattr(args, "context_connectivity", getattr(args, "connectivity", 26)),
@@ -225,6 +261,9 @@ def main():
     predictor_embed_dim = getattr(args, "predictor_embed_dim", 192)
 
     # Initialize Model & Loss
+    use_queue = getattr(args, "use_token_queue", True)
+    queue_tokens = getattr(args, "queue_patient_capacity", 128) * getattr(args, "context_num_patches", 192)
+
     if args.model_type == "ijepa":
         model = IJEPA3D(
             img_size=spatial_shape,
@@ -256,6 +295,8 @@ def main():
             t_max=getattr(args, "t_max", 3.0),
             n_knots=getattr(args, "n_knots", 17),
             normalize_measure=getattr(args, "normalize_measure", True),
+            use_token_queue=use_queue,
+            queue_capacity_tokens=queue_tokens,
         )
 
     elif args.model_type == "visreg_jepa":
@@ -278,6 +319,8 @@ def main():
             target_std=getattr(args, "target_std", 1.0),
             swd_metric=getattr(args, "swd_metric", "mse"),
             scale_loss_type=getattr(args, "scale_loss_type", "squared"),
+            use_token_queue=use_queue,
+            queue_capacity_tokens=queue_tokens,
         )
     else:
         raise ValueError(f"Unknown model_type: {args.model_type}")
@@ -322,7 +365,18 @@ def main():
         train_sublosses: dict[str, float] = {}
         num_batches = 0
 
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}")
+        # Cosine Regularizer Annealing (Wu et al., 2026; Tier 2 Upgrades):
+        # Holds reg_scale=1.0 for reg_warmup_epochs to prevent representation collapse,
+        # then cosine-anneals down to reg_min_scale (default 0.10).
+        reg_warmup = getattr(args, "reg_warmup_epochs", 15)
+        if epoch <= reg_warmup:
+            reg_scale = 1.0
+        else:
+            progress = (epoch - reg_warmup) / max(1, epochs - reg_warmup)
+            min_s = getattr(args, "reg_min_scale", 0.10)
+            reg_scale = min_s + 0.5 * (1.0 - min_s) * (1.0 + math.cos(math.pi * progress))
+
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs} (reg_scale={reg_scale:.2f})")
         for batch_idx, batch in enumerate(pbar):
             images = batch["images"].to(device)
             ctx_idx = batch["context_indices"].to(device)
@@ -348,6 +402,7 @@ def main():
                         out["targets"],
                         projected_tokens=out["projected_tokens"],
                         generator=reg_generator,
+                        reg_scale=reg_scale,
                     )
                     loss = loss_dict["loss"]
 
@@ -431,6 +486,7 @@ def main():
                             val_out["targets"],
                             projected_tokens=val_out["projected_tokens"],
                             generator=reg_generator,
+                            reg_scale=reg_scale,
                         )
                         v_loss = v_loss_dict["loss"]
 

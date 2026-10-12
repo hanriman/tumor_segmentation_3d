@@ -80,11 +80,12 @@ def export_artifacts(
     copied_files: list[Path] = []
     prefix_filter = model_prefix.lower() if model_prefix else None
 
-    # Check primary source and candidate fallbacks to ensure no files are missed
+    # Check primary source; only check fallback candidates if source_dir was not explicitly provided
     fallback_sources = [src_base]
-    for cand in [OUTPUTS_DIR, PROJECT_ROOT / "outputs", Path("/kaggle/working/outputs"), Path("outputs").resolve()]:
-        if cand.exists() and cand not in fallback_sources:
-            fallback_sources.append(cand)
+    if source_dir is None:
+        for cand in [OUTPUTS_DIR, PROJECT_ROOT / "outputs", Path("/kaggle/working/outputs"), Path("outputs").resolve()]:
+            if cand.exists() and cand not in fallback_sources:
+                fallback_sources.append(cand)
 
     for sub in include_subdirs:
         dst_subdir = target_export_dir / sub

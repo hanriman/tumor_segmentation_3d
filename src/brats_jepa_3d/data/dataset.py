@@ -58,14 +58,19 @@ class BraTS3DDataset(Dataset):
         # Fraction subsampling for Low-Data Label Efficiency Benchmark
         # Technical Decision: In low-data regimes (1% to 50% labels), unstratified random sampling
         # risks sampling bias (e.g. over-representing micro-lesions or empty volumes). Stratifying
-        # on tumor_quartile guarantees that every labeled fraction preserves the cohort's lesion size distribution.
+        # on tumor_quartile and ET presence guarantees that every labeled fraction preserves the cohort's lesion size distribution.
         if fraction < 1.0 and len(df) > 0:
             n_samples = max(1, int(np.ceil(len(df) * fraction)))
-            if (
-                "tumor_quartile" in df.columns
-                and df["tumor_quartile"].nunique() > 1
-                and n_samples >= df["tumor_quartile"].nunique()
-            ):
+            strata_col = None
+            if "tumor_quartile" in df.columns and df["tumor_quartile"].nunique() > 1:
+                strata_col = "tumor_quartile"
+                if "has_et" in df.columns and df["has_et"].nunique() > 1:
+                    composite = df["tumor_quartile"].astype(str) + "_" + df["has_et"].astype(str)
+                    if composite.value_counts().min() >= 2 and n_samples >= composite.nunique():
+                        df["_strata"] = composite
+                        strata_col = "_strata"
+
+            if strata_col is not None and n_samples >= df[strata_col].nunique():
                 try:
                     from sklearn.model_selection import train_test_split
 
@@ -73,13 +78,16 @@ class BraTS3DDataset(Dataset):
                         df,
                         train_size=n_samples,
                         random_state=seed,
-                        stratify=df["tumor_quartile"],
+                        stratify=df[strata_col],
                     )
                     df = sampled_df.reset_index(drop=True)
                 except (ValueError, KeyError, TypeError, ImportError):
                     df = df.sample(n=min(len(df), n_samples), random_state=seed).reset_index(drop=True)
             else:
                 df = df.sample(n=min(len(df), n_samples), random_state=seed).reset_index(drop=True)
+
+            if "_strata" in df.columns:
+                df = df.drop(columns=["_strata"])
 
         self.df = df
         self.cache: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}

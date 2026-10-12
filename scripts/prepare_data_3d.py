@@ -28,6 +28,7 @@ import argparse
 import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+import re
 
 import nibabel as nib
 import numpy as np
@@ -391,49 +392,60 @@ def main():
 
     df = pd.DataFrame(records)
 
-    # Patient-stratified split: 70% Train, 15% Val, 15% Test
-    # Stratified by tumor volume quartiles to ensure invariant volume distributions (Roy et al., 2024)
-    pids = df["patient_id"].unique()
+    # Grouped base-patient split: guarantee ZERO longitudinal patient leakage across splits
+    # Base ID strips trailing timepoint/visit suffixes (e.g. BraTS-GLI-00005-100 -> BraTS-GLI-00005)
+    base_id_re = re.compile(r"^(.*)-\d+$")
+    df["base_id"] = df["patient_id"].apply(
+        lambda p: base_id_re.match(str(p)).group(1) if base_id_re.match(str(p)) else str(p)
+    )
+
+    # Group-level quartile from max tumor volume across longitudinal scans
+    g = df.groupby("base_id").agg(
+        num_voxels_tumor=("num_voxels_tumor", "max"),
+        n_scans=("patient_id", "count"),
+    ).reset_index()
+
     split_map = None
-    if len(pids) >= 20:
+    if len(g) >= 20:
         try:
-            # Categorize into quartiles (dropping duplicates if many zero/identical tumor volumes exist)
-            df["tumor_quartile"] = pd.qcut(
-                df["num_voxels_tumor"], q=4, labels=False, duplicates="drop"
+            g["tumor_quartile"] = pd.qcut(
+                g["num_voxels_tumor"], q=4, labels=False, duplicates="drop"
             )
-            q_counts = df["tumor_quartile"].value_counts()
+            q_counts = g["tumor_quartile"].value_counts()
             if q_counts.min() >= 3:
-                train_df, temp_df = train_test_split(
-                    df, test_size=0.30, random_state=args.seed, stratify=df["tumor_quartile"]
+                train_g, temp_g = train_test_split(
+                    g, test_size=0.30, random_state=args.seed, stratify=g["tumor_quartile"]
                 )
-                val_df, test_df = train_test_split(
-                    temp_df,
+                val_g, test_g = train_test_split(
+                    temp_g,
                     test_size=0.50,
                     random_state=args.seed,
-                    stratify=temp_df["tumor_quartile"],
+                    stratify=temp_g["tumor_quartile"],
                 )
-                split_map = {pid: "train" for pid in train_df["patient_id"]}
-                split_map.update({pid: "val" for pid in val_df["patient_id"]})
-                split_map.update({pid: "test" for pid in test_df["patient_id"]})
+                split_map = {r.base_id: "train" for r in train_g.itertuples()}
+                split_map.update({r.base_id: "val" for r in val_g.itertuples()})
+                split_map.update({r.base_id: "test" for r in test_g.itertuples()})
+                quartile_map = dict(zip(g["base_id"], g["tumor_quartile"]))
+                df["tumor_quartile"] = df["base_id"].map(quartile_map)
         except (ValueError, KeyError, TypeError):
             split_map = None
 
-    if split_map is None and len(pids) >= 6:
-        train_pids, temp_pids = train_test_split(pids, test_size=0.30, random_state=args.seed)
-        val_pids, test_pids = train_test_split(temp_pids, test_size=0.50, random_state=args.seed)
-        split_map = {pid: "train" for pid in train_pids}
-        split_map.update({pid: "val" for pid in val_pids})
-        split_map.update({pid: "test" for pid in test_pids})
-    elif split_map is None and len(pids) >= 3:
-        split_map = {pids[0]: "train", pids[1]: "val", pids[2]: "test"}
-        for pid in pids[3:]:
-            split_map[pid] = "train"
+    unique_bids = g["base_id"].unique()
+    if split_map is None and len(unique_bids) >= 6:
+        train_bids, temp_bids = train_test_split(unique_bids, test_size=0.30, random_state=args.seed)
+        val_bids, test_bids = train_test_split(temp_bids, test_size=0.50, random_state=args.seed)
+        split_map = {bid: "train" for bid in train_bids}
+        split_map.update({bid: "val" for bid in val_bids})
+        split_map.update({bid: "test" for bid in test_bids})
+    elif split_map is None and len(unique_bids) >= 3:
+        split_map = {unique_bids[0]: "train", unique_bids[1]: "val", unique_bids[2]: "test"}
+        for bid in unique_bids[3:]:
+            split_map[bid] = "train"
     elif split_map is None:
         # Very small subset (e.g. limit=1 or 2 for debugging/smoke test)
         # WARNING: DEBUG ONLY — same patients are duplicated across train/val/test,
         # so any metric on this split is inflated. Never report beyond smoke.
-        split_map = {pid: "train" for pid in pids}
-        # Duplicate rows for val and test so loaders find records
+        split_map = {bid: "train" for bid in unique_bids}
         val_df = df.copy()
         val_df["split"] = "val"
         test_df = df.copy()
@@ -443,7 +455,7 @@ def main():
         split_map = None
 
     if split_map is not None:
-        df["split"] = df["patient_id"].map(split_map)
+        df["split"] = df["base_id"].map(split_map)
 
     metadata_path = output_dir / "metadata.csv"
     df.to_csv(metadata_path, index=False)

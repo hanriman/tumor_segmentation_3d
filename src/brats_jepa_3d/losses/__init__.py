@@ -8,6 +8,7 @@ from .tversky_loss_3d import (
     build_segmentation_criterion,
     resolve_seg_loss_type,
 )
+from .token_queue import FIFOTokenQueue
 from .visreg_loss import VisRegLoss
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "CombinedTverskyBCEWithLogitsLoss3D",
     "DeepSupervisionLoss3D",
     "EppsPulleyGaussianityTest",
+    "FIFOTokenQueue",
     "IJEPALoss",
     "SigRegLoss",
     "VisRegLoss",

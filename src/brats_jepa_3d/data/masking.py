@@ -8,10 +8,21 @@ logger = logging.getLogger(__name__)
 
 # Fraction of a token's voxels that must be brain for the token to count as tissue.
 TISSUE_TOKEN_FRAC = 0.10
-# Minimum tissue tokens inside a target cuboid (14/27) for it to be accepted.
+# Legacy minimum tissue tokens for isotropic 3x3x3 targets (kept for backward compatibility).
 MIN_TISSUE_TOKENS_PER_TARGET = 14
 # Minimum tissue context tokens before falling back to unfiltered regularization.
 MIN_TISSUE_CONTEXT_TOKENS = 32
+
+# Default Option B (3D Aspect-Ratio Jitter): 6 target cuboids spanning isotropic macro,
+# axial, coronal, and sagittal planar slabs, plus regional meso blocks (97 tokens total).
+DEFAULT_TARGET_CUBOID_SIZES: tuple[tuple[int, int, int], ...] = (
+    (3, 3, 3),  # 27 tokens: Macro isotropic cube (48mm)
+    (2, 3, 3),  # 18 tokens: Axial planar slab (32x48x48mm)
+    (3, 2, 3),  # 18 tokens: Coronal planar slab (48x32x48mm)
+    (3, 3, 2),  # 18 tokens: Sagittal planar slab (48x48x32mm)
+    (2, 2, 2),  #  8 tokens: Regional meso cube (32mm)
+    (2, 2, 2),  #  8 tokens: Regional meso cube (32mm)
+)
 
 
 class JEPAMaskingTransform3D:
@@ -36,23 +47,55 @@ class JEPAMaskingTransform3D:
        Target and context index sets satisfy:
            \text{ctx} \cap \left(\bigcup_{m=1}^M \text{tgt}_m\right) = \emptyset
        ensuring zero attention leakage from target into the context encoder.
+    5. 3D Aspect-Ratio Jitter Target Cuboids (Option B: 97 tokens):
+       Sampling multi-aspect cuboids [(3,3,3), (2,3,3), (3,2,3), (3,3,2), (2,2,2), (2,2,2)]
+       trains the predictor across axial, coronal, and sagittal anatomical planes, while maintaining
+       dense supervision (89.8% retention of baseline) and zero ragged padding via slot-uniform shapes.
     """
 
     def __init__(
         self,
         grid_size: tuple[int, int, int] = (8, 8, 8),
-        num_target_cuboids: int = 4,
-        target_cuboid_size: tuple[int, int, int] = (3, 3, 3),
+        num_target_cuboids: int | None = None,
+        target_cuboid_size: tuple[int, int, int] | None = None,
+        target_cuboid_sizes: (
+            tuple[tuple[int, int, int], ...]
+            | list[tuple[int, int, int]]
+            | list[list[int]]
+            | None
+        ) = None,
         max_target_overlap: float = 0.0,
         context_num_patches: int = 192,
         connectivity: int = 26,
         tissue_token_frac: float = TISSUE_TOKEN_FRAC,
-        min_tissue_tokens_per_target: int = MIN_TISSUE_TOKENS_PER_TARGET,
+        min_tissue_tokens_per_target: int | None = None,
     ):
         self.grid_size = grid_size
         self.num_patches = grid_size[0] * grid_size[1] * grid_size[2]  # 512
-        self.num_target_cuboids = num_target_cuboids
-        self.target_cuboid_size = target_cuboid_size
+
+        if target_cuboid_sizes is not None:
+            self.target_cuboid_sizes = tuple(
+                tuple(int(x) for x in s) for s in target_cuboid_sizes
+            )
+            self.num_target_cuboids = len(self.target_cuboid_sizes)
+            self.target_cuboid_size = (
+                self.target_cuboid_sizes[0] if self.target_cuboid_sizes else (3, 3, 3)
+            )
+        elif num_target_cuboids is not None or target_cuboid_size is not None:
+            n_tgt = 4 if num_target_cuboids is None else int(num_target_cuboids)
+            sz_tgt = (
+                (3, 3, 3)
+                if target_cuboid_size is None
+                else tuple(int(x) for x in target_cuboid_size)
+            )
+            self.num_target_cuboids = n_tgt
+            self.target_cuboid_size = sz_tgt
+            self.target_cuboid_sizes = tuple(sz_tgt for _ in range(n_tgt))
+        else:
+            self.target_cuboid_sizes = DEFAULT_TARGET_CUBOID_SIZES
+            self.num_target_cuboids = len(self.target_cuboid_sizes)
+            self.target_cuboid_size = self.target_cuboid_sizes[0]
+
         self.max_target_overlap = max_target_overlap
         self.context_num_patches = context_num_patches
         self.connectivity = connectivity
@@ -124,15 +167,21 @@ class JEPAMaskingTransform3D:
     ) -> list[set[int]]:
         """Samples M contiguous 3D cuboid target blocks with controlled overlap.
 
-        When `tissue` is given, cuboids with >= min_tissue_tokens_per_target tissue
-        tokens are preferred (best-attempt fallback mirrors the overlap logic).
+        When `tissue` is given, cuboids with >= min_tissue tissue tokens are preferred.
+        For each cuboid (cz, cy, cx), min_tissue is dynamically set to
+        max(4, int(0.40 * (cz * cy * cx))) unless overridden by self.min_tissue_tokens_per_target.
         """
         gz, gy, gx = self.grid_size
-        cz, cy, cx = self.target_cuboid_size
         target_cuboids = []
         all_target_indices: set[int] = set()
 
-        for _ in range(self.num_target_cuboids):
+        for cz, cy, cx in self.target_cuboid_sizes:
+            tgt_vol = cz * cy * cx
+            if self.min_tissue_tokens_per_target is not None:
+                min_tissue = min(self.min_tissue_tokens_per_target, tgt_vol)
+            else:
+                min_tissue = max(4, int(0.40 * tgt_vol)) if tissue is not None else 0
+
             best_cuboid: set[int] | None = None
             best_key: tuple[float, float] | None = None  # (overlap, -tissue_count): lower is better
 
@@ -150,7 +199,7 @@ class JEPAMaskingTransform3D:
                 overlap = len(candidate & all_target_indices) / len(candidate)
                 tissue_count = len(candidate & tissue) if tissue is not None else 0
                 if overlap <= self.max_target_overlap and (
-                    tissue is None or tissue_count >= self.min_tissue_tokens_per_target
+                    tissue is None or tissue_count >= min_tissue
                 ):
                     best_cuboid = candidate
                     break

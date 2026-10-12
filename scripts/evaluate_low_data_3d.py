@@ -90,6 +90,18 @@ def parse_args():
     )
     parser.add_argument("--include_background", action="store_true", default=None)
     parser.add_argument("--no_include_background", action="store_false", dest="include_background")
+    parser.add_argument(
+        "--deep_supervision",
+        action="store_true",
+        default=True,
+        help="Train with deep supervision multi-scale loss heads (default: True)",
+    )
+    parser.add_argument(
+        "--no_deep_supervision",
+        action="store_false",
+        dest="deep_supervision",
+        help="Disable deep supervision heads",
+    )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
 
@@ -294,7 +306,7 @@ def main():
                 num_heads=jepa_cfg.get("num_heads", 6),
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
                 decoder_type=args.decoder_type,
-                deep_supervision=True,
+                deep_supervision=args.deep_supervision,
                 out_channels=jepa_cfg.get("out_channels", 1),
             ).to(device), jepa_cfg.get("out_channels", 1)
 
@@ -330,15 +342,6 @@ def main():
                 )
                 return None
 
-            ds_flag = False
-            try:
-                sd_peek = torch.load(ckpt_path, map_location="cpu")
-                sd_peek = sd_peek.get("model_state_dict", sd_peek)
-                if any(k.startswith("decoder.ds") for k in sd_peek):
-                    ds_flag = True
-            except (KeyError, OSError, RuntimeError, AttributeError):
-                pass
-
             m = JEPASegmentationModel3D(
                 img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
                 patch_size=tuple(jepa_cfg.get("patch_size", (16, 16, 16))),
@@ -348,7 +351,7 @@ def main():
                 num_heads=jepa_cfg.get("num_heads", 6),
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
                 decoder_type=args.decoder_type,
-                deep_supervision=ds_flag,
+                deep_supervision=args.deep_supervision,
                 out_channels=jepa_cfg.get("out_channels", 1),
             )
             n_classes = jepa_cfg.get("out_channels", 1)
@@ -370,7 +373,7 @@ def main():
             return BraTS3DnnUNet(
                 in_channels=nnunet_cfg.get("in_channels", 4),
                 out_channels=nnunet_cfg.get("out_channels", 1),
-                deep_supervision=nnunet_cfg.get("deep_supervision", True),
+                deep_supervision=args.deep_supervision,
                 deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
                 res_block=nnunet_cfg.get("res_block", True),
             ).to(device), nnunet_cfg.get("out_channels", 1)
@@ -385,6 +388,7 @@ def main():
                 strides=tuple(unet_cfg.get("strides", (2, 2, 2, 2))),
                 num_res_units=unet_cfg.get("num_res_units", 2),
                 dropout=unet_cfg.get("dropout", 0.1),
+                deep_supervision=args.deep_supervision,
             ).to(device), unet_cfg.get("out_channels", 1)
 
         else:
