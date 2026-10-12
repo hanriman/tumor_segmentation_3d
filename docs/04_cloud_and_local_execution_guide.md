@@ -1,0 +1,121 @@
+# Cloud & Local Execution Guide (Kaggle & Colab Pro A100)
+
+*Step-by-step operational guide for data packaging, cloud GPU pre-training, downstream fine-tuning, and automated benchmark aggregation.*
+
+---
+
+## 1. Hardware Specifications & Optimization Strategy
+
+| Environment | Accelerator | Usable VRAM | Recommended Batch Size ($B$) | Mixed Precision | Purpose |
+| :--- | :--- | :--- | :---: | :---: | :--- |
+| **Local / Workstation** | CPU / Apple Silicon | Shared RAM | $B=1$ (smoke tests) | FP32 / MPS | Unit testing & code verification |
+| **Kaggle (Free Tier)** | NVIDIA Tesla T4 / P100 | 16 GB | $B=8$ (Pretrain) / $B=2$ (Downstream) | `--amp` (FP16) | Modular baseline & downstream fine-tuning runs |
+| **Colab Pro / Cloud** | NVIDIA A100 SXM4 | 40 GB / 80 GB | $B=16$ (Pretrain) / $B=4$ (Downstream) | `--amp` (BF16/FP16) | Fast large-scale SSL pre-training (100–300 epochs) |
+
+---
+
+## 2. Canonical Notebook Suite Mapping
+
+The repository organizes workflows into self-contained Jupyter notebooks with unified CLI runner compatibility:
+
+```text
+notebooks/
+├── 00_diagnose_visreg_3d.ipynb             # Pre-training diagnostics (mask distribution, tissue coverage, token variance)
+├── 01_train_visreg_3d.ipynb               # 3D VisReg / SigReg JEPA SSL pre-training (exports encoder checkpoint)
+├── 02_train_nnunet_3d.ipynb               # 3D nnU-Net baseline (DynUNet with deep supervision)
+├── 03_train_unet_3d.ipynb                 # 3D Residual UNet baseline
+├── 04_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT-FPN ablation (random initialization)
+├── 05_vit_unetr_hybrid_ablation_3d.ipynb  # From-scratch ViT-UNETR hybrid ablation (convolutional stem)
+├── 06_finetune_visreg_multiscale_3d.ipynb # VisReg + multiscale FPN downstream fine-tuning
+├── 07_finetune_visreg_unetr_3d.ipynb      # VisReg + hybrid UNETR downstream fine-tuning
+└── kaggle_runner_3d.ipynb                 # Interactive all-in-one runner with pipeline configuration toggles
+```
+
+---
+
+## 3. Data Preparation & Packaging Workflow
+
+### 3.1 Step 1: Preprocess Volumes Locally
+Run the parallel preprocessing pipeline with grouped `base_id` extraction (guaranteeing zero longitudinal patient leakage) and compact `float16` storage:
+
+```bash
+# Preprocess using 8 CPU workers into canonical 128^3 arrays
+python scripts/prepare_data_3d.py --dtype float16 --num_workers 8
+```
+
+### 3.2 Step 2: Package Archive for Cloud Staging
+```bash
+# Generates Kaggle/Colab upload archive in dist_kaggle/brats_3d_full.zip (~11 GB)
+python scripts/package_for_kaggle.py
+```
+
+---
+
+## 4. Execution on Kaggle (T4 16GB)
+
+### 4.1 Staging the Dataset
+1. Navigate to [kaggle.com/datasets](https://www.kaggle.com/datasets) $\to$ **New Dataset**.
+2. Title the dataset `brats-3d-full`.
+3. Upload `dist_kaggle/brats_3d_full.zip` and create the dataset.
+4. Kaggle mounts the files at `/kaggle/input/brats-3d-full/` (internal root `brats_gli_3d_full/`).
+
+### 4.2 Running Modular Workflows
+Each downstream notebook evaluates its checkpoints automatically across three evaluation regimes before generating output archives:
+1. **Holdout Test Evaluation**: Computes WT, TC, ET Dice and HD95 over held-out volumes ($N=242$).
+2. **Low-Data Label Efficiency**: Evaluates performance under $1\%, 5\%, 10\%, 25\%$ label fractions.
+3. **OOD Scanner Shift Evaluation**: Assesses robustness against Rician noise, $B_1$ field bias, and missing MRI modalities.
+
+Outputs are exported as self-contained zip archives:
+- `visreg_pretrain_outputs.zip`
+- `visreg_unetr_outputs.zip`
+- `visreg_multiscale_outputs.zip`
+- `nnunet_outputs.zip`
+- `unet_outputs.zip`
+
+---
+
+## 5. Execution on Google Colab Pro (A100 SXM4)
+
+For accelerated pre-training with large batch sizes ($B=16$) and token memory queues ($K=128$ patients):
+
+### 5.1 Environment Setup
+```python
+# In Colab notebook:
+from google.colab import drive
+drive.mount('/content/drive')
+
+!git clone https://github.com/hanriman/tumor_segmentation_3d.git
+%cd tumor_segmentation_3d
+!git checkout feat/multiregion-wt-tc-et
+!pip install -e .
+```
+
+### 5.2 Pre-Training Command (A100 Optimized)
+```bash
+python scripts/train_jepa_3d.py \
+    --data_dir /content/drive/MyDrive/brats_gli_3d_full \
+    --model_type visreg_jepa \
+    --batch_size 16 \
+    --epochs 100 \
+    --lr 7e-4 \
+    --amp \
+    --use_token_queue \
+    --queue_patient_capacity 128 \
+    --output_dir /content/drive/MyDrive/checkpoints/visreg_a100_100ep
+```
+
+---
+
+## 6. 1-Click Local Benchmark Aggregation
+
+Once cloud runs are complete, download the output zip archives into `outputs/` on your local workstation and run:
+
+```bash
+python scripts/combine_and_generate_paper_artifacts.py
+```
+
+This automated aggregator:
+1. Parses all test, low-data, and OOD CSV files across the 6 model evaluations.
+2. Renders publication-grade vector PDF and PNG figures in `paper/latex/figures/`.
+3. Formats camera-ready LaTeX tables (`table_main_benchmark.tex`, `table_low_data.tex`, etc.).
+4. Builds the complete `paper_artifacts.zip` package in seconds.

@@ -64,27 +64,22 @@ thesis_3d/
 ├── agents.md                     # Scientific writing & research guidelines
 │
 ├── docs/
-│   ├── roadmap_improvements_ablation_dataset.md # Phased engineering roadmap (v2.5: DS/TTA/Tversky/hybrid/brain-aware/full-pool)
-│   ├── improving_3d_jepa_segmentation_performance.md # Root-cause analysis: 79.7% vs 87.6% gap + 7 fixes
-│   ├── training_validation_bottleneck_and_hd95_optimization.md # 18.7x validation speedup
-│   ├── vit_from_scratch_ablation.md   # From-scratch ViT baseline rationale
-│   ├── audit_and_remediation_plan.md    # Formal mathematical audit & verification report
-│   ├── audit_and_remediation_plan_3d.md # Forensic root-cause analysis & code remediation
-│   ├── audit_report_2026-09-18.md       # Exhaustive forensic audit & verification sign-off
-│   ├── audit_findings_2026-09-18_21-15.md # Intermediate implementation and memory hazard findings
-│   ├── downstream_freezing_vs_finetuning.md # Research rationale: full fine-tuning vs frozen probe
-│   ├── implementation_audit_2026-09-17_1458.md # Reference alignment checklist
-│   └── kaggle_guide.md                  # End-to-end Kaggle GPU execution guide
+│   ├── README.md                         # Documentation index & guide overview
+│   ├── 01_visreg_jepa_architecture_and_pipeline.md # Complete dataflow, tokenization & VisReg loss formulation
+│   ├── 02_forensic_audit_and_tier2_upgrades.md     # Audit remediations, Option B target jitter, FIFO queue & annealing
+│   ├── 03_scientific_rationales_and_benchmarks.md  # Brain-aware masking, HD95 decoupling, fairness & official WT/TC/ET results
+│   └── 04_cloud_and_local_execution_guide.md       # Kaggle & Colab Pro A100 execution, data packaging & aggregation
 │
 ├── notebooks/
-│   ├── 01_train_visreg_3d.ipynb  # SSL pre-training only (100ep) + diagnose; exports visreg_pretrain_outputs.zip consumed by 07/08
-│   ├── 02_train_nnunet_3d.ipynb  # SOTA baseline: 3D DynUNet with deep supervision
-│   ├── 03_train_unet_3d.ipynb    # Classical baseline: 3D Residual UNet
-│   ├── 04_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT ablation
-│   ├── 06_vit_unetr_hybrid_ablation_3d.ipynb # From-scratch ViT + hybrid UNETR ablation (all cells --from_scratch)
-│   ├── 07_finetune_visreg_multiscale_3d.ipynb # VisReg + multiscale FPN downstream (fail-loud ckpt intake from 01)
-│   ├── 08_finetune_visreg_unetr_3d.ipynb # VisReg + hybrid UNETR downstream (same encoder as 07; controlled decoder ablation)
-│   └── kaggle_runner_3d.ipynb    # Interactive all-in-one runner with toggles
+│   ├── 00_diagnose_visreg_3d.ipynb       # Pre-training diagnostics (mask distribution, tissue coverage, token variance)
+│   ├── 01_train_visreg_3d.ipynb          # 3D VisReg / SigReg JEPA SSL pre-training (exports encoder checkpoint)
+│   ├── 02_train_nnunet_3d.ipynb          # 3D nnU-Net baseline (DynUNet with deep supervision)
+│   ├── 03_train_unet_3d.ipynb            # 3D Residual UNet baseline
+│   ├── 04_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT-FPN ablation (random initialization)
+│   ├── 05_vit_unetr_hybrid_ablation_3d.ipynb  # From-scratch ViT-UNETR hybrid ablation (convolutional stem)
+│   ├── 06_finetune_visreg_multiscale_3d.ipynb # VisReg + multiscale FPN downstream fine-tuning
+│   ├── 07_finetune_visreg_unetr_3d.ipynb      # VisReg + hybrid UNETR downstream fine-tuning
+│   └── kaggle_runner_3d.ipynb            # Interactive all-in-one runner with toggles
 │
 ├── configs/                      # Modular YAML configuration hierarchy
 │   ├── base.yaml                 # System paths, seed, device, AMP configs
@@ -151,15 +146,14 @@ thesis_3d/
 │   ├── combine_and_generate_paper_artifacts.py # 1-Click master multi-experiment aggregator & LaTeX exporter
 │   └── run_full_pipeline_3d.py   # Master automation orchestrator
 │
-├── tests/                        # Pytest automated test suite (116 unit tests)
-│   ├── conftest.py               # Synthetic 3D volume fixtures
-│   ├── test_data_3d.py           # Dataset, 3D masking collision & BFS verification
-│   ├── test_models_3d.py         # Forward/backward graphs & parameter isolation
-│   ├── test_losses_3d.py         # Epps-Pulley, Sliced-Wasserstein, multi-class Dice+CE
-│   ├── test_metrics_3d.py        # 3D Dice, cKDTree 3D HD95, Effective Rank S^2, collapse suite
-│   ├── test_export_3d.py         # Kaggle artifact staging, zip packaging, and input unzipping
-│   ├── test_aggregation_3d.py    # Multi-experiment result merging and LaTeX table export
-│   └── test_fixes_3d.py          # Regression tests: dynamic deep supervision, cosine EMA momentum, VisReg SWD, axis indexing, zero-match guards
+├── tests/                        # Consolidated pytest regression test suite (161 tests, 100% pass)
+│   ├── conftest.py               # Synthetic 3D volume fixtures & hardware mocks
+│   ├── test_data_3d.py           # Dataset, 0% leakage, Option B 3D target jitter & BFS masking
+│   ├── test_evaluation_3d.py     # Evaluation parity, deep supervision flags, uninit decoder guard
+│   ├── test_integration_3d.py    # End-to-end smoke test integrations for training and evaluation
+│   ├── test_losses_3d.py         # FIFO token memory queue, cosine annealing, VisReg, SigReg
+│   ├── test_metrics_3d.py        # Volumetric metrics, cKDTree 3D HD95, Effective Rank S^2
+│   └── test_models_3d.py         # ViT encoder, predictor, FPN, UNETR hybrid, DynUNet, Residual UNet
 │
 └── outputs/                      # Experiment-stratified outputs & benchmarks
     ├── <experiment_name>/        # e.g., kaggle_visreg_5_epoch, kaggle_nnunet_5_epoch, kaggle_unet_5_epoch
@@ -191,7 +185,7 @@ uv pip install -e ".[dev]"
 ### Step 2: Run Unit Tests
 ```bash
 pytest tests/ -v
-# Verified: 116 passed (see roadmap Phase 7)
+# Verified: 161 passed (100% pass rate in consolidated suites)
 ```
 
 ---
@@ -239,7 +233,7 @@ python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type mu
 > [!NOTE]
 > **Full Fine-Tuning vs. Frozen Probing**:
 > By default, `freeze_encoder=False` (full end-to-end fine-tuning). The pre-trained 3D Vision Transformer weights initialize the backbone outside the background-collapse attractor basin, and both encoder and decoder adapt jointly to the voxel segmentation objective. This represents the standard, equitable benchmark against fully supervised 3D CNNs.
-> For an in-depth scientific analysis of why full fine-tuning is standard in 3D medical segmentation and how to run 3-way probing ablations, see [docs/downstream_freezing_vs_finetuning.md](docs/downstream_freezing_vs_finetuning.md).
+> For an in-depth scientific analysis of why full fine-tuning is standard in 3D medical segmentation and how to run 3-way probing ablations, see [docs/03_scientific_rationales_and_benchmarks.md](docs/03_scientific_rationales_and_benchmarks.md).
 
 
 ### 4. Supervised 3D Baselines
