@@ -42,7 +42,7 @@ class BraTS3DUNet(nn.Module):
     def __init__(
         self,
         in_channels: int = 4,
-        out_channels: int = 1,
+        out_channels: int = 5,
         channels: tuple[int, ...] = (32, 64, 128, 256, 512),
         strides: tuple[int, ...] = (2, 2, 2, 2),
         num_res_units: int = 2,

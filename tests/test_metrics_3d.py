@@ -52,11 +52,16 @@ def test_compute_hd95_3d():
     vol_a[10:20, 10:20, 10:20] = 1
     assert compute_hd95_3d(vol_a, vol_a) == 0.0
 
-    # 2. Both empty
+    # 2. Empty target (BraTS challenge protocol: undefined -> NaN)
     vol_empty = np.zeros((32, 32, 32), dtype=np.uint8)
-    assert compute_hd95_3d(vol_empty, vol_empty) == 0.0
+    assert np.isnan(compute_hd95_3d(vol_empty, vol_empty))
+    assert np.isnan(compute_hd95_3d(vol_a, vol_empty))
 
-    # 3. Shifted cubes: 10:20 shifted by 3 voxels along z -> 13:23
+    # 3. Empty prediction with non-empty target -> maximum diagonal penalty
+    diag_expected = np.sqrt(32**2 + 32**2 + 32**2)
+    assert np.isclose(compute_hd95_3d(vol_empty, vol_a), diag_expected)
+
+    # 4. Shifted cubes: 10:20 shifted by 3 voxels along z -> 13:23
     vol_b = np.zeros((32, 32, 32), dtype=np.uint8)
     vol_b[13:23, 10:20, 10:20] = 1
     hd95 = compute_hd95_3d(vol_a, vol_b, voxel_spacing=(1.0, 1.0, 1.0))
@@ -145,7 +150,7 @@ def test_compute_volumetric_metrics_validation_and_from_logits():
     """Verify compute_volumetric_metrics_3d enforces single channel input and respects from_logits."""
     pred_multichannel = torch.randn(2, 4, 16, 16, 16)
     target = (torch.rand(2, 1, 16, 16, 16) > 0.5).float()
-    with pytest.raises(ValueError, match="expects binary Whole Tumor channel"):
+    with pytest.raises(ValueError, match="expects a binary channel"):
         compute_volumetric_metrics_3d(pred_multichannel, target)
 
     prob = torch.zeros(1, 1, 8, 8, 8)

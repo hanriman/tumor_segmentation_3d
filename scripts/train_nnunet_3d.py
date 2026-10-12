@@ -93,6 +93,12 @@ def parse_args():
         help="Include background in overlap loss (default: auto → excluded for C>1, included for C=1)")
     parser.add_argument("--no_include_background", action="store_false", dest="include_background",
         help="Exclude background from overlap loss")
+    parser.add_argument(
+        "--out_channels",
+        type=int,
+        default=5,
+        help="Number of output segmentation classes (default: 5 for BraTS multi-region)",
+    )
     return parser.parse_args()
 
 
@@ -109,16 +115,9 @@ def evaluate(model, loader, device, amp: bool = True, smoke_test: bool = False) 
                 out = model(images)
                 logits = out[0] if isinstance(out, (list, tuple)) else out
 
-            if logits.shape[1] == 1:
-                metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
-                all_dices.extend(metrics["dice_per_sample"])
-                all_ious.extend(metrics["iou_per_sample"])
-            else:
-                # Multi-class protocol: mean over WT/TC/ET keeps model selection
-                # honest (WT-only is blind to ET collapse).
-                d, i = validation_dice_iou(logits, masks)
-                all_dices.append(d)
-                all_ious.append(i)
+            d, i = validation_dice_iou(logits, masks)
+            all_dices.append(d)
+            all_ious.append(i)
 
             if smoke_test and batch_idx >= 1:
                 break
@@ -177,7 +176,7 @@ def main():
         train_dataset = [
             {
                 "image": torch.randn(4, 128, 128, 128),
-                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                "mask": torch.randint(0, 5, (1, 128, 128, 128)).long(),
                 "patient_id": f"train_{i}",
             }
             for i in range(4)
@@ -185,7 +184,7 @@ def main():
         val_dataset = [
             {
                 "image": torch.randn(4, 128, 128, 128),
-                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                "mask": torch.randint(0, 5, (1, 128, 128, 128)).long(),
                 "patient_id": f"val_{i}",
             }
             for i in range(2)
@@ -215,7 +214,7 @@ def main():
 
     model = BraTS3DnnUNet(
         in_channels=getattr(args, "in_channels", 4),
-        out_channels=getattr(args, "out_channels", 1),
+        out_channels=getattr(args, "out_channels", 5),
         deep_supervision=getattr(args, "deep_supervision", True),
         deep_supr_num=getattr(args, "deep_supr_num", 3),
         res_block=getattr(args, "res_block", True),
@@ -226,7 +225,7 @@ def main():
         deep_supervision=args.deep_supervision,
         tversky_alpha=getattr(args, "tversky_alpha", 0.3),
         tversky_beta=getattr(args, "tversky_beta", 0.7),
-        num_classes=getattr(args, "out_channels", 1),
+        num_classes=getattr(args, "out_channels", 5),
         include_background=getattr(args, "include_background", None),
     )
     optimizer = torch.optim.AdamW(

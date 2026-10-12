@@ -15,9 +15,9 @@ class VolumetricDiceLoss(nn.Module):
     def __init__(
         self,
         smooth: float = 1e-5,
-        num_classes: int = 4,
+        num_classes: int = 5,
         squared_pred: bool = True,
-        include_background: bool = True,
+        include_background: bool = False,
     ):
         super().__init__()
         self.smooth = smooth
@@ -92,9 +92,9 @@ class CombinedDiceBCELoss3D(nn.Module):
         dice_weight: float = 1.0,
         bce_weight: float = 1.0,
         smooth: float = 1e-5,
-        num_classes: int = 4,
+        num_classes: int = 5,
         squared_pred: bool = True,
-        include_background: bool = True,
+        include_background: bool = False,
     ):
         super().__init__()
         self.dice_weight = dice_weight

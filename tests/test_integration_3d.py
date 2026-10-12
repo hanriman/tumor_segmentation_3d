@@ -182,14 +182,14 @@ def test_evaluate_ood_from_scratch(ensure_scratch_checkpoint):
 
 
 def test_notebook_04_schema_and_uniformity():
-    """Verifies Notebook 04 follows the exact 20-cell pipeline of Notebooks 01, 02, and 03."""
-    nb_path = Path("notebooks/04_train_vit_from_scratch_ablation_3d.ipynb")
+    """Verifies multiregion Notebook 04 keeps the shared train/eval/low-data/OOD cell layout."""
+    nb_path = Path("notebooks/multiregion/04_train_vit_from_scratch_ablation_3d.ipynb")
     assert nb_path.exists()
     with open(nb_path, "r", encoding="utf-8") as f:
         nb = json.load(f)
 
     assert nb["nbformat"] == 4
-    assert len(nb["cells"]) == 20
+    assert len(nb["cells"]) == 21
 
     cell_eval = nb["cells"][13]
     eval_code = "".join(cell_eval["source"])
@@ -201,6 +201,18 @@ def test_notebook_04_schema_and_uniformity():
 
     cell_ood = nb["cells"][17]
     assert "evaluate_ood_3d.py" in "".join(cell_ood["source"])
+
+
+def test_notebooks_use_no_removed_cli_flags_or_methods():
+    """Notebooks must not reference CLI flags/methods removed in the multiregion-only cleanup."""
+    removed = ["--label_protocol", "ijepa", "use_token_queue", "validation_dice_iou_wt"]
+    nb_paths = sorted(Path("notebooks").rglob("*.ipynb"))
+    assert nb_paths, "no notebooks found"
+    for nb_path in nb_paths:
+        nb = json.loads(nb_path.read_text(encoding="utf-8"))
+        code = "\n".join("".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code")
+        for token in removed:
+            assert token not in code, f"{nb_path} still references removed '{token}'"
 
 
 # =========================================================================
@@ -221,15 +233,6 @@ class _Fixed5(torch.nn.Module):
         base[0, 2] = 10.0
         base[0, 4, :4, :4, :4] = 20.0
         return base.expand(B, -1, -1, -1, -1) + self.dummy
-
-
-class _Fixed1(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.dummy = torch.nn.Parameter(torch.zeros(()))
-
-    def forward(self, x):
-        return torch.full((x.shape[0], 1, 16, 16, 16), 2.0) + self.dummy
 
 
 def _battery_loader(n: int = 2, et_free: bool = False):
@@ -262,25 +265,6 @@ def test_low_data_returns_regions_multiclass():
     assert out["WT"] == 1.0 and out["TC"] == 1.0 and out["ET"] == 1.0
 
 
-def test_low_data_binary_legacy_shape():
-    scripts_dir = str(PROJECT_ROOT / "scripts")
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
-    import evaluate_low_data_3d as lowmod
-
-    torch.manual_seed(0)
-    data = [
-        {"image": torch.randn(4, 16, 16, 16), "mask": (torch.rand(1, 16, 16, 16) > 0.9).float()}
-        for _ in range(2)
-    ]
-    loader = DataLoader(data, batch_size=1)
-    out = lowmod.train_and_eval(
-        _Fixed1().eval(), loader, loader, torch.device("cpu"),
-        epochs=1, amp=False, smoke_test=True, num_classes=1)
-    assert set(out) == {"mean"}, out.keys()
-    assert 0.0 <= out["mean"] <= 1.0
-
-
 def test_ood_returns_regions_and_et_free_graceful():
     scripts_dir = str(PROJECT_ROOT / "scripts")
     if scripts_dir not in sys.path:
@@ -298,14 +282,3 @@ def test_ood_returns_regions_and_et_free_graceful():
         _Fixed5().eval(), _battery_loader(et_free=True), torch.device("cpu"),
         None, amp=False, smoke_test=True)
     assert out2["ET"] >= 0.0
-
-    data = [
-        {"image": torch.randn(4, 16, 16, 16),
-         "mask": (torch.rand(1, 16, 16, 16) > 0.9).float(),
-         "brain_mask": torch.ones(1, 16, 16, 16)}
-        for _ in range(2)
-    ]
-    out3 = oodmod.evaluate_perturbation(
-        _Fixed1().eval(), DataLoader(data, batch_size=1), torch.device("cpu"),
-        None, amp=False, smoke_test=True)
-    assert set(out3) == {"mean"}

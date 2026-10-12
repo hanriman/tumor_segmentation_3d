@@ -1,6 +1,6 @@
 from .deep_supervision_loss_3d import DeepSupervisionLoss3D
 from .dice_bce_loss_3d import CombinedDiceBCELoss3D, VolumetricDiceLoss
-from .ijepa_loss import IJEPALoss
+from .prediction_loss import JEPAPredictionLoss
 from .sigreg_loss import EppsPulleyGaussianityTest, SigRegLoss
 from .tversky_loss_3d import (
     CombinedTverskyBCEWithLogitsLoss3D,
@@ -8,7 +8,6 @@ from .tversky_loss_3d import (
     build_segmentation_criterion,
     resolve_seg_loss_type,
 )
-from .token_queue import FIFOTokenQueue
 from .visreg_loss import VisRegLoss
 
 __all__ = [
@@ -16,8 +15,7 @@ __all__ = [
     "CombinedTverskyBCEWithLogitsLoss3D",
     "DeepSupervisionLoss3D",
     "EppsPulleyGaussianityTest",
-    "FIFOTokenQueue",
-    "IJEPALoss",
+    "JEPAPredictionLoss",
     "SigRegLoss",
     "VisRegLoss",
     "VolumetricDiceLoss",

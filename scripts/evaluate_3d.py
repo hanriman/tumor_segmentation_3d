@@ -60,7 +60,7 @@ def parse_args():
         "--model_type",
         type=str,
         default=None,
-        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, ijepa, unet, nnunet, or all)",
+        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, unet, nnunet, or all)",
     )
     parser.add_argument(
         "--decoder_type",
@@ -139,6 +139,7 @@ def benchmark_model(
 ) -> dict[str, float]:
     model.eval()
     dices, ious, hd95s, latencies = [], [], [], []
+    dices_tumor, ious_tumor, hd95s_tumor = [], [], []
     region_acc: dict[str, dict[str, list]] | None = None
 
     with torch.no_grad():
@@ -166,71 +167,54 @@ def benchmark_model(
             t1 = time.perf_counter()
             latencies.append((t1 - t0) * 1000.0)  # ms per volume
 
-            metrics = None
-            if logits.shape[1] == 1:
-                metrics = compute_volumetric_metrics_3d(
-                    logits, masks, voxel_spacing=voxel_spacing
+            if region_acc is None:
+                region_acc = {}
+            res = compute_brats_regions_3d(
+                logits, masks, voxel_spacing=voxel_spacing
+            )
+            tgt_masks = brats_region_masks_from_target(masks, BRATS_REGIONS)
+            for rname, rmet in res.items():
+                acc = region_acc.setdefault(
+                    rname, {"dice": [], "iou": [], "hd95": [],
+                            "dice_tumor": [], "iou_tumor": [], "hd95_tumor": []}
                 )
-                dices.extend(metrics["dice_per_sample"])
-                ious.extend(metrics["iou_per_sample"])
-                hd95s.extend(metrics["hd95_per_sample"])
-            else:
-                # Multi-class protocol: accumulate per-region sample metrics plus
-                # batch-level tumor-only means (ET-free volumes score 1.0 when
-                # correctly empty in dice_mean; dice_tumor_only excludes them).
-                if region_acc is None:
-                    region_acc = {}
-                res = compute_brats_regions_3d(
-                    logits, masks, voxel_spacing=voxel_spacing
-                )
-                tgt_masks = brats_region_masks_from_target(masks, BRATS_REGIONS)
-                for rname, rmet in res.items():
-                    acc = region_acc.setdefault(
-                        rname, {"dice": [], "iou": [], "hd95": [],
-                                "dice_tumor": [], "iou_tumor": []}
-                    )
-                    acc["dice"].extend(rmet["dice_per_sample"])
-                    acc["iou"].extend(rmet["iou_per_sample"])
-                    acc["hd95"].extend(rmet["hd95_per_sample"])
-                    # Accumulate sample-level values where target has tumor to prevent Simpson's paradox
-                    has_t = [v > 0 for v in tgt_masks[rname].flatten(1).sum(dim=1).tolist()]
-                    for i, ht in enumerate(has_t):
-                        if ht and i < len(rmet["dice_per_sample"]):
-                            acc["dice_tumor"].append(rmet["dice_per_sample"][i])
-                            acc["iou_tumor"].append(rmet["iou_per_sample"][i])
+                acc["dice"].extend(rmet["dice_per_sample"])
+                acc["iou"].extend(rmet["iou_per_sample"])
+                acc["hd95"].extend(rmet["hd95_per_sample"])
+                has_t = [v > 0 for v in tgt_masks[rname].flatten(1).sum(dim=1).tolist()]
+                for i, ht in enumerate(has_t):
+                    if ht and i < len(rmet["dice_per_sample"]):
+                        acc["dice_tumor"].append(rmet["dice_per_sample"][i])
+                        acc["iou_tumor"].append(rmet["iou_per_sample"][i])
+                        if i < len(rmet["hd95_per_sample"]) and np.isfinite(rmet["hd95_per_sample"][i]):
+                            acc["hd95_tumor"].append(rmet["hd95_per_sample"][i])
 
             if smoke_test and batch_idx >= 1:
                 break
 
+    out: dict[str, Any] = {
+        "latency_ms": float(np.nanmean(latencies)) if latencies else 0.0,
+        "regions": {},
+    }
     if region_acc is not None:
-        out: dict[str, float] = {
-            "latency_ms": float(np.nanmean(latencies)) if latencies else 0.0,
-            "regions": {},
-        }
         for rname, acc in region_acc.items():
+            finite_hd95 = [h for h in acc["hd95"] if np.isfinite(h)]
+            finite_hd95_tumor = [h for h in acc["hd95_tumor"] if np.isfinite(h)]
             out["regions"][rname] = {
                 "dice_mean": float(np.nanmean(acc["dice"])) if acc["dice"] else 0.0,
-                "dice_std": float(np.nanstd(acc["dice"])) if acc["dice"] else 0.0,
+                "dice_std": float(np.nanstd(acc["dice"])) if len(acc["dice"]) > 1 else 0.0,
                 "iou_mean": float(np.nanmean(acc["iou"])) if acc["iou"] else 0.0,
-                "iou_std": float(np.nanstd(acc["iou"])) if acc["iou"] else 0.0,
-                "hd95_mean": float(np.nanmean(acc["hd95"])) if acc["hd95"] else 0.0,
-                "hd95_std": float(np.nanstd(acc["hd95"])) if acc["hd95"] else 0.0,
+                "iou_std": float(np.nanstd(acc["iou"])) if len(acc["iou"]) > 1 else 0.0,
+                "hd95_mean": float(np.mean(finite_hd95)) if finite_hd95 else float("nan"),
+                "hd95_std": float(np.std(finite_hd95)) if len(finite_hd95) > 1 else 0.0,
                 "dice_tumor_only": float(np.nanmean(acc["dice_tumor"]))
                 if acc["dice_tumor"] else float("nan"),
                 "iou_tumor_only": float(np.nanmean(acc["iou_tumor"]))
                 if acc["iou_tumor"] else float("nan"),
+                "hd95_tumor_only": float(np.mean(finite_hd95_tumor))
+                if finite_hd95_tumor else float("nan"),
             }
-        return out
-
-    return {
-        "dice_mean": float(np.nanmean(dices)) if dices else 0.0,
-        "dice_std": float(np.nanstd(dices)) if dices else 0.0,
-        "iou_mean": float(np.nanmean(ious)) if ious else 0.0,
-        "iou_std": float(np.nanstd(ious)) if ious else 0.0,
-        "hd95_mean": float(np.nanmean(hd95s)) if hd95s else 0.0,
-        "hd95_std": float(np.nanstd(hd95s)) if hd95s else 0.0,
-        "latency_ms": float(np.nanmean(latencies)) if latencies else 0.0,
-    }
+    return out
 
 
 def evaluate_representation(
@@ -284,7 +268,7 @@ def main():
         test_dataset = [
             {
                 "image": torch.randn(4, 128, 128, 128),
-                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                "mask": torch.randint(0, 5, (1, 128, 128, 128), dtype=torch.float32),
                 "patient_id": f"test_{i}",
             }
             for i in range(2)
@@ -306,7 +290,6 @@ def main():
     all_models_list = [
         ("3D SigReg JEPA (FPN)", "sigreg_jepa", args.decoder_type or "multiscale"),
         ("3D VisReg JEPA (FPN)", "visreg_jepa", args.decoder_type or "multiscale"),
-        ("3D I-JEPA (FPN)", "ijepa", args.decoder_type or "multiscale"),
         ("3D Residual UNet", "unet_3d", None),
         ("3D nnU-Net (DynUNet)", "nnunet_3d", None),
     ]
@@ -321,7 +304,6 @@ def main():
             "scratch": "visreg_jepa",
             "sigreg": "sigreg_jepa",
             "sigreg_jepa": "sigreg_jepa",
-            "ijepa": "ijepa",
             "unet": "unet_3d",
             "unet_3d": "unet_3d",
             "nnunet": "nnunet_3d",
@@ -466,7 +448,7 @@ def main():
                 encoder_depth=jepa_cfg.get("encoder_depth", 8),
                 num_heads=jepa_cfg.get("num_heads", 6),
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                out_channels=jepa_cfg.get("out_channels", 1),
+                out_channels=jepa_cfg.get("out_channels", 5),
                 decoder_type=decoder_type or "multiscale",
                 deep_supervision=ds_flag,
             ).to(device)
@@ -503,36 +485,23 @@ def main():
             tta=args.tta, voxel_spacing=tuple(args.voxel_spacing),
         )
 
-        if "regions" in seg_stats:
-            # Multi-class protocol: one row per (model, region); WT first.
-            # Protocol column keeps v1 WT-only rows unmixable with v2 rows.
-            for rname in ("WT", "TC", "ET"):
-                if rname not in seg_stats["regions"]:
-                    continue
-                rs = seg_stats["regions"][rname]
-                dt = rs.get("dice_tumor_only", float("nan"))
-                results.append(
-                    {
-                        "Model": f"{label} [{rname}]",
-                        "Protocol": "v2 WT/TC/ET",
-                        "Dice (%)": f"{rs['dice_mean'] * 100:.2f} ± {rs['dice_std'] * 100:.2f}",
-                        "Dice_tumor_only (%)": (
-                            f"{dt * 100:.2f}" if dt == dt else "n/a"),
-                        "IoU (%)": f"{rs['iou_mean'] * 100:.2f} ± {rs['iou_std'] * 100:.2f}",
-                        "HD95 (mm)": f"{rs['hd95_mean']:.2f} ± {rs['hd95_std']:.2f}",
-                        "Latency (ms)": f"{seg_stats['latency_ms']:.2f}",
-                        "EffRank (S²)": erank,
-                        "Centered CosSim": cossim,
-                    }
-                )
-        else:
+        for rname in ("WT", "TC", "ET"):
+            if rname not in seg_stats.get("regions", {}):
+                continue
+            rs = seg_stats["regions"][rname]
+            dt = rs.get("dice_tumor_only", float("nan"))
+            ht = rs.get("hd95_tumor_only", float("nan"))
             results.append(
                 {
-                    "Model": label,
-                    "Protocol": "v1 WT-only",
-                    "Dice (%)": f"{seg_stats['dice_mean'] * 100:.2f} ± {seg_stats['dice_std'] * 100:.2f}",
-                    "IoU (%)": f"{seg_stats['iou_mean'] * 100:.2f} ± {seg_stats['iou_std'] * 100:.2f}",
-                    "HD95 (mm)": f"{seg_stats['hd95_mean']:.2f} ± {seg_stats['hd95_std']:.2f}",
+                    "Model": f"{label} [{rname}]",
+                    "Protocol": "v2 WT/TC/ET",
+                    "Dice (%)": f"{rs['dice_mean'] * 100:.2f} ± {rs['dice_std'] * 100:.2f}",
+                    "Dice_tumor_only (%)": (
+                        f"{dt * 100:.2f}" if dt == dt else "n/a"),
+                    "IoU (%)": f"{rs['iou_mean'] * 100:.2f} ± {rs['iou_std'] * 100:.2f}",
+                    "HD95 (mm)": f"{rs['hd95_mean']:.2f} ± {rs['hd95_std']:.2f}",
+                    "HD95_tumor_only (mm)": (
+                        f"{ht:.2f}" if ht == ht else "n/a"),
                     "Latency (ms)": f"{seg_stats['latency_ms']:.2f}",
                     "EffRank (S²)": erank,
                     "Centered CosSim": cossim,

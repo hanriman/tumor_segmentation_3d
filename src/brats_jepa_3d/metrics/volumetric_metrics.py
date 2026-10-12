@@ -82,8 +82,10 @@ def compute_hd95_3d(
        Surface boundaries \partial P, \partial T are extracted via 3D 26-connectivity morphological erosion.
        Nearest-neighbor Euclidean queries run in O(K log K) time via scipy.spatial.cKDTree.
     2. Guarded Failure Edge Cases:
-       - Identical volumes (both empty or identical mask) -> HD95 = 0.0 mm.
-       - Complete failure (one empty, other non-empty) -> penalized with the maximum spatial 3D diagonal:
+       - Target volume empty -> HD95 is undefined (float("nan")), following the official
+         BraTS challenge protocol (Taha & Hanbury 2015; Maier-Hein et al. 2024).
+       - Both non-empty and identical mask -> HD95 = 0.0 mm.
+       - Target non-empty but prediction empty -> penalized with the maximum spatial 3D diagonal:
          \sqrt{(D s_z)^2 + (H s_y)^2 + (W s_x)^2}.
     3. Point-Cap Subsampling (Validation Freeze Prevention):
        Early noisy predictions can produce >300,000 boundary points. Subsampling boundary points to
@@ -92,12 +94,21 @@ def compute_hd95_3d(
     p_mask = (pred_vol_3d > 0).astype(bool)
     t_mask = (target_vol_3d > 0).astype(bool)
 
-    if np.array_equal(p_mask, t_mask):
-        return 0.0
+    # Official BraTS evaluation protocol (Taha & Hanbury 2015; Maier-Hein et al. Nature Methods 2024):
+    # HD95 is undefined when ground-truth structure has no foreground voxels.
+    if not np.any(t_mask):
+        return float("nan")
 
     d, h, w = p_mask.shape
     scale = np.array(voxel_spacing, dtype=np.float64)
     diag = float(np.sqrt((d * scale[0]) ** 2 + (h * scale[1]) ** 2 + (w * scale[2]) ** 2))
+
+    # If target has foreground but prediction is completely empty -> maximum spatial diagonal penalty
+    if not np.any(p_mask):
+        return diag
+
+    if np.array_equal(p_mask, t_mask):
+        return 0.0
 
     # 3D 26-connectivity morphological erosion
     struct_26 = np.ones((3, 3, 3), dtype=bool)
@@ -192,8 +203,8 @@ def compute_volumetric_metrics_3d(
     # Technical Guard: Multi-class tensors must be binarized/sub-indexed prior to metric computation
     if pred.dim() == 5 and pred.shape[1] > 1:
         raise ValueError(
-            f"compute_volumetric_metrics_3d expects binary Whole Tumor channel (C=1). "
-            f"Got pred with shape {pred.shape}. For multi-class evaluation, extract or binarize target channel."
+            f"compute_volumetric_metrics_3d expects a binary channel (C=1). "
+            f"Got pred with shape {pred.shape}. For BraTS multi-region evaluation, use compute_brats_regions_3d."
         )
 
     if pred.shape != target.shape:
@@ -272,12 +283,17 @@ def compute_volumetric_metrics_3d(
     # volumes is unchanged — only the tumor-only cohort mean is NaN.)
     dice_tumor = float(np.mean([dice_vals[i] for i in tumor_indices])) if tumor_indices else float("nan")
     iou_tumor = float(np.mean([iou_vals[i] for i in tumor_indices])) if tumor_indices else float("nan")
-    # NaN (not 0.0) when HD95 was not computed or no tumor volumes exist:
-    # 0.0 would masquerade as a perfect boundary score. Callers must use
-    # nan-aware aggregation (np.nanmean) and render NaN as "n/a".
+    tumor_hd95_vals = [hd95_vals[i] for i in tumor_indices if np.isfinite(hd95_vals[i])]
     hd95_tumor = (
-        float(np.nanmean([hd95_vals[i] for i in tumor_indices]))
-        if (tumor_indices and compute_hd95)
+        float(np.mean(tumor_hd95_vals))
+        if (tumor_hd95_vals and compute_hd95)
+        else float("nan")
+    )
+
+    finite_hd95_vals = [h for h in hd95_vals if np.isfinite(h)]
+    hd95_mean = (
+        float(np.mean(finite_hd95_vals))
+        if (finite_hd95_vals and compute_hd95)
         else float("nan")
     )
 
@@ -286,7 +302,7 @@ def compute_volumetric_metrics_3d(
         "iou": float(np.mean(iou_vals)),
         "precision": float(np.mean(precision_vals)),
         "recall": float(np.mean(recall_vals)),
-        "hd95": float(np.nanmean(hd95_vals)) if compute_hd95 else float("nan"),
+        "hd95": hd95_mean,
         "dice_tumor_only": dice_tumor,
         "iou_tumor_only": iou_tumor,
         "hd95_tumor_only": hd95_tumor,

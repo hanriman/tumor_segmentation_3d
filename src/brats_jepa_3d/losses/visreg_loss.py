@@ -5,8 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .ijepa_loss import IJEPALoss
-from .token_queue import FIFOTokenQueue
+from .prediction_loss import JEPAPredictionLoss
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +66,9 @@ class VisRegLoss(nn.Module):
         target_std: float = 1.0,
         swd_metric: str = "mse",
         scale_loss_type: str = "squared",
-        use_token_queue: bool = False,
-        queue_capacity_tokens: int = 24576,
     ):
         super().__init__()
-        self.jepa_loss = IJEPALoss(loss_type=loss_type)
+        self.jepa_loss = JEPAPredictionLoss(loss_type=loss_type)
         self.center_weight = center_weight
         self.scale_weight = scale_weight
         self.swd_weight = swd_weight
@@ -85,11 +82,6 @@ class VisRegLoss(nn.Module):
                 f"Unknown scale_loss_type: {scale_loss_type}. Must be 'squared' or 'hinge'."
             )
         self.scale_loss_type = scale_loss_type
-        self.token_queue = (
-            FIFOTokenQueue(max_tokens=queue_capacity_tokens)
-            if use_token_queue
-            else None
-        )
 
     def _center_loss(self, z: torch.Tensor) -> torch.Tensor:
         r"""Center regularization: (1/D) * ||mu_z||_2^2."""
@@ -175,19 +167,10 @@ class VisRegLoss(nn.Module):
                 f"VisRegLoss expects non-empty [N, D] tokens after flatten, got {tuple(z_batch.shape)}."
             )
 
-        # Buffer integration: concatenate with detached representations from preceding steps
-        if self.token_queue is not None:
-            z = self.token_queue.get_all(z_batch)
-        else:
-            z = z_batch
-
+        z = z_batch
         center_loss = self._center_loss(z)
         scale_loss = self._scale_loss(z)
         swd_loss = self._sliced_wasserstein_distance(z, generator=generator)
-
-        # Update FIFO queue with detached current batch representations during training
-        if self.token_queue is not None and self.training:
-            self.token_queue.update(z_batch)
 
         reg_term = (
             self.center_weight * center_loss

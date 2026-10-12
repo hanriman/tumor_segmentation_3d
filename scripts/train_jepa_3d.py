@@ -29,9 +29,9 @@ from brats_jepa_3d.data import (
     VolumetricAugmentations3D,
     jepa_masking_collate_fn_3d,
 )
-from brats_jepa_3d.losses import IJEPALoss, SigRegLoss, VisRegLoss
+from brats_jepa_3d.losses import SigRegLoss, VisRegLoss
 from brats_jepa_3d.metrics import compute_representation_collapse_metrics
-from brats_jepa_3d.models import IJEPA3D, SigRegJEPA3D, VisRegJEPA3D
+from brats_jepa_3d.models import SigRegJEPA3D, VisRegJEPA3D
 from brats_jepa_3d.utils import (
     MetricTracker,
     dataset_fingerprint,
@@ -48,7 +48,7 @@ def parse_args():
         "--model_type",
         type=str,
         default="sigreg_jepa",
-        choices=["ijepa", "sigreg_jepa", "visreg_jepa"],
+        choices=["sigreg_jepa", "visreg_jepa"],
     )
     parser.add_argument("--config", type=str, default=None, help="Path to base YAML config")
     parser.add_argument("--model_config", type=str, default=None, help="Path to model YAML config")
@@ -82,25 +82,7 @@ def parse_args():
     parser.add_argument(
         "--smoke_test", action="store_true", help="Run 1 epoch with 2 batches for fast verification"
     )
-    # Tier 2: FIFO Token Memory Queue & Cosine Regularizer Annealing
-    parser.add_argument(
-        "--use_token_queue",
-        action="store_true",
-        default=True,
-        help="Enable FIFO Token Memory Queue for statistical regularizers (default: True)",
-    )
-    parser.add_argument(
-        "--no_token_queue",
-        action="store_false",
-        dest="use_token_queue",
-        help="Disable FIFO Token Memory Queue",
-    )
-    parser.add_argument(
-        "--queue_patient_capacity",
-        type=int,
-        default=128,
-        help="Number of patient volumes buffered in FIFO Token Queue (default: 128)",
-    )
+    # Cosine Regularizer Annealing (Wu et al., 2026)
     parser.add_argument(
         "--reg_warmup_epochs",
         type=int,
@@ -261,22 +243,7 @@ def main():
     predictor_embed_dim = getattr(args, "predictor_embed_dim", 192)
 
     # Initialize Model & Loss
-    use_queue = getattr(args, "use_token_queue", True)
-    queue_tokens = getattr(args, "queue_patient_capacity", 128) * getattr(args, "context_num_patches", 192)
-
-    if args.model_type == "ijepa":
-        model = IJEPA3D(
-            img_size=spatial_shape,
-            patch_size=patch_size,
-            in_channels=in_channels,
-            embed_dim=embed_dim,
-            encoder_depth=encoder_depth,
-            predictor_depth=predictor_depth,
-            predictor_embed_dim=predictor_embed_dim,
-        ).to(device)
-        criterion = IJEPALoss(loss_type=getattr(args, "loss_type", "smooth_l1"))
-
-    elif args.model_type == "sigreg_jepa":
+    if args.model_type == "sigreg_jepa":
         model = SigRegJEPA3D(
             img_size=spatial_shape,
             patch_size=patch_size,
@@ -286,7 +253,6 @@ def main():
             encoder_depth=encoder_depth,
             predictor_depth=predictor_depth,
             predictor_embed_dim=predictor_embed_dim,
-            sigreg_weight=getattr(args, "sigreg_weight", 1.0),
         ).to(device)
         criterion = SigRegLoss(
             loss_type=getattr(args, "loss_type", "smooth_l1"),
@@ -295,8 +261,6 @@ def main():
             t_max=getattr(args, "t_max", 3.0),
             n_knots=getattr(args, "n_knots", 17),
             normalize_measure=getattr(args, "normalize_measure", True),
-            use_token_queue=use_queue,
-            queue_capacity_tokens=queue_tokens,
         )
 
     elif args.model_type == "visreg_jepa":
@@ -319,8 +283,6 @@ def main():
             target_std=getattr(args, "target_std", 1.0),
             swd_metric=getattr(args, "swd_metric", "mse"),
             scale_loss_type=getattr(args, "scale_loss_type", "squared"),
-            use_token_queue=use_queue,
-            queue_capacity_tokens=queue_tokens,
         )
     else:
         raise ValueError(f"Unknown model_type: {args.model_type}")
@@ -385,26 +347,22 @@ def main():
             optimizer.zero_grad()
 
             with get_autocast_context(device, enabled=args.amp):
-                if args.model_type in ("visreg_jepa", "sigreg_jepa") and "context_tissue_mask" in batch:
-                    out = model(
-                        images, ctx_idx, tgt_idx_list,
-                        context_tissue_mask=batch["context_tissue_mask"].to(device),
-                    )
-                else:
-                    out = model(images, ctx_idx, tgt_idx_list)
-
-                if args.model_type == "ijepa":
-                    loss = criterion(out["predictions"], out["targets"])
-                    loss_dict = {"loss": loss, "jepa_loss": loss}
-                elif args.model_type == "sigreg_jepa" or args.model_type == "visreg_jepa":
-                    loss_dict = criterion(
-                        out["predictions"],
-                        out["targets"],
-                        projected_tokens=out["projected_tokens"],
-                        generator=reg_generator,
-                        reg_scale=reg_scale,
-                    )
-                    loss = loss_dict["loss"]
+                out = model(
+                    images,
+                    ctx_idx,
+                    tgt_idx_list,
+                    context_tissue_mask=batch["context_tissue_mask"].to(device)
+                    if "context_tissue_mask" in batch
+                    else None,
+                )
+                loss_dict = criterion(
+                    out["predictions"],
+                    out["targets"],
+                    projected_tokens=out["projected_tokens"],
+                    generator=reg_generator,
+                    reg_scale=reg_scale,
+                )
+                loss = loss_dict["loss"]
 
             for k, v in loss_dict.items():
                 if isinstance(v, torch.Tensor):
@@ -422,22 +380,6 @@ def main():
                 if args.clip_grad_norm > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
                 optimizer.step()
-
-            # Technical Decision (I-JEPA EMA Momentum Annealing):
-            # Target encoder weights are updated via an Exponential Moving Average (EMA):
-            #   \bar{\theta}_t \leftarrow m_t \bar{\theta}_{t-1} + (1 - m_t) \theta_t
-            # The momentum parameter m_t is annealed via a half-period cosine schedule:
-            #   m_t = m_end - (m_end - m_start) * 0.5 * (1 + cos(\pi * progress))
-            # starting at m_start (default 0.996) and monotonically increasing to m_end (1.0).
-            # Hyperparameters are dynamically loaded from config (configs/model/ijepa_3d.yaml).
-            if args.model_type == "ijepa":
-                m_start = getattr(args, "ema_start_momentum", 0.996)
-                m_end = getattr(args, "ema_end_momentum", 1.0)
-                anneal_epochs = getattr(args, "ema_anneal_epochs", epochs)
-                anneal_steps = anneal_epochs * steps_per_epoch
-                progress = min(1.0, global_step / max(1, anneal_steps))
-                curr_momentum = m_end - (m_end - m_start) * 0.5 * (1.0 + math.cos(math.pi * progress))
-                model.update_target_encoder(momentum=curr_momentum)
 
             global_step += 1
             epoch_loss += loss.item()
@@ -457,6 +399,8 @@ def main():
 
         # Validation evaluation
         model.eval()
+        if hasattr(criterion, "eval"):
+            criterion.eval()
         val_loss_sum = 0.0
         val_sublosses: dict[str, float] = {}
         val_batches = 0
@@ -470,25 +414,22 @@ def main():
                 val_tgt_idx_list = [t.to(device) for t in val_batch["target_indices_list"]]
 
                 with get_autocast_context(device, enabled=args.amp):
-                    if args.model_type in ("visreg_jepa", "sigreg_jepa") and "context_tissue_mask" in val_batch:
-                        val_out = model(
-                            val_images, val_ctx_idx, val_tgt_idx_list,
-                            context_tissue_mask=val_batch["context_tissue_mask"].to(device),
-                        )
-                    else:
-                        val_out = model(val_images, val_ctx_idx, val_tgt_idx_list)
-                    if args.model_type == "ijepa":
-                        v_loss = criterion(val_out["predictions"], val_out["targets"])
-                        v_loss_dict = {"loss": v_loss, "jepa_loss": v_loss}
-                    elif args.model_type in ("sigreg_jepa", "visreg_jepa"):
-                        v_loss_dict = criterion(
-                            val_out["predictions"],
-                            val_out["targets"],
-                            projected_tokens=val_out["projected_tokens"],
-                            generator=reg_generator,
-                            reg_scale=reg_scale,
-                        )
-                        v_loss = v_loss_dict["loss"]
+                    val_out = model(
+                        val_images,
+                        val_ctx_idx,
+                        val_tgt_idx_list,
+                        context_tissue_mask=val_batch["context_tissue_mask"].to(device)
+                        if "context_tissue_mask" in val_batch
+                        else None,
+                    )
+                    v_loss_dict = criterion(
+                        val_out["predictions"],
+                        val_out["targets"],
+                        projected_tokens=val_out["projected_tokens"],
+                        generator=reg_generator,
+                        reg_scale=1.0,
+                    )
+                    v_loss = v_loss_dict["loss"]
 
                 val_loss_sum += v_loss.item()
                 val_batches += 1
@@ -497,6 +438,10 @@ def main():
                         val_sublosses[k] = val_sublosses.get(k, 0.0) + v.item()
 
                 del val_images, val_ctx_idx, val_tgt_idx_list, val_batch, val_out
+
+        model.train()
+        if hasattr(criterion, "train"):
+            criterion.train()
 
         avg_val_loss = val_loss_sum / max(1, val_batches) if val_batches > 0 else avg_train_loss
         avg_val_sublosses = (
@@ -558,9 +503,10 @@ def main():
         }
         tracker.update(epoch_metrics)
 
-        # Save best checkpoint
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
+        # Save best checkpoint (anchored to core JEPA prediction loss to avoid regularizer annealing drift)
+        val_score = avg_val_sublosses.get("val_jepa_loss", avg_val_loss)
+        if val_score < best_val_loss:
+            best_val_loss = val_score
             best_ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_3d_best.pt"
             torch.save(
                 {
@@ -570,11 +516,14 @@ def main():
                     "optimizer_state_dict": optimizer.state_dict(),
                     "loss": avg_train_loss,
                     "val_loss": avg_val_loss,
+                    "val_jepa_loss": val_score,
                     "pool_fingerprint": dataset_fingerprint(get_dataset_dir()),
                 },
                 best_ckpt_path,
             )
-            logger.info(f"Best model checkpoint saved: {best_ckpt_path} (val_loss: {best_val_loss:.5f})")
+            logger.info(
+                f"Best model checkpoint saved: {best_ckpt_path} (val_jepa_loss: {val_score:.5f}, val_loss: {avg_val_loss:.5f})"
+            )
 
         # Save periodic checkpoint
         save_freq = getattr(args, "save_freq", 10)

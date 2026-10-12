@@ -28,7 +28,7 @@ class ViTSegmentationDecoder3D(nn.Module):
     """
 
     def __init__(
-        self, in_dim: int = 384, out_channels: int = 1, grid_size: tuple[int, int, int] = (8, 8, 8)
+        self, in_dim: int = 384, out_channels: int = 5, grid_size: tuple[int, int, int] = (8, 8, 8)
     ):
         super().__init__()
         self.in_dim = in_dim
@@ -83,7 +83,7 @@ class MultiScaleViTSegmentationDecoder3D(nn.Module):
     def __init__(
         self,
         in_dim: int = 384,
-        out_channels: int = 1,
+        out_channels: int = 5,
         grid_size: tuple[int, int, int] = (8, 8, 8),
         deep_supervision: bool = False,
     ):
@@ -236,7 +236,7 @@ class HybridUNETRDecoder3D(nn.Module):
     def __init__(
         self,
         in_dim: int = 384,
-        out_channels: int = 1,
+        out_channels: int = 5,
         in_channels: int = 4,
         grid_size: tuple[int, int, int] = (8, 8, 8),
         deep_supervision: bool = False,
@@ -435,7 +435,7 @@ class JEPASegmentationModel3D(nn.Module):
         encoder_depth: int = 8,
         num_heads: int = 6,
         mlp_ratio: float = 4.0,
-        out_channels: int = 1,
+        out_channels: int = 5,
         freeze_encoder: bool = False,
         decoder_type: str = "multiscale",
         deep_supervision: bool = False,

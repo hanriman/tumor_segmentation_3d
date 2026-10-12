@@ -63,32 +63,15 @@ class JEPAPredictor3D(nn.Module):
         # Projection back to encoder representation dimension
         self.out_proj = nn.Linear(pred_embed_dim, embed_dim)
 
-    def forward(
+    def predict_target_block(
         self,
-        context_tokens: torch.Tensor,
-        context_indices: torch.Tensor,
+        ctx: torch.Tensor,
+        N_ctx: int,
         target_indices: torch.Tensor,
     ) -> torch.Tensor:
-        """
-        context_tokens: [B, N_ctx, embed_dim]
-        context_indices: [B, N_ctx]
-        target_indices: [B, N_tgt]
-        Returns: predicted target representations [B, N_tgt, embed_dim]
-        """
-        B, N_ctx, _ = context_tokens.shape
-        _, N_tgt = target_indices.shape
+        """Evaluates a single target query given pre-projected and position-conditioned context."""
+        B, N_tgt = target_indices.shape
         D_pred = self.pred_embed_dim
-
-        # Project context tokens to predictor dimension
-        ctx = self.context_proj(context_tokens)
-
-        # Context positional queries
-        ctx_pos = torch.gather(
-            self.pos_embed.expand(B, -1, -1),
-            dim=1,
-            index=context_indices.unsqueeze(-1).expand(B, N_ctx, D_pred),
-        )
-        ctx = ctx + ctx_pos
 
         # Target positional queries
         tgt_pos = torch.gather(
@@ -111,5 +94,57 @@ class JEPAPredictor3D(nn.Module):
         pred_tgt = combined[:, N_ctx:, :]
 
         # Project back to encoder embedding space
-        out = self.out_proj(pred_tgt)
-        return out
+        return self.out_proj(pred_tgt)
+
+    def forward(
+        self,
+        context_tokens: torch.Tensor,
+        context_indices: torch.Tensor,
+        target_indices: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        context_tokens: [B, N_ctx, embed_dim]
+        context_indices: [B, N_ctx]
+        target_indices: [B, N_tgt]
+        Returns: predicted target representations [B, N_tgt, embed_dim]
+        """
+        B, N_ctx, _ = context_tokens.shape
+        D_pred = self.pred_embed_dim
+
+        # Project context tokens to predictor dimension and add sinusoidal coordinates
+        ctx = self.context_proj(context_tokens)
+        ctx_pos = torch.gather(
+            self.pos_embed.expand(B, -1, -1),
+            dim=1,
+            index=context_indices.unsqueeze(-1).expand(B, N_ctx, D_pred),
+        )
+        ctx = ctx + ctx_pos
+
+        return self.predict_target_block(ctx, N_ctx, target_indices)
+
+    def forward_multi_targets(
+        self,
+        context_tokens: torch.Tensor,
+        context_indices: torch.Tensor,
+        target_indices_list: list[torch.Tensor],
+    ) -> list[torch.Tensor]:
+        """
+        Efficient multi-target evaluation: computes context linear projection and positional
+        conditioning once per forward pass across all target cuboid queries.
+        """
+        B, N_ctx, _ = context_tokens.shape
+        D_pred = self.pred_embed_dim
+
+        ctx = self.context_proj(context_tokens)
+        ctx_pos = torch.gather(
+            self.pos_embed.expand(B, -1, -1),
+            dim=1,
+            index=context_indices.unsqueeze(-1).expand(B, N_ctx, D_pred),
+        )
+        ctx = ctx + ctx_pos
+
+        return [
+            self.predict_target_block(ctx, N_ctx, tgt_idx)
+            for tgt_idx in target_indices_list
+        ]
+

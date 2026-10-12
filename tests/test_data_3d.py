@@ -504,7 +504,7 @@ def test_multiregion_preserves_labels(tmp_path):
     pdir = _make_patient(tmp_path / "raw")
     out = tmp_path / "out"
     out.mkdir()
-    rec = process_patient(pdir, out, target_size=16, dtype="float32", label_protocol="multiregion")
+    rec = process_patient(pdir, out, target_size=16, dtype="float32")
     assert rec is not None
     z = np.load(out / f"{pdir.name}_volume.npz")
     assert z["image"].shape == (4, 16, 16, 16)
@@ -513,10 +513,6 @@ def test_multiregion_preserves_labels(tmp_path):
     assert vals >= {1, 2, 3, 4}, f"octant labels lost in resampling: {vals}"
     assert rec["has_et"] is True and rec["num_voxels_et"] > 0
     assert ET_LABEL == 4
-    out2 = tmp_path / "out2"
-    out2.mkdir()
-    rec2 = process_patient(pdir, out2, target_size=16, dtype="float32", label_protocol="wt")
-    assert rec2["num_voxels_tumor"] == rec["num_voxels_tumor"]
 
 
 def test_multiregion_rejects_stray_labels(tmp_path):
@@ -529,14 +525,14 @@ def test_multiregion_rejects_stray_labels(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
     with pytest.raises(ValueError, match="unexpected segmentation labels"):
-        process_patient(pdir, out, target_size=16, label_protocol="multiregion")
+        process_patient(pdir, out, target_size=16)
 
 
 def test_multiregion_et_free_volume(tmp_path):
     pdir = _make_patient(tmp_path / "raw", pid="TEST-NOET", labels=(0, 1, 2))
     out = tmp_path / "out"
     out.mkdir()
-    rec = process_patient(pdir, out, target_size=16, dtype="float32", label_protocol="multiregion")
+    rec = process_patient(pdir, out, target_size=16, dtype="float32")
     assert rec["has_et"] is False and rec["num_voxels_et"] == 0
     assert rec["has_tumor"] is True
 
@@ -546,8 +542,7 @@ def test_resample_preserve_labels_unit():
     vol[2:5, 2:5, 2:5] = 4.0
     vol[6:9, 6:9, 6:9] = 1.0
     out = resample_3d_volume(vol, (8, 8, 8), is_mask=True, preserve_labels=True)
-    out_bin = resample_3d_volume(vol, (8, 8, 8), is_mask=True)
-    assert set(np.unique(out_bin).tolist()) <= {0, 1}
+    assert set(np.unique(out).tolist()) == {0, 1, 4}
 
 
 def test_prepare_data_3d_grouped_base_id_zero_leakage():

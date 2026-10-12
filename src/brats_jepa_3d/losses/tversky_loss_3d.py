@@ -28,7 +28,7 @@ class VolumetricTverskyLoss(nn.Module):
         alpha: float = 0.3,
         beta: float = 0.7,
         smooth: float = 1e-5,
-        include_background: bool = True,
+        include_background: bool = False,
     ):
         super().__init__()
         if alpha < 0 or beta < 0 or alpha + beta <= 0:

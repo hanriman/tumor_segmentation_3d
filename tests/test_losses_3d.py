@@ -8,8 +8,7 @@ from brats_jepa_3d.losses import (
     CombinedDiceBCELoss3D,
     CombinedTverskyBCEWithLogitsLoss3D,
     DeepSupervisionLoss3D,
-    FIFOTokenQueue,
-    IJEPALoss,
+    JEPAPredictionLoss,
     SigRegLoss,
     VisRegLoss,
     VolumetricDiceLoss,
@@ -20,12 +19,12 @@ from brats_jepa_3d.losses import (
 
 
 # =========================================================================
-# 1. Self-Supervised JEPA Losses (I-JEPA, VisReg, SigReg)
+# 1. Self-Supervised JEPA Losses (Prediction Loss, VisReg, SigReg)
 # =========================================================================
 
 
-def test_ijepa_loss():
-    criterion = IJEPALoss(loss_type="smooth_l1")
+def test_jepa_prediction_loss():
+    criterion = JEPAPredictionLoss(loss_type="smooth_l1")
     preds = [torch.randn(2, 27, 384, requires_grad=True)]
     targets = [torch.randn(2, 27, 384)]
 
@@ -37,9 +36,9 @@ def test_ijepa_loss():
     assert preds[0].grad is not None
 
 
-def test_ijepa_loss_empty_predictions_raises():
-    """Verify IJEPALoss raises ValueError when predictions or targets lists are empty."""
-    criterion = IJEPALoss()
+def test_jepa_prediction_loss_empty_predictions_raises():
+    """Verify JEPAPredictionLoss raises ValueError when predictions or targets lists are empty."""
+    criterion = JEPAPredictionLoss()
     with pytest.raises(ValueError, match="must be non-empty"):
         criterion([], [])
 
@@ -164,65 +163,9 @@ def test_visreg_swd_standard_normal():
     assert swd.item() < 0.10, f"SWD of standard normal is too large: {swd.item()}"
 
 
-def test_fifo_token_queue_circular_buffer_and_gradient_isolation():
-    """Verify FIFOTokenQueue buffers tokens, wraps around circularly, and isolates gradients."""
-    queue = FIFOTokenQueue(max_tokens=100, feature_dim=16)
-    queue.train()
-
-    # Step 1: Empty queue returns current batch only
-    x1 = torch.randn(20, 16, requires_grad=True)
-    all1 = queue.get_all(x1)
-    assert all1.shape == (20, 16)
-    assert len(queue) == 0
-
-    # Push x1 into queue
-    queue.update(x1)
-    assert len(queue) == 20
-
-    # Step 2: Next step x2 gets concatenated with cached x1
-    x2 = torch.randn(30, 16, requires_grad=True)
-    all2 = queue.get_all(x2)
-    assert all2.shape == (50, 16)  # 30 current + 20 cached
-
-    # Verify gradient isolation: loss backward flows to x2, zero grad into queue
-    loss = all2.sum()
-    loss.backward()
-    assert x2.grad is not None
-    assert x2.grad.shape == (30, 16)
-
-    queue.update(x2)
-    assert len(queue) == 50
-
-    # Step 3: Push 70 more tokens -> exceeds max_tokens 100, wraps around
-    x3 = torch.randn(70, 16)
-    queue.update(x3)
-    assert len(queue) == 100
-
-    # Step 4: Reset
-    queue.reset()
-    assert len(queue) == 0
-
-
-def test_fifo_token_queue_eval_mode_bypass():
-    """Verify FIFOTokenQueue bypasses cached tokens when in eval mode."""
-    queue = FIFOTokenQueue(max_tokens=50, feature_dim=8)
-    queue.train()
-    queue.update(torch.randn(30, 8))
-    assert len(queue) == 30
-
-    queue.eval()
-    x = torch.randn(10, 8)
-    out = queue.get_all(x)
-    assert out.shape == (10, 8)  # Bypasses queue during evaluation
-
-
-def test_visreg_loss_with_token_queue_and_reg_scale_annealing():
-    """Verify VisRegLoss operates with FIFOTokenQueue and scales regularizers via reg_scale."""
-    criterion = VisRegLoss(
-        num_projections=64,
-        use_token_queue=True,
-        queue_capacity_tokens=500,
-    )
+def test_visreg_loss_reg_scale_annealing():
+    """Verify VisRegLoss scales regularizers via reg_scale."""
+    criterion = VisRegLoss(num_projections=64)
     criterion.train()
 
     preds = [torch.randn(2, 27, 64, requires_grad=True)]
@@ -235,7 +178,6 @@ def test_visreg_loss_with_token_queue_and_reg_scale_annealing():
     assert out1["reg_scale"].item() == 1.0
     out1["loss"].backward()
     assert proj1.grad is not None
-    assert len(criterion.token_queue) == 2 * 192
 
     # Step 2: Annealed regularizer scale (reg_scale=0.10)
     preds2 = [torch.randn(2, 27, 64, requires_grad=True)]
@@ -250,13 +192,9 @@ def test_visreg_loss_with_token_queue_and_reg_scale_annealing():
     assert torch.allclose(out2["loss"], expected_loss, atol=1e-5)
 
 
-def test_sigreg_loss_with_token_queue_and_reg_scale_annealing():
-    """Verify SigRegLoss operates with FIFOTokenQueue and scales regularizer via reg_scale."""
-    criterion = SigRegLoss(
-        num_projections=64,
-        use_token_queue=True,
-        queue_capacity_tokens=500,
-    )
+def test_sigreg_loss_reg_scale_annealing():
+    """Verify SigRegLoss scales regularizer via reg_scale."""
+    criterion = SigRegLoss(num_projections=64)
     criterion.train()
 
     preds = [torch.randn(2, 27, 64, requires_grad=True)]
@@ -268,7 +206,6 @@ def test_sigreg_loss_with_token_queue_and_reg_scale_annealing():
     assert out1["reg_scale"].item() == 1.0
     out1["loss"].backward()
     assert proj1.grad is not None
-    assert len(criterion.token_queue) == 2 * 192
 
     # Annealed scale
     preds2 = [torch.randn(2, 27, 64, requires_grad=True)]

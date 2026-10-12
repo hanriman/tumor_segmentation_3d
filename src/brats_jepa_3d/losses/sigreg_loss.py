@@ -5,8 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .ijepa_loss import IJEPALoss
-from .token_queue import FIFOTokenQueue
+from .prediction_loss import JEPAPredictionLoss
 
 logger = logging.getLogger(__name__)
 
@@ -109,22 +108,15 @@ class SigRegLoss(nn.Module):
         t_max: float = 3.0,
         n_knots: int = 17,
         normalize_measure: bool = True,
-        use_token_queue: bool = False,
-        queue_capacity_tokens: int = 24576,
     ):
         super().__init__()
-        self.jepa_loss = IJEPALoss(loss_type=loss_type)
+        self.jepa_loss = JEPAPredictionLoss(loss_type=loss_type)
         self.sigreg_weight = sigreg_weight
         self.num_projections = num_projections
         self.ep_test = EppsPulleyGaussianityTest(
             t_max=t_max,
             n_knots=n_knots,
             normalize_measure=normalize_measure,
-        )
-        self.token_queue = (
-            FIFOTokenQueue(max_tokens=queue_capacity_tokens)
-            if use_token_queue
-            else None
         )
 
     def forward(
@@ -159,11 +151,7 @@ class SigRegLoss(nn.Module):
                 f"SigRegLoss expects non-empty [N, D] tokens after flatten, got {tuple(z_batch.shape)}."
             )
 
-        # Buffer integration: concatenate with detached representations from preceding steps
-        if self.token_queue is not None:
-            z = self.token_queue.get_all(z_batch)
-        else:
-            z = z_batch
+        z = z_batch
         D = z.shape[-1]
 
         # Sample M random projection directions on unit hypersphere in float32
@@ -183,10 +171,6 @@ class SigRegLoss(nn.Module):
         proj = z.float() @ A
 
         sigreg_val = self.ep_test(proj)
-
-        # Update FIFO queue with detached current batch representations during training
-        if self.token_queue is not None and self.training:
-            self.token_queue.update(z_batch)
 
         total_loss = j_loss + reg_scale * self.sigreg_weight * sigreg_val.to(dtype=j_loss.dtype)
 

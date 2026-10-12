@@ -26,7 +26,7 @@ def main():
         "--model_type",
         type=str,
         default="visreg_jepa",
-        choices=["visreg_jepa", "sigreg_jepa", "ijepa", "all"],
+        choices=["visreg_jepa", "sigreg_jepa", "all"],
         help="SSL JEPA model architecture to train and evaluate (default: visreg_jepa)",
     )
     parser.add_argument(
@@ -46,7 +46,7 @@ def main():
 
     # Models to train and fine-tune
     models_to_run = (
-        ["visreg_jepa", "sigreg_jepa", "ijepa"]
+        ["visreg_jepa", "sigreg_jepa"]
         if args.model_type == "all"
         else [args.model_type]
     )

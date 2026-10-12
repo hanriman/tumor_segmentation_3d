@@ -66,7 +66,7 @@ def parse_args():
         "--model_type",
         type=str,
         default="all",
-        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, ijepa, unet_3d, nnunet_3d, vit_scratch, or all)",
+        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, unet_3d, nnunet_3d, vit_scratch, or all)",
     )
     parser.add_argument(
         "--from_scratch",
@@ -183,10 +183,9 @@ def train_and_eval(
         if smoke_test:
             break
 
-    # Evaluate on test set (per-region for C>1, scalar for C=1).
+    # Evaluate on test set across canonical BraTS regions (WT, TC, ET)
     model.eval()
-    region_dices: dict[str, list[float]] | None = None
-    binary_dices: list[float] = []
+    region_dices = {"WT": [], "TC": [], "ET": []}
     with torch.no_grad():
         for batch_idx, batch in enumerate(test_loader):
             images = batch["image"].to(device)
@@ -197,25 +196,14 @@ def train_and_eval(
                 else:
                     out = model(images)
                     logits = out[0] if isinstance(out, (list, tuple)) else out
-            if logits.shape[1] == 1:
-                metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
-                binary_dices.extend(metrics["dice_per_sample"])
-            else:
-                # Multi-class protocol: accumulate per-region sample Dice so
-                # tiers report WT/TC/ET separately (ET-first collapse visible).
-                if region_dices is None:
-                    region_dices = {"WT": [], "TC": [], "ET": []}
-                res = compute_brats_regions_3d(logits, masks, compute_hd95=False)
-                for rname in ("WT", "TC", "ET"):
-                    region_dices[rname].extend(res[rname]["dice_per_sample"])
+            res = compute_brats_regions_3d(logits, masks, compute_hd95=False)
+            for rname in ("WT", "TC", "ET"):
+                region_dices[rname].extend(res[rname]["dice_per_sample"])
             if smoke_test and batch_idx >= 1:
                 break
 
-    if region_dices is None:
-        return {"mean": float(np.mean(binary_dices)) if binary_dices else 0.0}
     out_scores = {r: float(np.nanmean(v)) if v else 0.0 for r, v in region_dices.items()}
-    out_scores["mean"] = float(
-        sum(out_scores[r] for r in ("WT", "TC", "ET")) / 3.0)
+    out_scores["mean"] = float(sum(out_scores[r] for r in ("WT", "TC", "ET")) / 3.0)
     return out_scores
 
 
@@ -241,7 +229,7 @@ def main():
         test_dataset = [
             {
                 "image": torch.randn(4, 128, 128, 128),
-                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                "mask": torch.randint(0, 5, (1, 128, 128, 128), dtype=torch.float32),
             }
             for _ in range(2)
         ]
@@ -261,7 +249,6 @@ def main():
     all_models = [
         ("3D VisReg JEPA (FPN)", "visreg_jepa"),
         ("3D SigReg JEPA (FPN)", "sigreg_jepa"),
-        ("3D I-JEPA (FPN)", "ijepa"),
         ("3D nnU-Net", "nnunet_3d"),
         ("3D UNet", "unet_3d"),
     ]
@@ -271,7 +258,6 @@ def main():
         "visreg_jepa": "visreg_jepa",
         "sigreg": "sigreg_jepa",
         "sigreg_jepa": "sigreg_jepa",
-        "ijepa": "ijepa",
         "unet": "unet_3d",
         "unet_3d": "unet_3d",
         "nnunet": "nnunet_3d",
@@ -307,13 +293,12 @@ def main():
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
                 decoder_type=args.decoder_type,
                 deep_supervision=args.deep_supervision,
-                out_channels=jepa_cfg.get("out_channels", 1),
-            ).to(device), jepa_cfg.get("out_channels", 1)
+                out_channels=jepa_cfg.get("out_channels", 5),
+            ).to(device), jepa_cfg.get("out_channels", 5)
 
         jepa_prefixes = {
             "3D VisReg JEPA (FPN)": "visreg_jepa",
             "3D SigReg JEPA (FPN)": "sigreg_jepa",
-            "3D I-JEPA (FPN)": "ijepa",
         }
         if name in jepa_prefixes:
             prefix = jepa_prefixes[name]
@@ -352,9 +337,9 @@ def main():
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
                 decoder_type=args.decoder_type,
                 deep_supervision=args.deep_supervision,
-                out_channels=jepa_cfg.get("out_channels", 1),
+                out_channels=jepa_cfg.get("out_channels", 5),
             )
-            n_classes = jepa_cfg.get("out_channels", 1)
+            n_classes = jepa_cfg.get("out_channels", 5)
             ckpt = torch.load(ckpt_path, map_location=device)
             check_pool_match(
                 ckpt.get("pool_fingerprint"),
@@ -372,24 +357,24 @@ def main():
             nnunet_cfg = load_yaml_config(nnunet_cfg_path) if nnunet_cfg_path.exists() else {}
             return BraTS3DnnUNet(
                 in_channels=nnunet_cfg.get("in_channels", 4),
-                out_channels=nnunet_cfg.get("out_channels", 1),
+                out_channels=nnunet_cfg.get("out_channels", 5),
                 deep_supervision=args.deep_supervision,
                 deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
                 res_block=nnunet_cfg.get("res_block", True),
-            ).to(device), nnunet_cfg.get("out_channels", 1)
+            ).to(device), nnunet_cfg.get("out_channels", 5)
 
         elif name == "3D UNet":
             unet_cfg_path = CONFIGS_DIR / "model" / "unet_3d.yaml"
             unet_cfg = load_yaml_config(unet_cfg_path) if unet_cfg_path.exists() else {}
             return BraTS3DUNet(
                 in_channels=unet_cfg.get("in_channels", 4),
-                out_channels=unet_cfg.get("out_channels", 1),
+                out_channels=unet_cfg.get("out_channels", 5),
                 channels=tuple(unet_cfg.get("channels", (32, 64, 128, 256, 512))),
                 strides=tuple(unet_cfg.get("strides", (2, 2, 2, 2))),
                 num_res_units=unet_cfg.get("num_res_units", 2),
                 dropout=unet_cfg.get("dropout", 0.1),
                 deep_supervision=args.deep_supervision,
-            ).to(device), unet_cfg.get("out_channels", 1)
+            ).to(device), unet_cfg.get("out_channels", 5)
 
         else:
             raise ValueError(f"Unknown model name: {name}")
@@ -419,7 +404,7 @@ def main():
             train_dataset = [
                 {
                     "image": torch.randn(4, 128, 128, 128),
-                    "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                    "mask": torch.randint(0, 5, (1, 128, 128, 128)).long(),
                 }
                 for _ in range(2)
             ]

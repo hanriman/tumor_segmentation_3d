@@ -3,9 +3,9 @@ import torch.nn.functional as F
 from torch import nn
 
 
-class IJEPALoss(nn.Module):
+class JEPAPredictionLoss(nn.Module):
     r"""
-    Latent Space Prediction Loss for 3D I-JEPA.
+    Latent Space Prediction Loss for 3D Joint-Embedding Predictive Architectures.
 
     Mathematical Rationale (Assran et al., CVPR 2023; Huber, 1964):
     ---------------------------------------------------------------
@@ -34,7 +34,6 @@ class IJEPALoss(nn.Module):
         total_loss = torch.tensor(0.0, device=predictions[0].device, dtype=torch.float32)
 
         for pred, tgt in zip(predictions, targets):
-            # Apply LayerNorm to target representations to stabilize target scale
             tgt_norm = F.layer_norm(tgt.detach(), (tgt.shape[-1],))
 
             if self.loss_type == "smooth_l1":

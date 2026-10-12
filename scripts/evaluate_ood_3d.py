@@ -67,7 +67,7 @@ def parse_args():
         "--model_type",
         type=str,
         default="all",
-        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, ijepa, unet_3d, nnunet_3d, vit_scratch, or all)",
+        help="Specific model to evaluate (visreg_jepa, sigreg_jepa, unet_3d, nnunet_3d, vit_scratch, or all)",
     )
     parser.add_argument(
         "--from_scratch",
@@ -93,13 +93,11 @@ def evaluate_perturbation(
 ) -> dict[str, float]:
     """Scores one perturbation regime.
 
-    Returns {"mean": dice} for binary (C=1) models (legacy v1 shape), else
-    per-region {"WT", "TC", "ET", "mean"} macro Dice so regime tables resolve
+    Returns per-region {"WT", "TC", "ET", "mean"} macro Dice so regime tables resolve
     the T1c/FLAIR asymmetry per region (e.g. ET preserved T1c-only).
     """
     model.eval()
-    region_dices: dict[str, list[float]] | None = None
-    binary_dices: list[float] = []
+    region_dices = {"WT": [], "TC": [], "ET": []}
     with torch.no_grad():
         for batch_idx, batch in enumerate(loader):
             images = batch["image"].to(device)
@@ -117,20 +115,12 @@ def evaluate_perturbation(
                     out = model(images)
                     logits = out[0] if isinstance(out, (list, tuple)) else out
 
-            if logits.shape[1] == 1:
-                metrics = compute_volumetric_metrics_3d(logits, masks, compute_hd95=False)
-                binary_dices.extend(metrics["dice_per_sample"])
-            else:
-                # Multi-class protocol: accumulate per-region sample Dice.
-                if region_dices is None:
-                    region_dices = {"WT": [], "TC": [], "ET": []}
-                res = compute_brats_regions_3d(logits, masks, compute_hd95=False)
-                for rname in ("WT", "TC", "ET"):
-                    region_dices[rname].extend(res[rname]["dice_per_sample"])
+            res = compute_brats_regions_3d(logits, masks, compute_hd95=False)
+            for rname in ("WT", "TC", "ET"):
+                region_dices[rname].extend(res[rname]["dice_per_sample"])
             if smoke_test and batch_idx >= 1:
                 break
-    if region_dices is None:
-        return {"mean": float(np.mean(binary_dices)) if binary_dices else 0.0}
+
     out_scores = {r: float(np.nanmean(v)) if v else 0.0 for r, v in region_dices.items()}
     out_scores["mean"] = float(
         sum(out_scores[r] for r in ("WT", "TC", "ET")) / 3.0)
@@ -154,7 +144,7 @@ def main():
         test_dataset = [
             {
                 "image": torch.randn(4, 128, 128, 128),
-                "mask": (torch.rand(1, 128, 128, 128) > 0.95).float(),
+                "mask": torch.randint(0, 5, (1, 128, 128, 128)).long(),
                 "brain_mask": (torch.rand(1, 128, 128, 128) > 0.5).float(),
             }
             for _ in range(2)
@@ -169,7 +159,6 @@ def main():
     all_models = [
         ("3D VisReg JEPA (FPN)", "visreg_jepa"),
         ("3D SigReg JEPA (FPN)", "sigreg_jepa"),
-        ("3D I-JEPA (FPN)", "ijepa"),
         ("3D nnU-Net", "nnunet_3d"),
         ("3D UNet", "unet_3d"),
     ]
@@ -179,7 +168,6 @@ def main():
         "visreg_jepa": "visreg_jepa",
         "sigreg": "sigreg_jepa",
         "sigreg_jepa": "sigreg_jepa",
-        "ijepa": "ijepa",
         "unet": "unet_3d",
         "unet_3d": "unet_3d",
         "nnunet": "nnunet_3d",
@@ -233,7 +221,7 @@ def main():
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
                 decoder_type=args.decoder_type,
                 deep_supervision=ds_flag,
-                out_channels=jepa_cfg.get("out_channels", 1),
+                out_channels=jepa_cfg.get("out_channels", 5),
             )
             sd = torch.load(ckpt, map_location=device)
             sd = sd.get("model_state_dict", sd)
@@ -245,7 +233,6 @@ def main():
         jepa_prefixes = {
             "3D VisReg JEPA (FPN)": "visreg_jepa",
             "3D SigReg JEPA (FPN)": "sigreg_jepa",
-            "3D I-JEPA (FPN)": "ijepa",
         }
         if name in jepa_prefixes:
             prefix = jepa_prefixes[name]
@@ -278,7 +265,7 @@ def main():
                 mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
                 decoder_type=args.decoder_type,
                 deep_supervision=ds_flag,
-                out_channels=jepa_cfg.get("out_channels", 1),
+                out_channels=jepa_cfg.get("out_channels", 5),
             )
             if ckpt and ckpt.exists():
                 ckpt_raw = torch.load(ckpt, map_location=device)
@@ -295,36 +282,20 @@ def main():
                     matched = [k for k in m.state_dict() if k not in missing]
                     logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
                 elif has_pretrain:
-                    res = m.load_pretrained_encoder(sd)
-                    logger.warning(
-                        f"Loaded pre-trained encoder weights for {name} from {ckpt.name} ({res['loaded_keys']} keys), "
-                        f"but decoder is randomly initialized."
+                    raise RuntimeError(
+                        f"{name}: Checkpoint {ckpt.name} contains only pre-trained encoder weights. "
+                        f"Evaluating a randomly initialized downstream decoder produces invalid benchmark numbers. "
+                        f"Train downstream model with train_downstream_3d.py first."
                     )
                 else:
                     missing, _unexpected = load_downstream_state_dict(m, sd, name)
                     matched = [k for k in m.state_dict() if k not in missing]
                     logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             else:
-                pretrain_ckpts = [p for p in sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{prefix}*epoch*.pt"))) if "scratch" not in p.name.lower()]
-                if pretrain_ckpts:
-                    ckpt = pretrain_ckpts[-1]
-                    ckpt_raw = torch.load(ckpt, map_location=device)
-                    check_pool_match(
-                        ckpt_raw.get("pool_fingerprint"),
-                        dataset_fingerprint(get_dataset_dir()),
-                        f"ood/{name}",
-                    )
-                    sd = ckpt_raw.get("model_state_dict", ckpt_raw)
-                    res = m.load_pretrained_encoder(sd)
-                    logger.warning(
-                        f"Loaded pre-trained encoder weights for {name} from {ckpt.name} ({res['loaded_keys']} keys), "
-                        f"but decoder is randomly initialized."
-                    )
-                else:
-                    logger.warning(
-                        f"Checkpoint for {name} not found. Skipping OOD evaluation."
-                    )
-                    return None
+                logger.warning(
+                    f"Downstream checkpoint for {name} not found. Skipping OOD evaluation."
+                )
+                return None
             return m.to(device)
 
         elif name == "3D nnU-Net":
@@ -332,7 +303,7 @@ def main():
             nnunet_cfg = load_yaml_config(nnunet_cfg_path) if nnunet_cfg_path.exists() else {}
             m = BraTS3DnnUNet(
                 in_channels=nnunet_cfg.get("in_channels", 4),
-                out_channels=nnunet_cfg.get("out_channels", 1),
+                out_channels=nnunet_cfg.get("out_channels", 5),
                 deep_supervision=nnunet_cfg.get("deep_supervision", True),
                 deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
                 res_block=nnunet_cfg.get("res_block", True),
@@ -358,7 +329,7 @@ def main():
             unet_cfg = load_yaml_config(unet_cfg_path) if unet_cfg_path.exists() else {}
             m = BraTS3DUNet(
                 in_channels=unet_cfg.get("in_channels", 4),
-                out_channels=unet_cfg.get("out_channels", 1),
+                out_channels=unet_cfg.get("out_channels", 5),
                 channels=tuple(unet_cfg.get("channels", (32, 64, 128, 256, 512))),
                 strides=tuple(unet_cfg.get("strides", (2, 2, 2, 2))),
                 num_res_units=unet_cfg.get("num_res_units", 2),
@@ -430,18 +401,12 @@ def main():
                 tta=args.tta,
             )
             dname = _display_name(m_name)
-            if set(scores) == {"mean"}:
-                # Binary legacy: single column as before (v1 WT-only).
-                logger.info(f"{m_name} -> Dice: {scores['mean'] * 100:.2f}%")
-                row[dname] = f"{scores['mean'] * 100:.2f}%"
-            else:
-                # v2 regions protocol: one column per region + mean.
-                logger.info(
-                    f"{m_name} -> WT {scores['WT'] * 100:.2f}% / "
-                    f"TC {scores['TC'] * 100:.2f}% / ET {scores['ET'] * 100:.2f}% "
-                    f"(mean {scores['mean'] * 100:.2f}%)")
-                for r in ("WT", "TC", "ET", "mean"):
-                    row[f"{dname} [{r}]"] = f"{scores[r] * 100:.2f}%"
+            logger.info(
+                f"{m_name} -> WT {scores['WT'] * 100:.2f}% / "
+                f"TC {scores['TC'] * 100:.2f}% / ET {scores['ET'] * 100:.2f}% "
+                f"(mean {scores['mean'] * 100:.2f}%)")
+            for r in ("WT", "TC", "ET", "mean"):
+                row[f"{dname} [{r}]"] = f"{scores[r] * 100:.2f}%"
         records.append(row)
 
     new_df = pd.DataFrame(records)

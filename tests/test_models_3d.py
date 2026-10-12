@@ -14,12 +14,12 @@ from brats_jepa_3d.models import (
     BraTS3DnnUNet,
     BraTS3DUNet,
     HybridUNETRDecoder3D,
-    IJEPA3D,
     JEPAPredictor3D,
     JEPASegmentationModel3D,
     MultiScaleViTSegmentationDecoder3D,
     PatchEmbed3D,
     SigRegJEPA3D,
+    SingleEncoderJEPA3D,
     VisionTransformerEncoder3D,
     VisRegJEPA3D,
     dropout_disabled,
@@ -132,51 +132,59 @@ def test_visreg_jepa_3d():
     assert out["projected_tokens"].shape == (2, 192, 128)
 
 
-def test_ijepa_3d_and_ema():
-    model = IJEPA3D(
-        img_size=(128, 128, 128),
-        patch_size=(16, 16, 16),
-        in_channels=4,
-        embed_dim=384,
-        encoder_depth=2,
-        predictor_depth=2,
-        num_heads=6,
+def test_jepa_predictor_forward_multi_targets():
+    """Verify JEPAPredictor3D forward_multi_targets produces identical outputs to sequential forward."""
+    predictor = JEPAPredictor3D(
+        embed_dim=64,
+        pred_embed_dim=32,
+        depth=2,
+        num_heads=2,
     )
-    images = torch.randn(2, 4, 128, 128, 128)
-    context_indices = torch.randint(0, 512, (2, 192))
-    target_indices_list = [torch.randint(0, 512, (2, 27))]
+    context_tokens = torch.randn(2, 48, 64)
+    context_indices = torch.randint(0, 512, (2, 48))
+    target_indices_list = [
+        torch.randint(0, 512, (2, 27)),
+        torch.randint(0, 512, (2, 18)),
+        torch.randint(0, 512, (2, 8)),
+    ]
 
-    out = model(images, context_indices, target_indices_list)
-    assert len(out["predictions"]) == 1
+    # Predict via forward_multi_targets (cached context proj + cached sinusoidal gather)
+    preds_multi = predictor.forward_multi_targets(context_tokens, context_indices, target_indices_list)
 
-    # Verify EMA update modifies target encoder weights
-    target_weight_before = model.target_encoder.blocks[0].norm1.weight.clone()
-    with torch.no_grad():
-        model.context_encoder.blocks[0].norm1.weight.add_(1.0)
-    model.update_target_encoder(momentum=0.5)
-    target_weight_after = model.target_encoder.blocks[0].norm1.weight
-    assert not torch.equal(target_weight_before, target_weight_after)
+    # Predict via sequential loop
+    preds_seq = [
+        predictor(context_tokens, context_indices, tgt_idx)
+        for tgt_idx in target_indices_list
+    ]
+
+    assert len(preds_multi) == len(target_indices_list)
+    for p_multi, p_seq in zip(preds_multi, preds_seq):
+        assert torch.allclose(p_multi, p_seq, atol=1e-5)
 
 
-def test_ijepa3d_target_encoder_eval_mode():
-    """Verify IJEPA3D keeps target_encoder in eval mode even after model.train() is called."""
-    model = IJEPA3D(
-        img_size=(32, 32, 32),
+def test_single_encoder_jepa_3d():
+    """Verify SingleEncoderJEPA3D architecture and forward pass."""
+    model = SingleEncoderJEPA3D(
+        img_size=(64, 64, 64),
         patch_size=(16, 16, 16),
         in_channels=4,
         embed_dim=64,
+        proj_dim=32,
         encoder_depth=2,
-        predictor_depth=1,
+        predictor_depth=2,
         predictor_embed_dim=32,
         num_heads=2,
     )
-    assert not model.target_encoder.training
-    model.train()
-    assert not model.target_encoder.training
-    model.train(True)
-    assert not model.target_encoder.training
-    model.eval()
-    assert not model.target_encoder.training
+    images = torch.randn(2, 4, 64, 64, 64)
+    context_indices = torch.randint(0, 64, (2, 24))
+    target_indices_list = [torch.randint(0, 64, (2, 8)), torch.randint(0, 64, (2, 4))]
+
+    out = model(images, context_indices, target_indices_list)
+    assert len(out["predictions"]) == 2
+    assert len(out["targets"]) == 2
+    assert out["projected_tokens"].shape == (2, 24, 32)
+    assert out["predictions"][0].shape == (2, 8, 64)
+    assert out["predictions"][1].shape == (2, 4, 64)
 
 
 def test_ema_cosine_momentum_schedule_and_smoke_test():
@@ -279,13 +287,13 @@ def test_segmentation_decoders_3d():
     out_ms_train = model_ms(x)
     assert isinstance(out_ms_train, list)
     assert len(out_ms_train) == 4
-    assert out_ms_train[0].shape == (2, 1, 128, 128, 128)
+    assert out_ms_train[0].shape == (2, 5, 128, 128, 128)
 
     model_ms.eval()
     with torch.no_grad():
         out_ms_eval = model_ms(x)
     assert isinstance(out_ms_eval, torch.Tensor)
-    assert out_ms_eval.shape == (2, 1, 128, 128, 128)
+    assert out_ms_eval.shape == (2, 5, 128, 128, 128)
 
     # 2. Linear Segmentation Decoder
     model_lin = JEPASegmentationModel3D(
@@ -299,7 +307,7 @@ def test_segmentation_decoders_3d():
         deep_supervision=False,
     )
     out_lin = model_lin(x)
-    assert out_lin.shape == (2, 1, 128, 128, 128)
+    assert out_lin.shape == (2, 5, 128, 128, 128)
 
 
 def test_supervised_baselines_3d():
@@ -415,7 +423,7 @@ def test_unet_ds_train_returns_four_heads():
         outs = m(torch.randn(1, 4, 32, 32, 32))
     assert isinstance(outs, list) and len(outs) == 4
     assert [tuple(o.shape[2:]) for o in outs] == [(32, 32, 32), (16, 16, 16), (8, 8, 8), (4, 4, 4)]
-    assert all(o.shape[:2] == (1, 1) for o in outs)
+    assert all(o.shape[:2] == (1, 5) for o in outs)
 
 
 def test_unet_ds_eval_and_disabled_return_single():
@@ -423,13 +431,13 @@ def test_unet_ds_eval_and_disabled_return_single():
     m.eval()
     with torch.no_grad():
         y = m(torch.randn(1, 4, 32, 32, 32))
-    assert isinstance(y, torch.Tensor) and tuple(y.shape) == (1, 1, 32, 32, 32)
+    assert isinstance(y, torch.Tensor) and tuple(y.shape) == (1, 5, 32, 32, 32)
 
     m2 = _tiny_unet(deep_supervision=False)
     m2.train()
     with torch.no_grad():
         y2 = m2(torch.randn(1, 4, 32, 32, 32))
-    assert isinstance(y2, torch.Tensor) and tuple(y2.shape) == (1, 1, 32, 32, 32)
+    assert isinstance(y2, torch.Tensor) and tuple(y2.shape) == (1, 5, 32, 32, 32)
     assert not [k for k in m2.state_dict() if k.startswith("ds")]
 
 
@@ -439,7 +447,7 @@ def test_unet_ds_loss_backward():
     m.train()
     crit = DeepSupervisionLoss3D()
     logits = m(torch.randn(1, 4, 32, 32, 32))
-    target = (torch.rand(1, 1, 32, 32, 32) > 0.5).float()
+    target = torch.randint(0, 5, (1, 1, 32, 32, 32)).long()
     loss = crit(logits, target)["loss"]
     loss.backward()
     assert torch.isfinite(loss).item()
@@ -468,7 +476,7 @@ def test_unet_repeated_forwards_stable():
     m.train()
     with torch.no_grad():
         r2 = [tuple(o.shape) for o in m(x)]
-    assert r1 == r2 == [(1, 1, 32, 32, 32), (1, 1, 16, 16, 16), (1, 1, 8, 8, 8), (1, 1, 4, 4, 4)]
+    assert r1 == r2 == [(1, 5, 32, 32, 32), (1, 5, 16, 16, 16), (1, 5, 8, 8, 8), (1, 5, 4, 4, 4)]
 
 
 def test_p2_step14_unet_hooks_bounded():
@@ -508,7 +516,7 @@ def test_hybrid_eval_shape():
     dec.eval()
     with torch.no_grad():
         y = dec(_fake_intermediates(), raw_volume=torch.randn(1, 4, 128, 128, 128))
-    assert tuple(y.shape) == (1, 1, 128, 128, 128)
+    assert tuple(y.shape) == (1, 5, 128, 128, 128)
 
 
 def test_hybrid_train_ds_heads():
@@ -525,7 +533,7 @@ def test_hybrid_no_volume_fallback():
     dec.eval()
     with torch.no_grad():
         y = dec(_fake_intermediates())
-    assert tuple(y.shape) == (1, 1, 128, 128, 128)
+    assert tuple(y.shape) == (1, 5, 128, 128, 128)
 
 
 def test_hybrid_grad_flow():
@@ -561,7 +569,7 @@ def test_hybrid_full_model_forward():
     model.eval()
     with torch.no_grad():
         y = model(torch.randn(1, 4, 32, 32, 32))
-    assert tuple(y.shape) == (1, 1, 32, 32, 32)
+    assert tuple(y.shape) == (1, 5, 32, 32, 32)
 
 
 # =========================================================================
@@ -592,9 +600,9 @@ def test_residual_tissue_filter_rejects_non3d():
 
 
 def test_option_b_full_model_forward_and_loss_backward():
-    """Verify IJEPA3D, VisRegJEPA3D, and SigRegJEPA3D with Option B 6-slot target masking."""
+    """Verify VisRegJEPA3D and SigRegJEPA3D with Option B 6-slot target masking."""
     from brats_jepa_3d.data.masking import JEPAMaskingTransform3D, jepa_masking_collate_fn_3d
-    from brats_jepa_3d.losses import IJEPALoss, VisRegLoss, SigRegLoss
+    from brats_jepa_3d.losses import VisRegLoss, SigRegLoss
 
     tf = JEPAMaskingTransform3D()  # Option B: 6 slots, 97 tokens
     batch_raw = [
@@ -611,29 +619,7 @@ def test_option_b_full_model_forward_and_loss_backward():
     for m, shp in enumerate(expected_shapes):
         assert tgt_list[m].shape == shp
 
-    # 1. IJEPA3D forward + backward
-    ijepa = IJEPA3D(
-        img_size=(128, 128, 128),
-        patch_size=(16, 16, 16),
-        in_channels=4,
-        embed_dim=96,
-        encoder_depth=2,
-        predictor_depth=2,
-        predictor_embed_dim=48,
-    )
-    ijepa_crit = IJEPALoss()
-    out = ijepa(images, ctx, tgt_list)
-    assert len(out["predictions"]) == 6
-    assert len(out["targets"]) == 6
-    for m in range(6):
-        assert out["predictions"][m].shape == (2, tgt_list[m].shape[1], 96)
-        assert out["targets"][m].shape == (2, tgt_list[m].shape[1], 96)
-
-    loss_ijepa = ijepa_crit(out["predictions"], out["targets"])
-    loss_ijepa.backward()
-    assert any(p.grad is not None for p in ijepa.parameters())
-
-    # 2. VisRegJEPA3D forward + backward
+    # 1. VisRegJEPA3D forward + backward
     visreg = VisRegJEPA3D(
         img_size=(128, 128, 128),
         patch_size=(16, 16, 16),

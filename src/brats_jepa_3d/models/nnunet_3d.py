@@ -17,7 +17,7 @@ class BraTS3DnnUNet(nn.Module):
     def __init__(
         self,
         in_channels: int = 4,
-        out_channels: int = 1,
+        out_channels: int = 5,
         kernel_size: list[list[int]] | None = None,
         strides: list[list[int]] | None = None,
         upsample_kernel_size: list[list[int]] | None = None,

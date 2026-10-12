@@ -56,7 +56,11 @@ def _load_script(name: str):
 
 def _tiny_loader(n: int = 2):
     data = [
-        {"image": torch.randn(4, 32, 32, 32), "mask": (torch.rand(1, 32, 32, 32) > 0.9).float()}
+        {
+            "image": torch.randn(4, 32, 32, 32),
+            "mask": torch.randint(0, 5, (1, 32, 32, 32)).long(),
+            "brain_mask": torch.ones(1, 32, 32, 32),
+        }
         for _ in range(n)
     ]
     return DataLoader(data, batch_size=1)
@@ -211,7 +215,7 @@ def test_low_data_train_and_eval_tversky_tta():
         model, _tiny_loader(), _tiny_loader(), device, epochs=1, amp=False,
         smoke_test=True, loss_type="tversky", tta=True,
     )
-    assert set(scores) == {"mean"}
+    assert set(scores) == {"WT", "TC", "ET", "mean"}
     assert 0.0 <= scores["mean"] <= 1.0
 
 
@@ -222,7 +226,7 @@ def test_low_data_train_and_eval_dice_no_tta():
     scores = m.train_and_eval(
         model, _tiny_loader(), _tiny_loader(), device, epochs=1, amp=False, smoke_test=True,
     )
-    assert set(scores) == {"mean"}
+    assert set(scores) == {"WT", "TC", "ET", "mean"}
     assert 0.0 <= scores["mean"] <= 1.0
 
 
@@ -233,7 +237,7 @@ def test_ood_perturbation_tta():
     scores = m.evaluate_perturbation(
         model, _tiny_loader(), device, None, amp=False, smoke_test=True, tta=True,
     )
-    assert set(scores) == {"mean"}
+    assert set(scores) == {"WT", "TC", "ET", "mean"}
     assert 0.0 <= scores["mean"] <= 1.0
 
 

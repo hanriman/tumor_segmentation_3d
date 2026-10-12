@@ -4,7 +4,7 @@ spatial_shape: [128, 128, 128]
 patch_size: [16, 16, 16]
 in_channels: 4
 modalities: ["t1n", "t1c", "t2w", "t2f"]
-binary_target: "WT"  # Whole Tumor (labels > 0)
+num_classes: 5  # BraTS 2024 GLI (0=background, 1=NCR, 2=ED, 3=NET, 4=ET; evaluated WT, TC, ET)
 zscore_non_zero_only: true
 
 # Spatial Augmentations
