@@ -79,9 +79,11 @@ thesis_3d/
 │   ├── 04_train_unet_3d.ipynb            # 3D Residual UNet baseline
 │   ├── 05_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT-FPN ablation (random initialization)
 │   ├── 06_vit_unetr_hybrid_ablation_3d.ipynb  # From-scratch ViT-UNETR hybrid ablation (convolutional stem)
-│   ├── 07_finetune_visreg_multiscale_3d.ipynb # VisReg + multiscale FPN downstream fine-tuning
-│   ├── 08_finetune_visreg_unetr_3d.ipynb      # VisReg + hybrid UNETR downstream fine-tuning
-│   └── colab_a100_visreg_pretrain.ipynb  # Dedicated NVIDIA A100 (Google Colab Web UI) pre-training
+│   ├── 07_finetune_visreg_multiscale_3d.ipynb # VisReg + multiscale FPN downstream fine-tuning (Kaggle T4)
+│   ├── 08_finetune_visreg_unetr_3d.ipynb      # VisReg + hybrid UNETR downstream fine-tuning (Kaggle T4)
+│   ├── colab_a100_visreg_pretrain.ipynb       # Dedicated NVIDIA A100 (Google Colab) SSL pre-training
+│   ├── colab_a100_finetune_visreg_multiscale.ipynb # Dedicated NVIDIA A100 VisReg + multiscale FPN downstream
+│   └── colab_a100_finetune_visreg_unetr.ipynb      # Dedicated NVIDIA A100 VisReg + hybrid UNETR downstream
 │
 ├── configs/                      # Modular YAML configuration hierarchy
 │   ├── base.yaml                 # System paths, seed, device, AMP configs

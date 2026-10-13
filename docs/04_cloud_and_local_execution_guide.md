@@ -26,12 +26,14 @@ notebooks/                                    # BraTS 2024 WT/TC/ET (5-class, v2
 ├── 04_train_unet_3d.ipynb                 # 3D Residual UNet baseline
 ├── 05_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT-FPN ablation (random initialization)
 ├── 06_vit_unetr_hybrid_ablation_3d.ipynb  # From-scratch ViT-UNETR hybrid ablation (convolutional stem)
-├── 07_finetune_visreg_multiscale_3d.ipynb # VisReg + multiscale FPN downstream fine-tuning
-├── 08_finetune_visreg_unetr_3d.ipynb      # VisReg + hybrid UNETR downstream fine-tuning
-└── colab_a100_visreg_pretrain.ipynb       # Dedicated NVIDIA A100 (Google Colab Web UI) pre-training
+├── 07_finetune_visreg_multiscale_3d.ipynb # VisReg + multiscale FPN downstream fine-tuning (Kaggle T4)
+├── 08_finetune_visreg_unetr_3d.ipynb      # VisReg + hybrid UNETR downstream fine-tuning (Kaggle T4)
+├── colab_a100_visreg_pretrain.ipynb       # Dedicated NVIDIA A100 SSL pre-training (Google Colab)
+├── colab_a100_finetune_visreg_multiscale.ipynb # Dedicated NVIDIA A100 VisReg + multiscale FPN downstream
+└── colab_a100_finetune_visreg_unetr.ipynb      # Dedicated NVIDIA A100 VisReg + hybrid UNETR downstream
 ```
 
-All downstream notebooks (`03`–`08`) share a standardized reproducibility configuration cell (Cell 3) defining `SEED = 42`, `NUM_WORKERS = 4`, `PATCH_SIZE = 16`, `BATCH_SIZE = 2`, `EPOCHS = 30`, `LOW_DATA_EPOCHS = 15`, `LEARNING_RATE = 3e-4`, and `WEIGHT_DECAY = 1e-4`, which are dynamically injected into CLI commands without magic numbers.
+All Kaggle downstream notebooks (`03`–`08`) share a standardized reproducibility configuration cell (`SEED = 42`, `NUM_WORKERS = 4`, `PATCH_SIZE = 16`, `BATCH_SIZE = 2`). The Colab A100 suite utilizes high-throughput batching (`BATCH_SIZE = 4` downstream, `BATCH_SIZE = 32` pretrain) and supports high-resolution `PATCH_SIZE = 8` (4,096 tokens) or canonical `PATCH_SIZE = 16`.
 
 ---
 

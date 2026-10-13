@@ -93,13 +93,16 @@ When pre-training completes, the JEPA predictor and projector are **discarded**.
 
 1. **Multi-Scale 3D FPN (`vit_fpn`)**:
    - Lateral skip connections tapped from encoder layers $L_2, L_4, L_6, L_8$.
-   - Progressive $2\times$ transposed 3D convolutions with `GroupNorm` and residual blocks restoring resolution: $8^3 \to 16^3 \to 32^3 \to 64^3 \to 128^3$.
+   - Scale-adaptive hierarchical decoding:
+     - On canonical $8^3$ grids (patch size $16^3$): 4 progressive $2\times$ transposed 3D convolution stages with `GroupNorm` ($8^3 \to 16^3 \to 32^3 \to 64^3 \to 128^3$).
+     - On high-resolution $16^3$ grids (patch size $8^3$): Stage 1 operates at native token resolution ($16^3 \to 16^3$), followed by 3 progressive $2\times$ upsampling stages ($16^3 \to 32^3 \to 64^3 \to 128^3$), preserving output dimensionality.
    - Total model size: ~23.2M parameters.
 
 2. **Hybrid 3D UNETR (`vit_unetr`)**:
-   - Replaces pure transposed convolutions with a convolutional stem and residual decoder blocks.
-   - High-frequency spatial features from early convolutional stages are concatenated with ViT latent features.
-   - Delivers $+5.44\text{pp}$ higher mean Dice over pure ViT-FPN by resolving the $16^3$ patch boundary bottleneck.
+   - Replaces pure transposed convolutions with a dual-stream architecture: pre-trained ViT lateral representations fused with a lightweight native convolutional stem (`stem_128` at $128^3$, `stem_64` at $64^3$).
+   - High-frequency edge maps from the stem are concatenated into decoder stages 3 and 4 ($64^3$ and $128^3$).
+   - Dynamically supports both $8^3$ and $16^3$ token grids, maintaining channel and spatial compatibility.
+   - Delivers $+5.44\text{pp}$ higher mean Dice over pure ViT-FPN by resolving the coarse token boundary bottleneck.
 
 ---
 
