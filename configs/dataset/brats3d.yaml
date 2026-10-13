@@ -15,15 +15,3 @@ augmentations:
   rand_noise_prob: 0.3
   noise_std: 0.05
 
-# Masking Parameters (Option B: 3D Aspect-Ratio Jitter Target Cuboids, 97 tokens total)
-masking:
-  target_cuboid_sizes:
-    - [3, 3, 3]    # 27 tokens: Macro isotropic cube (48mm)
-    - [2, 3, 3]    # 18 tokens: Axial planar slab (32x48x48mm)
-    - [3, 2, 3]    # 18 tokens: Coronal planar slab (48x32x48mm)
-    - [3, 3, 2]    # 18 tokens: Sagittal planar slab (48x48x32mm)
-    - [2, 2, 2]    #  8 tokens: Regional meso cube (32mm)
-    - [2, 2, 2]    #  8 tokens: Regional meso cube (32mm)
-  max_target_overlap: 0.0
-  context_num_patches: 192         # Exactly 192 tokens (37.5% of 512)
-  context_connectivity: 26         # 3D BFS connectivity

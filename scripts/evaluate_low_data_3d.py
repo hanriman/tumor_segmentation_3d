@@ -112,6 +112,13 @@ def parse_args():
         help="Output directory for checkpoints and metrics",
     )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
+    parser.add_argument(
+        "--patch_size",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Voxel patch size (e.g. 8 8 8 or 16 16 16, default: from model config or 16 16 16)",
+    )
     return parser.parse_args()
 
 
@@ -294,9 +301,19 @@ def main():
             jepa_cfg_path = CONFIGS_DIR / "model" / "visreg_jepa_3d.yaml"
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
             logger.info("Initializing 3D ViT-FPN from SCRATCH (random initialization, no pre-trained weights)")
+            raw_patch = getattr(args, "patch_size", None)
+            if raw_patch is not None:
+                if isinstance(raw_patch, int):
+                    patch_size = (raw_patch, raw_patch, raw_patch)
+                elif len(raw_patch) == 1:
+                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
+                else:
+                    patch_size = tuple(int(x) for x in raw_patch)
+            else:
+                patch_size = tuple(jepa_cfg.get("patch_size", (16, 16, 16)))
             return JEPASegmentationModel3D(
                 img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
-                patch_size=tuple(jepa_cfg.get("patch_size", (16, 16, 16))),
+                patch_size=patch_size,
                 in_channels=jepa_cfg.get("in_channels", 4),
                 embed_dim=jepa_cfg.get("embed_dim", 384),
                 encoder_depth=jepa_cfg.get("encoder_depth", 8),
@@ -342,9 +359,20 @@ def main():
                 )
                 return None
 
+            raw_patch = getattr(args, "patch_size", None)
+            if raw_patch is not None:
+                if isinstance(raw_patch, int):
+                    patch_size = (raw_patch, raw_patch, raw_patch)
+                elif len(raw_patch) == 1:
+                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
+                else:
+                    patch_size = tuple(int(x) for x in raw_patch)
+            else:
+                patch_size = tuple(jepa_cfg.get("patch_size", (16, 16, 16)))
+
             m = JEPASegmentationModel3D(
                 img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
-                patch_size=tuple(jepa_cfg.get("patch_size", (16, 16, 16))),
+                patch_size=patch_size,
                 in_channels=jepa_cfg.get("in_channels", 4),
                 embed_dim=jepa_cfg.get("embed_dim", 384),
                 encoder_depth=jepa_cfg.get("encoder_depth", 8),

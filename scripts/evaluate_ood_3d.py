@@ -92,6 +92,13 @@ def parse_args():
         "--tta", action="store_true", default=False,
         help="4-fold orthogonal-reflection test-time augmentation",
     )
+    parser.add_argument(
+        "--patch_size",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Voxel patch size (e.g. 8 8 8 or 16 16 16, default: from model config or 16 16 16)",
+    )
     return parser.parse_args()
 
 
@@ -226,9 +233,20 @@ def main():
             except (KeyError, OSError, RuntimeError, AttributeError):
                 pass
 
+            raw_patch = getattr(args, "patch_size", None)
+            if raw_patch is not None:
+                if isinstance(raw_patch, int):
+                    patch_size = (raw_patch, raw_patch, raw_patch)
+                elif len(raw_patch) == 1:
+                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
+                else:
+                    patch_size = tuple(int(x) for x in raw_patch)
+            else:
+                patch_size = tuple(jepa_cfg.get("patch_size", (16, 16, 16)))
+
             m = JEPASegmentationModel3D(
                 img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
-                patch_size=tuple(jepa_cfg.get("patch_size", (16, 16, 16))),
+                patch_size=patch_size,
                 in_channels=jepa_cfg.get("in_channels", 4),
                 embed_dim=jepa_cfg.get("embed_dim", 384),
                 encoder_depth=jepa_cfg.get("encoder_depth", 8),
@@ -273,9 +291,20 @@ def main():
                 except (KeyError, OSError, RuntimeError, AttributeError):
                     pass
 
+            raw_patch = getattr(args, "patch_size", None)
+            if raw_patch is not None:
+                if isinstance(raw_patch, int):
+                    patch_size = (raw_patch, raw_patch, raw_patch)
+                elif len(raw_patch) == 1:
+                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
+                else:
+                    patch_size = tuple(int(x) for x in raw_patch)
+            else:
+                patch_size = tuple(jepa_cfg.get("patch_size", (16, 16, 16)))
+
             m = JEPASegmentationModel3D(
                 img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
-                patch_size=tuple(jepa_cfg.get("patch_size", (16, 16, 16))),
+                patch_size=patch_size,
                 in_channels=jepa_cfg.get("in_channels", 4),
                 embed_dim=jepa_cfg.get("embed_dim", 384),
                 encoder_depth=jepa_cfg.get("encoder_depth", 8),

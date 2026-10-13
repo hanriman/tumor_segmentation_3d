@@ -14,14 +14,21 @@ MIN_TISSUE_TOKENS_PER_TARGET = 14
 MIN_TISSUE_CONTEXT_TOKENS = 32
 
 # Default Option B (3D Aspect-Ratio Jitter): 6 target cuboids spanning isotropic macro,
-# axial, coronal, and sagittal planar slabs, plus regional meso blocks (97 tokens total).
-DEFAULT_TARGET_CUBOID_SIZES: tuple[tuple[int, int, int], ...] = (
+# axial, coronal, and sagittal planar slabs, plus regional meso blocks (97 tokens for 8³ grid).
+DEFAULT_TARGET_CUBOID_SIZES_8GRID: tuple[tuple[int, int, int], ...] = (
     (3, 3, 3),  # 27 tokens: Macro isotropic cube (48mm)
     (2, 3, 3),  # 18 tokens: Axial planar slab (32x48x48mm)
     (3, 2, 3),  # 18 tokens: Coronal planar slab (48x32x48mm)
     (3, 3, 2),  # 18 tokens: Sagittal planar slab (48x48x32mm)
     (2, 2, 2),  #  8 tokens: Regional meso cube (32mm)
     (2, 2, 2),  #  8 tokens: Regional meso cube (32mm)
+)
+DEFAULT_TARGET_CUBOID_SIZES = DEFAULT_TARGET_CUBOID_SIZES_8GRID
+
+# Scaled Option B for 16³ grid (patch_size 8³): 776 tokens total across 6 target cuboids
+# Preserves identical physical millimeter volume coverage (48mm, 32x48x48mm, 32mm).
+DEFAULT_TARGET_CUBOID_SIZES_16GRID: tuple[tuple[int, int, int], ...] = tuple(
+    (s[0] * 2, s[1] * 2, s[2] * 2) for s in DEFAULT_TARGET_CUBOID_SIZES_8GRID
 )
 
 
@@ -40,14 +47,14 @@ class JEPAMaskingTransform3D:
        Context tokens are sampled via a 3D Breadth-First Search (BFS) cluster expansion from a random
        non-target seed voxel. This guarantees a single topologically contiguous anatomical context
        subvolume, reflecting how human radiologists interpret localized pathology within surrounding tissue.
-    3. Constant Sequence Length (N_ctx = 192):
-       Enforcing exactly N_ctx = 192 patches (37.5% of 512 total patches) across all volumes eliminates
+    3. Constant Sequence Length (N_ctx = 192 / 1536):
+       Enforcing exactly N_ctx = 37.5% of total patches across all volumes eliminates
        ragged tensor padding and attention masks, maximizing GPU Tensor Core computation speed.
     4. Strict Disjointness Guarantee:
        Target and context index sets satisfy:
            \text{ctx} \cap \left(\bigcup_{m=1}^M \text{tgt}_m\right) = \emptyset
        ensuring zero attention leakage from target into the context encoder.
-    5. 3D Aspect-Ratio Jitter Target Cuboids (Option B: 97 tokens):
+    5. 3D Aspect-Ratio Jitter Target Cuboids (Option B: 97 / 776 tokens):
        Sampling multi-aspect cuboids [(3,3,3), (2,3,3), (3,2,3), (3,3,2), (2,2,2), (2,2,2)]
        trains the predictor across axial, coronal, and sagittal anatomical planes, while maintaining
        dense supervision (89.8% retention of baseline) and zero ragged padding via slot-uniform shapes.
@@ -65,13 +72,13 @@ class JEPAMaskingTransform3D:
             | None
         ) = None,
         max_target_overlap: float = 0.0,
-        context_num_patches: int = 192,
+        context_num_patches: int | None = None,
         connectivity: int = 26,
         tissue_token_frac: float = TISSUE_TOKEN_FRAC,
         min_tissue_tokens_per_target: int | None = None,
     ):
         self.grid_size = grid_size
-        self.num_patches = grid_size[0] * grid_size[1] * grid_size[2]  # 512
+        self.num_patches = grid_size[0] * grid_size[1] * grid_size[2]
 
         if target_cuboid_sizes is not None:
             self.target_cuboid_sizes = tuple(
@@ -92,12 +99,20 @@ class JEPAMaskingTransform3D:
             self.target_cuboid_size = sz_tgt
             self.target_cuboid_sizes = tuple(sz_tgt for _ in range(n_tgt))
         else:
-            self.target_cuboid_sizes = DEFAULT_TARGET_CUBOID_SIZES
+            if grid_size == (16, 16, 16):
+                self.target_cuboid_sizes = DEFAULT_TARGET_CUBOID_SIZES_16GRID
+            else:
+                self.target_cuboid_sizes = DEFAULT_TARGET_CUBOID_SIZES_8GRID
             self.num_target_cuboids = len(self.target_cuboid_sizes)
             self.target_cuboid_size = self.target_cuboid_sizes[0]
 
         self.max_target_overlap = max_target_overlap
-        self.context_num_patches = context_num_patches
+        if context_num_patches is None:
+            self.context_num_patches = int(0.375 * self.num_patches)
+        elif context_num_patches == 192 and grid_size == (16, 16, 16):
+            self.context_num_patches = 1536
+        else:
+            self.context_num_patches = int(context_num_patches)
         self.connectivity = connectivity
         self.tissue_token_frac = tissue_token_frac
         self.min_tissue_tokens_per_target = min_tissue_tokens_per_target

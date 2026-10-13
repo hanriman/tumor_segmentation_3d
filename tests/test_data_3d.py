@@ -591,3 +591,34 @@ def test_prepare_data_3d_grouped_base_id_zero_leakage():
     assert len(train_bases & test_bases) == 0, f"Leaked Train <-> Test: {train_bases & test_bases}"
     assert len(val_bases & test_bases) == 0, f"Leaked Val <-> Test: {val_bases & test_bases}"
     assert len(train_bases | val_bases | test_bases) == 25
+
+
+def test_resolution_scaled_option_b_masking():
+    """Verify that JEPAMaskingTransform3D correctly scales Option B cuboids and context for 16^3 grid."""
+    from brats_jepa_3d.data.masking import (
+        DEFAULT_TARGET_CUBOID_SIZES_8GRID,
+        DEFAULT_TARGET_CUBOID_SIZES_16GRID,
+    )
+
+    # 1. Scaling math matches 2x per axis
+    for s8, s16 in zip(DEFAULT_TARGET_CUBOID_SIZES_8GRID, DEFAULT_TARGET_CUBOID_SIZES_16GRID):
+        assert tuple(x * 2 for x in s8) == s16
+
+    # 2. 8^3 grid defaults
+    tf8 = JEPAMaskingTransform3D(grid_size=(8, 8, 8))
+    assert tf8.context_num_patches == 192  # 37.5% of 512
+    assert tf8.target_cuboid_sizes == DEFAULT_TARGET_CUBOID_SIZES_8GRID
+
+    # 3. 16^3 grid defaults
+    tf16 = JEPAMaskingTransform3D(grid_size=(16, 16, 16))
+    assert tf16.context_num_patches == 1536  # 37.5% of 4096
+    assert tf16.target_cuboid_sizes == DEFAULT_TARGET_CUBOID_SIZES_16GRID
+
+    # 4. Invariance of anatomical coverage:
+    # On 128mm volume:
+    # For 16mm patch: 192 tokens * (16^3) = 786,432 mm^3
+    # For 8mm patch: 1536 tokens * (8^3) = 786,432 mm^3
+    vol8 = tf8.context_num_patches * (16**3)
+    vol16 = tf16.context_num_patches * (8**3)
+    assert vol8 == vol16, "Context physical volume differs across resolutions"
+

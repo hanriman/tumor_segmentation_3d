@@ -192,21 +192,24 @@ def main():
         target_cuboid_size = tuple(int(x) for x in target_cuboid_size)
     num_target_cuboids = getattr(args, "num_target_cuboids", None)
 
-    # Scale context tokens proportionally (37.5% of total tokens) if not explicitly set
+    # Scale context tokens proportionally (context_fraction, default 37.5% of total tokens)
     total_tokens = grid_size[0] * grid_size[1] * grid_size[2]
-    default_context_tokens = int(0.375 * total_tokens)
-    context_num_patches = getattr(args, "context_num_patches", default_context_tokens)
+    context_fraction = getattr(args, "context_fraction", 0.375)
+    default_context_tokens = int(context_fraction * total_tokens)
+    context_num_patches = getattr(args, "context_num_patches", None)
+    if context_num_patches is None:
+        context_num_patches = default_context_tokens
+    elif context_num_patches == 192 and grid_size == (16, 16, 16):
+        context_num_patches = 1536
 
-    # If grid is (16, 16, 16) and target cuboids not set, use scaled Option B cuboids (776 tokens)
-    if grid_size == (16, 16, 16) and target_cuboid_sizes is None and target_cuboid_size is None:
-        target_cuboid_sizes = (
-            (6, 6, 6),
-            (4, 6, 6),
-            (6, 4, 6),
-            (6, 6, 4),
-            (4, 4, 4),
-            (4, 4, 4),
-        )
+    # Resolve resolution-scaled Option B cuboids if not explicitly passed
+    if target_cuboid_sizes is None and target_cuboid_size is None:
+        if grid_size == (16, 16, 16):
+            target_cuboid_sizes = getattr(args, "target_cuboid_sizes_16grid", None)
+        else:
+            target_cuboid_sizes = getattr(args, "target_cuboid_sizes_8grid", None)
+    if isinstance(target_cuboid_sizes, list):
+        target_cuboid_sizes = tuple(tuple(int(x) for x in s) for s in target_cuboid_sizes)
 
     masking_tf = JEPAMaskingTransform3D(
         grid_size=grid_size,
