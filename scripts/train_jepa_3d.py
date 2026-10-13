@@ -41,7 +41,7 @@ from brats_jepa_3d.utils import (
 )
 
 
-def parse_args():
+def parse_args(args=None):
     parser = argparse.ArgumentParser(description="Pre-train 3D JEPA models on BraTS 2024 GLI")
     parser.add_argument(
         "--model_type",
@@ -118,7 +118,43 @@ def parse_args():
         default=0.10,
         help="Minimum regularizer scale after cosine annealing (default: 0.10)",
     )
-    return parser.parse_args()
+    return parser.parse_args(sanitize_colab_args(args))
+
+
+def sanitize_colab_args(argv: list[str] | None = None) -> list[str]:
+    """Sanitizes unexpanded IPython/Colab template placeholders (e.g. '{PATCH_SIZE}') in CLI arguments."""
+    import sys
+
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    substitutions = {
+        "{PATCH_SIZE}": "8",
+        "{PRETRAIN_BATCH_SIZE}": "32",
+        "{BATCH_SIZE}": "4",
+        "{EPOCHS}": "200",
+        "{SEED}": "42",
+        "{NUM_WORKERS}": "4",
+        "{LEARNING_RATE}": "5e-4",
+        "{WEIGHT_DECAY}": "0.05",
+        "{REG_WARMUP_EPOCHS}": "30",
+        "{REG_MIN_SCALE}": "0.10",
+        "{LR}": "5e-4",
+        "{WARMUP_EPOCHS}": "5",
+        "{COSINE_DECAY_EPOCHS}": "45",
+    }
+    sanitized = []
+    for a in raw_args:
+        if a in substitutions:
+            sanitized.append(substitutions[a])
+        elif a.startswith("{") and a.endswith("}"):
+            inner = a[1:-1]
+            try:
+                float(inner)
+                sanitized.append(inner)
+            except ValueError:
+                continue
+        else:
+            sanitized.append(a)
+    return sanitized
 
 
 def get_lr_scheduler(

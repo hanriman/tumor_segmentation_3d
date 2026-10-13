@@ -38,7 +38,7 @@ from brats_jepa_3d.utils import (
 )
 
 
-def parse_args():
+def parse_args(args=None):
     parser = argparse.ArgumentParser(description="Downstream 3D Volumetric Fine-Tuning")
     parser.add_argument("--model_type", type=str, default="sigreg_jepa")
     parser.add_argument(
@@ -144,7 +144,43 @@ def parse_args():
         default=None,
         help="Voxel patch size (e.g. 8 8 8 for high-res A100 or 16 16 16 for standard, default: from config or 16 16 16)",
     )
-    return parser.parse_args()
+    return parser.parse_args(sanitize_colab_args(args))
+
+
+def sanitize_colab_args(argv: list[str] | None = None) -> list[str]:
+    """Sanitizes unexpanded IPython/Colab template placeholders (e.g. '{PATCH_SIZE}') in CLI arguments."""
+    import sys
+
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    substitutions = {
+        "{PATCH_SIZE}": "8",
+        "{PRETRAIN_BATCH_SIZE}": "32",
+        "{BATCH_SIZE}": "4",
+        "{EPOCHS}": "50",
+        "{SEED}": "42",
+        "{NUM_WORKERS}": "4",
+        "{LEARNING_RATE}": "5e-4",
+        "{WEIGHT_DECAY}": "0.05",
+        "{REG_WARMUP_EPOCHS}": "30",
+        "{REG_MIN_SCALE}": "0.10",
+        "{LR}": "5e-4",
+        "{WARMUP_EPOCHS}": "5",
+        "{COSINE_DECAY_EPOCHS}": "45",
+    }
+    sanitized = []
+    for a in raw_args:
+        if a in substitutions:
+            sanitized.append(substitutions[a])
+        elif a.startswith("{") and a.endswith("}"):
+            inner = a[1:-1]
+            try:
+                float(inner)
+                sanitized.append(inner)
+            except ValueError:
+                continue
+        else:
+            sanitized.append(a)
+    return sanitized
 
 
 def evaluate(model, loader, device, amp: bool = True, smoke_test: bool = False) -> dict[str, float]:
