@@ -23,7 +23,7 @@ def discover_experiment_directories(base_dir: Path | str | None = None) -> list[
     # Check immediate subdirectories
     for item in sorted(root.iterdir()):
         if item.is_dir() and not item.name.startswith((".", "_")):
-            if item.name in ["paper_artifacts", "figures", "legacy"]:
+            if item.name in ["paper_artifacts", "figures", "legacy", "archive"]:
                 continue
             if (item / "metrics").exists() or (item / "checkpoints").exists() or (item / "logs").exists():
                 discovered.append(item)

@@ -60,7 +60,7 @@ To ensure mathematical rigor, benchmark reproducibility, and peer-review defensi
 ### 3.1 Upgrade A: Option B 3D Anisotropic Target Masking Jitter
 
 #### The Mathematical Problem
-Standard I-JEPA uses isotropic cubic target blocks ($3 \times 3 \times 3 = 27$ tokens). In 3D MRI, gliomas display irregular, anisotropic morphology (infiltrating along planar white matter tracts and sulcal boundaries). Fixed isotropic targets fail to force the predictor to learn directional spatial correlations.
+Conventional 3D JEPA designs typically use isotropic cubic target blocks ($3 \times 3 \times 3 = 27$ tokens). In 3D MRI, gliomas display irregular, anisotropic morphology (infiltrating along planar white matter tracts and sulcal boundaries). Fixed isotropic targets fail to force the predictor to learn directional spatial correlations.
 
 #### Algorithmic Formulation
 Option B specifies 6 target slots with varying aspect ratios and token volumes:

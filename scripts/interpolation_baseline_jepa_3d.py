@@ -40,11 +40,17 @@ from brats_jepa_3d.metrics.probing_metrics import (  # noqa: E402
 )
 from brats_jepa_3d.models.visreg_jepa_3d import VisRegJEPA3D  # noqa: E402
 
-V1_PRETRAIN_CKPT = (
+_mr_ckpt = (
     PROJECT_ROOT
-    / "outputs/experiments/v1_fulldata_tumor_vs_healthy/visreg_pretrain_outputs"
+    / "outputs/multiregion/visreg_pretrain_outputs"
     / "checkpoints/visreg_jepa_3d_best.pt"
 )
+_legacy_ckpt = (
+    PROJECT_ROOT
+    / "outputs/archive/experiments/v1_fulldata_tumor_vs_healthy/visreg_pretrain_outputs"
+    / "checkpoints/visreg_jepa_3d_best.pt"
+)
+V1_PRETRAIN_CKPT = _mr_ckpt if _mr_ckpt.exists() else _legacy_ckpt
 GRID = (8, 8, 8)
 PATCH = 16
 
