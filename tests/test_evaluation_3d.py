@@ -1001,3 +1001,16 @@ def test_evaluate_3d_sample_level_tumor_accumulation():
     assert np.isnan(stats["regions"]["ET"]["dice_tumor_only"])
     # WT was present in sample 0, so dice_tumor_only should be a valid score >= 0.0
     assert 0.0 <= stats["regions"]["WT"]["dice_tumor_only"] <= 1.0
+
+
+def test_get_checkpoint_search_dirs_discovery(tmp_path: Path):
+    """Verify get_checkpoint_search_dirs includes existing primary and fallback candidate directories."""
+    from brats_jepa_3d.config import get_checkpoint_search_dirs
+
+    dummy_primary = tmp_path / "primary_ckpts"
+    dummy_primary.mkdir(parents=True)
+
+    dirs = get_checkpoint_search_dirs(dummy_primary)
+    assert dummy_primary in dirs
+    # Order preserves primary first
+    assert dirs[0] == dummy_primary

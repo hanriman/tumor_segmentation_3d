@@ -23,6 +23,7 @@ from brats_jepa_3d.config import (
     CONFIGS_DIR,
     OUTPUTS_DIR,
     ensure_directories,
+    get_checkpoint_search_dirs,
     load_yaml_config,
 )
 from brats_jepa_3d.data import BraTS3DDataset
@@ -361,7 +362,7 @@ def main():
                     f"--checkpoint was specified ({args.checkpoint}), but multiple models are being evaluated. "
                     f"Using default checkpoint path for {label}."
                 )
-            search_dirs = [checkpoints_dir] if checkpoints_dir == CHECKPOINTS_DIR else [checkpoints_dir, CHECKPOINTS_DIR]
+            search_dirs = get_checkpoint_search_dirs(checkpoints_dir)
             if model_type == "unet_3d":
                 ckpt_file = next((d / "unet_3d_best.pt" for d in search_dirs if (d / "unet_3d_best.pt").exists()), checkpoints_dir / "unet_3d_best.pt")
             elif model_type == "nnunet_3d":
@@ -537,7 +538,10 @@ def main():
                     "Dice_tumor_only (%)": (
                         f"{dt * 100:.2f}" if dt == dt else "n/a"),
                     "IoU (%)": f"{rs['iou_mean'] * 100:.2f} ± {rs['iou_std'] * 100:.2f}",
+                    "HD95 (voxels)": f"{rs['hd95_mean']:.2f} ± {rs['hd95_std']:.2f}",
                     "HD95 (mm)": f"{rs['hd95_mean']:.2f} ± {rs['hd95_std']:.2f}",
+                    "HD95_tumor_only (voxels)": (
+                        f"{ht:.2f}" if ht == ht else "n/a"),
                     "HD95_tumor_only (mm)": (
                         f"{ht:.2f}" if ht == ht else "n/a"),
                     "Latency (ms)": f"{seg_stats['latency_ms']:.2f}",

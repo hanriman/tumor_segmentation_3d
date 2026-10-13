@@ -144,6 +144,31 @@ def ensure_directories(base_output_dir: Path | str | None = None):
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def get_checkpoint_search_dirs(primary_dir: Path | str | None = None) -> list[Path]:
+    """Returns candidate checkpoint search directories in priority order across cloud & local layouts."""
+    primary = Path(primary_dir).resolve() if primary_dir else CHECKPOINTS_DIR
+    candidates = [
+        primary,
+        CHECKPOINTS_DIR,
+        Path("outputs/checkpoints").resolve(),
+        Path.cwd() / "outputs" / "checkpoints",
+        PROJECT_ROOT / "outputs" / "checkpoints",
+        Path("/kaggle/working/outputs/checkpoints"),
+        Path("/kaggle/working/tumor_segmentation_3d/outputs/checkpoints"),
+        Path("/kaggle/working/thesis_repo/outputs/checkpoints"),
+    ]
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            if c.exists():
+                result.append(c)
+    if not result:
+        result.append(primary)
+    return result
+
+
 def merge_config_with_args(
     config: dict[str, Any],
     args: Any,

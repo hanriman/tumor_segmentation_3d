@@ -27,6 +27,7 @@ from brats_jepa_3d.config import (
     CONFIGS_DIR,
     OUTPUTS_DIR,
     ensure_directories,
+    get_checkpoint_search_dirs,
     get_dataset_dir,
     load_yaml_config,
 )
@@ -208,7 +209,7 @@ def main():
     else:
         selected_models = all_models
 
-    search_dirs = [checkpoints_dir] if checkpoints_dir == CHECKPOINTS_DIR else [checkpoints_dir, CHECKPOINTS_DIR]
+    search_dirs = get_checkpoint_search_dirs(checkpoints_dir)
 
     def get_model(name: str):
         if name == "3D ViT-FPN (From Scratch)":

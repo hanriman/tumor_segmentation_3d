@@ -19,6 +19,7 @@ from brats_jepa_3d.config import (
     CONFIGS_DIR,
     OUTPUTS_DIR,
     ensure_directories,
+    get_checkpoint_search_dirs,
     get_dataset_dir,
     load_yaml_config,
 )
@@ -335,7 +336,7 @@ def main():
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
             # Prioritize pre-trained SSL checkpoints (*_3d_best.pt or *_3d_epoch_*.pt), excluding downstream fine-tuned checkpoints
-            search_dirs = [checkpoints_dir] if checkpoints_dir == CHECKPOINTS_DIR else [checkpoints_dir, CHECKPOINTS_DIR]
+            search_dirs = get_checkpoint_search_dirs(checkpoints_dir)
             ssl_best_ckpts, ssl_epoch_ckpts, fallback_ckpts = [], [], []
             for sdir in search_dirs:
                 if sdir.exists():
