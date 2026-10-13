@@ -91,6 +91,21 @@ Deep supervision is enabled symmetrically across all models:
 - **3D VisReg FPN / UNETR**: Multi-scale lateral skip heads.
 - Normalized hierarchical loss weights: $w_s = 2^{-s} / \sum_{j} 2^{-j}$.
 
+### 5.3 High-Resolution Patch Scaling ($8^3$ vs. $16^3$ Patch Size) & Benchmark Parity
+When scaling the Vision Transformer patch embedding from $16^3$ down to $8^3$ voxels on high-memory hardware (e.g., NVIDIA A100 40/80 GB):
+1. **Computational & Token Sequence Expansion**:
+   - For an identical $128^3$ volume, $8^3$ voxel patches generate $(128/8)^3 = 16^3 = \mathbf{4,096\text{ tokens}}$ ($8\times$ longer than the $8^3 = 512$ token sequence at $16^3$ patch size).
+   - Self-attention computational complexity and activation storage scale quadratically: $(4,096 / 512)^2 = \mathbf{64\times}$.
+   - Option B anisotropic target masking scales proportionally to maintain identical physical anatomical coverage: $776$ target tokens ($18.95\%$ of 4,096) and $1,536$ context tokens ($37.5\%$).
+2. **Downstream Memory and Latency Spillover**:
+   - If downstream segmentation adopts the fine-grained $8^3$ encoder, lateral skip feature maps are emitted at $16^3$ spatial resolution ($8\times$ more spatial tokens per intermediate layer).
+   - Backward pass activation memory under multi-scale deep supervision expands from $\approx 7.4\,\text{GB}$ to $>30\,\text{GB}$, requiring A100-tier hardware or micro-batching ($B=1$) with gradient accumulation. Downstream inference latency also increases $\approx 4\text{--}8\times$.
+3. **Preserving Benchmark Fairness ([`AGENTS.md`](../AGENTS.md))**:
+   - Directly comparing an $8^3$-patch JEPA ($4,096$ tokens) against standard $16^3$-patch CNN/ViT baselines introduces a spatial resolution confounder: gains could stem from $8\times$ finer spatial token granularity rather than self-supervised representation quality.
+   - Therefore, benchmark fairness requires:
+     - The canonical benchmark strictly fixes patch size to $16^3$ across all models on Kaggle T4 ($B=2$ downstream).
+     - The $8^3$ patch configuration is classified as an **asymptotic capacity & resolution scaling ablation**, evaluated against matched from-scratch $8^3$ ViT controls to isolate true representation benefit.
+
 ---
 
 ## 6. Rationale 5: Disentangling Architecture from Representation ($\Delta_{\text{JEPA}}$ vs. $\Delta_{\text{Arch}}$)
