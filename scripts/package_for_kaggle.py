@@ -112,8 +112,8 @@ def parse_args():
     parser.add_argument(
         "--dataset_name",
         type=str,
-        default="brats_gli_3d",
-        help="Processed dataset folder name under data/processed/ (default: brats_gli_3d)",
+        default="brats_gli_3d_v2",
+        help="Processed dataset folder name under data/processed/ (default: brats_gli_3d_v2)",
     )
     return parser.parse_args()
 
