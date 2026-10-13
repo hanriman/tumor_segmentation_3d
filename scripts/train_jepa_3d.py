@@ -83,6 +83,13 @@ def parse_args(args=None):
     parser.add_argument("--no_amp", "--no-amp", action="store_false", dest="amp")
     parser.add_argument("--clip_grad_norm", type=float, default=1.0)
     parser.add_argument(
+        "--grad_accum_steps",
+        "--gradient_accumulation_steps",
+        type=int,
+        default=1,
+        help="Number of micro-batches to accumulate gradients over (default: 1)",
+    )
+    parser.add_argument(
         "--num_workers",
         type=int,
         default=2,
@@ -434,13 +441,14 @@ def main():
             min_s = getattr(args, "reg_min_scale", 0.10)
             reg_scale = min_s + 0.5 * (1.0 - min_s) * (1.0 + math.cos(math.pi * progress))
 
+        grad_accum_steps = max(1, getattr(args, "grad_accum_steps", 1))
+        optimizer.zero_grad()
+
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs} (reg_scale={reg_scale:.2f})")
         for batch_idx, batch in enumerate(pbar):
             images = batch["images"].to(device)
             ctx_idx = batch["context_indices"].to(device)
             tgt_idx_list = [t.to(device) for t in batch["target_indices_list"]]
-
-            optimizer.zero_grad()
 
             with get_autocast_context(device, enabled=args.amp):
                 out = model(
@@ -458,7 +466,8 @@ def main():
                     generator=reg_generator,
                     reg_scale=reg_scale,
                 )
-                loss = loss_dict["loss"]
+                raw_loss = loss_dict["loss"]
+                loss = raw_loss / grad_accum_steps
 
             for k, v in loss_dict.items():
                 if isinstance(v, torch.Tensor):
@@ -466,22 +475,27 @@ def main():
 
             if scaler.is_enabled():
                 scaler.scale(loss).backward()
-                if args.clip_grad_norm > 0:
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
-                scaler.step(optimizer)
-                scaler.update()
             else:
                 loss.backward()
-                if args.clip_grad_norm > 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
-                optimizer.step()
 
-            global_step += 1
-            epoch_loss += loss.item()
+            if (batch_idx + 1) % grad_accum_steps == 0 or (batch_idx + 1) == len(train_loader):
+                if scaler.is_enabled():
+                    if args.clip_grad_norm > 0:
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    if args.clip_grad_norm > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                    optimizer.step()
+                optimizer.zero_grad()
+                global_step += 1
+
+            epoch_loss += raw_loss.item()
             num_batches += 1
             pbar.set_postfix(
-                {"loss": f"{loss.item():.4f}", "lr": f"{scheduler.get_last_lr()[0]:.6f}"}
+                {"loss": f"{raw_loss.item():.4f}", "lr": f"{scheduler.get_last_lr()[0]:.6f}"}
             )
 
             if args.smoke_test and batch_idx >= 1:

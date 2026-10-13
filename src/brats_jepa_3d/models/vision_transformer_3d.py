@@ -160,9 +160,9 @@ class TransformerBlock(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Pre-LayerNorm self-attention with residual skip
+        # Pre-LayerNorm self-attention with residual skip (need_weights=False enables fast-path SDPA / FlashAttention)
         norm_x = self.norm1(x)
-        attn_out, _ = self.attn(norm_x, norm_x, norm_x)
+        attn_out, _ = self.attn(norm_x, norm_x, norm_x, need_weights=False)
         x = x + attn_out
 
         # Pre-LayerNorm MLP with residual skip
