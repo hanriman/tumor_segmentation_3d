@@ -42,7 +42,7 @@ Gliomas (glioblastomas and astrocytomas) are intrinsically **three-dimensional, 
 | **VisReg Decoupled Moments** | $\mathcal{L}_{\text{VisReg}} = \mathcal{L}_{\text{JEPA}} + \lambda_{\text{c}} \frac{\|\mu\|_2^2}{D} + \lambda_{\text{sc}} \frac{\sum (1-\sigma_d)^2}{D} + \lambda_{\text{sh}} W_2^2$; shape term detaches both mu and sigma (center handled only by center loss); optional `generator` for seeded SWD slices. | **Wu, Balestriero, & Levine (2026)**; **Villani (2009)**. Stop-gradient on $\mu,\sigma$ prevents redundant mean gradients and dimensional collapse; closed-form 1D sort in $O(N \log N)$. |
 | **Hierarchical 3D FPN Decoder** | Lateral skips from $L_2, L_4, L_6, L_8$ with progressive ConvTranspose3d and `GroupNorm`. | **Lin et al. (2017)**; **Hatamizadeh et al. (2022)**; **Wu & He (2018)**. Restores high-frequency boundary gradients; GroupNorm stabilizes small 3D batches ($B \le 4$). |
 | **Supervised 3D Baselines** | MONAI 3D Residual UNet (+ ds1/ds2/ds3 heads) and MONAI 3D DynUNet, both with deep supervision default-ON ($w_s = 2^{-s}/\sum 2^{-j}$); asymmetric Tversky opt-in (binary-only `CombinedTverskyBCEWithLogitsLoss3D` with explicit `ValueError` guard; raw `VolumetricTverskyLoss` accepts `include_background=False` for multi-class parity with Dice); 4-fold TTA at eval. | **Ronneberger et al. (2015)**; **Isensee et al. (2021)**; **Lee et al. (2015)**; **Salehi et al. (2017)**. Establishes state-of-the-art supervised benchmark parity. |
-| **Exact 3D HD95 Metric** | $d_{\text{HD95}}^{3\text{D}}$ via 3D 26-connectivity morphological erosion and `cKDTree` in physical mm ($1.0\text{ mm}^3$); tumor-only aggregates (`dice_tumor_only`, `iou_tumor_only`, `hd95_tumor_only`) are NaN (never 1.0/0.0) on tumor-free cohorts or when HD95 is off — aggregate with `nanmean`, render as `n/a`. | **Huttenlocher et al. (1993)**; **Taha & Hanbury (2015)**; **Powers (2011)**. Guarded zero-division prevents artificial epsilon score inflation. |
+| **Exact 3D HD95 Metric** | $d_{\text{HD95}}^{3\text{D}}$ via 3D 26-connectivity morphological erosion and `cKDTree` in canonical grid voxels (normalized $128^3$ space); tumor-only aggregates (`dice_tumor_only`, `iou_tumor_only`, `hd95_tumor_only`) are NaN (never 1.0/0.0) on tumor-free cohorts or when HD95 is off — aggregate with `nanmean`, render as `n/a`. | **Huttenlocher et al. (1993)**; **Taha & Hanbury (2015)**; **Powers (2011)**. Guarded zero-division prevents artificial epsilon score inflation. |
 | **Effective Rank ($S_k^2$)** | $\text{erank}(Z) = \exp\left(-\sum p_k \ln p_k\right)$, $p_k = S_k^2 / \sum S_j^2$. | **Roy & Vetterli (2007)**. Strictly uses covariance eigenvalues $S_k^2$, preventing linear $S_k$ from masking dimensional collapse. |
 | **Centered Cosine Sim** | $\bar{S}_{\text{centered}} = \frac{1}{N(N-1)} \sum_{i \neq j} \frac{(z_i - \bar{z})^\top (z_j - \bar{z})}{\|z_i - \bar{z}\|_2 \|z_j - \bar{z}\|_2}$. | **Wang & Isola (2020)**. Decouples centroid translation from angular dispersion, diagnosing directional collapse. |
 | **Combined Loss Alignment** | Multi-class Cross-Entropy supervises all voxels including background (`ignore_index=-100`) while Dice default `include_background=True` is a no-op on the binary task (explicit `False` required only for multi-class). | **Isensee et al. (2021)**; **Milletari et al. (2016)**. Dense CE penalizes false-positive foreground predictions across healthy tissue while Dice prevents background dominance. |
@@ -78,7 +78,8 @@ thesis_3d/
 │   ├── 05_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT-FPN ablation (random initialization)
 │   ├── 06_vit_unetr_hybrid_ablation_3d.ipynb  # From-scratch ViT-UNETR hybrid ablation (convolutional stem)
 │   ├── 07_finetune_visreg_multiscale_3d.ipynb # VisReg + multiscale FPN downstream fine-tuning
-│   └── 08_finetune_visreg_unetr_3d.ipynb      # VisReg + hybrid UNETR downstream fine-tuning
+│   ├── 08_finetune_visreg_unetr_3d.ipynb      # VisReg + hybrid UNETR downstream fine-tuning
+│   └── colab_a100_visreg_pretrain.ipynb  # Dedicated NVIDIA A100 (Google Colab Web UI) pre-training
 │
 ├── configs/                      # Modular YAML configuration hierarchy
 │   ├── base.yaml                 # System paths, seed, device, AMP configs
@@ -92,6 +93,7 @@ thesis_3d/
 │   │   └── nnunet_3d.yaml        # 3D DynUNet + Deep Supervision parameters
 │   └── experiment/
 │       ├── pretrain_50ep.yaml    # 3D SSL pre-training schedule
+│       ├── colab_a100_pretrain.yaml # NVIDIA A100 SSL pre-training schedule (B=16, reg annealing)
 │       └── finetune_30ep.yaml    # 3D downstream fine-tuning schedule
 │
 ├── src/
@@ -272,21 +274,27 @@ python scripts/run_full_pipeline_3d.py --model_type visreg_jepa
 python scripts/run_full_pipeline_3d.py --model_type all
 ```
 
-### 7. Running on Kaggle GPU & Streamlined Local Aggregation
-For zero-setup cloud execution on free NVIDIA Tesla T4 GPUs (16 GB):
+### 7. Cloud Execution (Kaggle & Colab A100) & Streamlined Local Aggregation
+
+#### Option A: Zero-Setup Parallel Execution on Kaggle (Free NVIDIA Tesla T4 16 GB)
 1. **Package Data**: Run `python scripts/package_for_kaggle.py` and upload `dist_kaggle/brats_3d_full.zip` to Kaggle as a dataset named `brats-3d-full` (1,621 scans, grouped split: train 1,144 / val 235 / test 242).
 2. **Train Models in Parallel**:
    - Run `notebooks/03_train_nnunet_3d.ipynb` and `notebooks/04_train_unet_3d.ipynb` across concurrent GPU sessions.
    - For VisReg JEPA, run `notebooks/01_train_visreg_3d.ipynb` once (SSL pre-training, 100 epochs), publish its `visreg_pretrain_outputs.zip` checkpoint as a Kaggle dataset input, then run `notebooks/07_finetune_visreg_multiscale_3d.ipynb` and `notebooks/08_finetune_visreg_unetr_3d.ipynb` in parallel on the identical encoder (controlled decoder ablation).
    - Each downstream/baseline notebook evaluates its own test split performance, low-data label efficiency, and OOD robustness self-contained on the GPU before exporting.
-3. **1-Click Local Aggregation (Zero Cloud Re-Upload)**:
-   - Download the output archives into `outputs/<experiment_name>/` (e.g. `outputs/kaggle_visreg_multiscale`, `outputs/kaggle_visreg_unetr`, `outputs/kaggle_nnunet_5_epoch`, `outputs/kaggle_unet_5_epoch`).
-   - Run the local aggregator script:
-     ```bash
-     python scripts/combine_and_generate_paper_artifacts.py
-     ```
-   - Automatically merges all master benchmarks, low-data curves, and OOD tables, renders all 4 vector PDF/PNG figures, formats LaTeX tables, and packages `paper_artifacts.zip` locally in **2 seconds**!
-4. For comprehensive instructions and hardware budgeting, see [docs/kaggle_guide.md](docs/kaggle_guide.md).
+
+#### Option B: High-Throughput Pre-Training on Google Colab (NVIDIA A100 SXM 40/80 GB)
+- Run `notebooks/colab_a100_visreg_pretrain.ipynb` directly in the Colab Web UI with runtime set to **A100 GPU (High-RAM)**.
+- Securely authenticates private Kaggle datasets via Colab Secrets (`KAGGLE_USERNAME`, `KAGGLE_KEY`), unzips to fast local NVMe (`/content/data/`), trains 50 epochs with `batch_size: 16` and cosine regularizer annealing, and synchronizes checkpoints directly to Google Drive.
+
+#### 1-Click Local Aggregation (Zero Cloud Re-Upload):
+- Download the output archives into `outputs/<experiment_name>/` (e.g. `outputs/kaggle_visreg_multiscale`, `outputs/kaggle_visreg_unetr`, `outputs/kaggle_nnunet_5_epoch`, `outputs/kaggle_unet_5_epoch`).
+- Run the local aggregator script:
+  ```bash
+  python scripts/combine_and_generate_paper_artifacts.py
+  ```
+- Automatically merges all master benchmarks, low-data curves, and OOD tables, renders all 4 vector PDF/PNG figures, formats LaTeX tables, and packages `paper_artifacts.zip` locally in **2 seconds**!
+- For detailed operational instructions, hardware budgets, and step-by-step guides, see [docs/04_cloud_and_local_execution_guide.md](docs/04_cloud_and_local_execution_guide.md).
 
 ---
 
@@ -294,10 +302,10 @@ For zero-setup cloud execution on free NVIDIA Tesla T4 GPUs (16 GB):
 
 ### 6.1 Empirical Kaggle Benchmark Results (5-Epoch Verification Runs)
 > [!NOTE]
-> Historical runs below used the legacy pool/test split ($N=271$). The current pool is 1,621 scans with a grouped patient split (test $N=242$); re-benchmark on the consolidated Kaggle run before citing.
+> Historical runs below used the legacy pool/test split ($N=271$). The current pool is 1,621 scans with a grouped patient split (test $N=242$); re-benchmark on the consolidated Kaggle run before citing. Reported HD95 distances reflect canonical $128^3$ grid voxels (standardized bounding-box coordinates) rather than uncalibrated physical millimeters.
 Measured on NVIDIA Tesla T4 GPU (16 GB VRAM) with Automatic Mixed Precision (`--amp`):
 
-| Model Architecture | 3D Dice (%) | 3D IoU (%) | HD95 (mm) | Latency (ms / vol) | EffRank ($S^2$) | Centered CosSim |
+| Model Architecture | 3D Dice (%) | 3D IoU (%) | HD95 (voxels) | Latency (ms / vol) | EffRank ($S^2$) | Centered CosSim |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **3D nnU-Net (DynUNet)** | $82.52 \pm 14.14$ | $72.05 \pm 15.32$ | $9.05 \pm 14.41$ | $126.57$ | - | - |
 | **3D VisReg JEPA (FPN)** | $69.62 \pm 16.34$ | $55.40 \pm 16.28$ | $16.83 \pm 17.17$ | $73.14$ | $15.74$ ($4.1\%$) | $0.0665$ |
@@ -318,7 +326,7 @@ Measured on NVIDIA Tesla T4 GPU (16 GB VRAM) with Automatic Mixed Precision (`--
 > Values below are **unvalidated convergence targets**, not measured results. Do not cite as findings. Only §6.1 is empirical.
 Full-budget asymptotic convergence targets across the three benchmarked architectures plus decoder ablations (EffRank/CosSim columns are per-model collapse diagnostics, not cross-method rankings):
 
-| Model Architecture | 3D Dice (%) | 3D IoU (%) | 3D HD95 (mm) | Latency (ms / vol) | EffRank ($S^2$) | Centered CosSim |
+| Model Architecture | 3D Dice (%) | 3D IoU (%) | 3D HD95 (voxels) | Latency (ms / vol) | EffRank ($S^2$) | Centered CosSim |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **3D VisReg JEPA (FPN)** | $90.1 \pm 1.8$ | $82.0 \pm 2.5$ | $3.54 \pm 0.58$ | $3.1$ | $82.9$ | $0.0018$ |
 | **3D Residual UNet** | $85.4 \pm 3.2$ | $74.8 \pm 3.9$ | $5.68 \pm 1.12$ | $22.1$ | - | - |

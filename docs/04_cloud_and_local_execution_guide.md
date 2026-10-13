@@ -27,7 +27,8 @@ notebooks/                                    # BraTS 2024 WT/TC/ET (5-class, v2
 ├── 05_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT-FPN ablation (random initialization)
 ├── 06_vit_unetr_hybrid_ablation_3d.ipynb  # From-scratch ViT-UNETR hybrid ablation (convolutional stem)
 ├── 07_finetune_visreg_multiscale_3d.ipynb # VisReg + multiscale FPN downstream fine-tuning
-└── 08_finetune_visreg_unetr_3d.ipynb      # VisReg + hybrid UNETR downstream fine-tuning
+├── 08_finetune_visreg_unetr_3d.ipynb      # VisReg + hybrid UNETR downstream fine-tuning
+└── colab_a100_visreg_pretrain.ipynb       # Dedicated NVIDIA A100 (Google Colab Web UI) pre-training
 ```
 
 ---
@@ -60,7 +61,7 @@ python scripts/package_for_kaggle.py
 
 ### 4.2 Running Modular Workflows
 Each downstream notebook evaluates its checkpoints automatically across three evaluation regimes before generating output archives:
-1. **Holdout Test Evaluation**: Computes WT, TC, ET Dice and HD95 over held-out volumes ($N=242$).
+1. **Holdout Test Evaluation**: Computes WT, TC, ET Dice and HD95 (in canonical voxels) over held-out volumes ($N=242$).
 2. **Low-Data Label Efficiency**: Evaluates performance under $1\%, 5\%, 10\%, 25\%$ label fractions.
 3. **OOD Scanner Shift Evaluation**: Assesses robustness against Rician noise, $B_1$ field bias, and missing MRI modalities.
 
@@ -73,35 +74,46 @@ Outputs are exported as self-contained zip archives:
 
 ---
 
-## 5. Execution on Google Colab Pro (A100 SXM4)
+## 5. Execution on Google Colab (NVIDIA A100 SXM4)
 
-For accelerated pre-training with large batch sizes ($B=16$) and token memory queues ($K=128$ patients):
+For large-scale self-supervised pre-training ($8^3 = 512$ token grid) with full batch capacity ($B=16$) and regularizer schedule annealing, use the dedicated notebook:
+`notebooks/colab_a100_visreg_pretrain.ipynb`.
 
-### 5.1 Environment Setup
-```python
-# In Colab notebook:
-from google.colab import drive
-drive.mount('/content/drive')
+### 5.1 Why the Colab Web UI?
+- **Seamless Secrets Integration**: Secure access to private Kaggle datasets using Colab's built-in Secret Manager (`KAGGLE_USERNAME`, `KAGGLE_KEY`).
+- **Resilient Execution**: Does not drop background processes if a local VS Code remote SSH tunnel disconnects.
+- **Drive Persistence**: Checkpoints and diagnostics stream directly to `/content/drive/MyDrive/checkpoints/visreg_jepa_a100_50ep/`.
 
-!git clone https://github.com/hanriman/tumor_segmentation_3d.git
-%cd tumor_segmentation_3d
-!git checkout main
-!pip install -e .
-```
-
-### 5.2 Pre-Training Command (A100 Optimized)
-```bash
-python scripts/train_jepa_3d.py \
-    --data_dir /content/drive/MyDrive/brats_gli_3d_full \
-    --model_type visreg_jepa \
-    --batch_size 16 \
-    --epochs 100 \
-    --lr 7e-4 \
-    --amp \
-    --use_token_queue \
-    --queue_patient_capacity 128 \
-    --output_dir /content/drive/MyDrive/checkpoints/visreg_a100_100ep
-```
+### 5.2 Step-by-Step Launch Procedure
+1. **Open the Notebook**: In Google Colab, open `notebooks/colab_a100_visreg_pretrain.ipynb` from GitHub (`hanriman/tumor_segmentation_3d`).
+2. **Select A100 GPU**:
+   - Menu $\to$ **Runtime** $\to$ **Change runtime type**.
+   - Hardware accelerator: **A100 GPU**.
+   - Runtime shape: **High-RAM**.
+3. **Authenticate Private Kaggle Dataset**:
+   - Open **Secrets** (key 🔑 icon) in the left sidebar.
+   - Add `KAGGLE_USERNAME` and `KAGGLE_KEY` with notebook access toggled on (or upload `kaggle.json` interactively when prompted).
+4. **Fast NVMe Extraction**:
+   - Set `KAGGLE_DATASET = "yourusername/brats-3d-full"` in Cell 6.
+   - The notebook downloads and unzips directly to `/content/data/` on the local NVMe, avoiding slow Google Drive I/O during DataLoader iterations.
+5. **Pre-Flight Smoke Test**:
+   - Runs a 2-minute verification pass:
+     ```bash
+     python scripts/train_jepa_3d.py --model_type visreg_jepa --smoke_test --reg_warmup_epochs 2 --reg_min_scale 0.10
+     ```
+6. **50-Epoch Production Training**:
+   - Executes using the tuned A100 configuration ([`configs/experiment/colab_a100_pretrain.yaml`](../configs/experiment/colab_a100_pretrain.yaml)):
+     ```bash
+     python scripts/train_jepa_3d.py \
+         --model_type visreg_jepa \
+         --data_dir /content/data \
+         --output_dir /content/outputs/visreg_jepa_a100 \
+         --experiment_config configs/experiment/colab_a100_pretrain.yaml
+     ```
+   - Features: $B=16$, AMP FP16, Option B Anisotropic Target Masking Jitter (97 tokens across 6 cuboids), and Cosine Regularizer Annealing (15 warmup epochs, min scale 0.10).
+7. **Diagnostics & Drive Mirroring**:
+   - Executes `scripts/diagnose_visreg_3d.py` to plot Effective Rank, Cosine Similarity, and Feature Variance curves.
+   - Automatically synchronizes all weights and metrics to Google Drive.
 
 ---
 

@@ -6,7 +6,7 @@
 
 ## 1. Overview & Context
 
-To ensure mathematical rigor, benchmark reproducibility, and peer-review defensibility ([`AGENTS.md`](../AGENTS.md)), the codebase underwent a forensic audit followed by a series of pre-training algorithmic upgrades on the `feat/multiregion-wt-tc-et` branch.
+To ensure mathematical rigor, benchmark reproducibility, and peer-review defensibility ([`AGENTS.md`](../AGENTS.md)), the codebase underwent a forensic audit followed by a series of pre-training algorithmic upgrades, consolidated on the `main` branch.
 
 ```
        Phase 1: Forensic Codebase Audit
