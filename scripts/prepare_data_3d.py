@@ -237,6 +237,7 @@ def process_patient(
     t1c_resampled = np.where(brain_mask_resampled, t1c_resampled, 0.0)
     t2w_resampled = np.where(brain_mask_resampled, t2w_resampled, 0.0)
     t2f_resampled = np.where(brain_mask_resampled, t2f_resampled, 0.0)
+    seg_resampled = np.where(brain_mask_resampled, seg_resampled, 0).astype(np.uint8)
 
     # 3. Channel-independent Z-Score Normalization strictly within brain mask
     t1n_norm = zscore_normalize_non_zero(t1n_resampled, mask=brain_mask_resampled)

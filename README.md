@@ -68,7 +68,7 @@ thesis_3d/
 ├── docs/
 │   ├── README.md                         # Documentation index & guide overview
 │   ├── 01_visreg_jepa_architecture_and_pipeline.md # Complete dataflow, tokenization & VisReg loss formulation
-│   ├── 02_forensic_audit_and_tier2_upgrades.md     # Audit remediations, Option B target jitter, FIFO queue & annealing
+│   ├── 02_forensic_audit_and_tier2_upgrades.md     # Audit remediations, Option B target jitter, token regularization & annealing
 │   ├── 03_scientific_rationales_and_benchmarks.md  # Brain-aware masking, HD95 decoupling, fairness & official WT/TC/ET results
 │   └── 04_cloud_and_local_execution_guide.md       # Kaggle & Colab Pro A100 execution, data packaging & aggregation
 │
@@ -149,12 +149,12 @@ thesis_3d/
 │   ├── combine_and_generate_paper_artifacts.py # 1-Click master multi-experiment aggregator & LaTeX exporter
 │   └── run_full_pipeline_3d.py   # Master automation orchestrator
 │
-├── tests/                        # Consolidated pytest regression test suite (161 tests, 100% pass)
+├── tests/                        # Consolidated pytest regression test suite (159 tests, 100% pass)
 │   ├── conftest.py               # Synthetic 3D volume fixtures & hardware mocks
 │   ├── test_data_3d.py           # Dataset, 0% leakage, Option B 3D target jitter & BFS masking
 │   ├── test_evaluation_3d.py     # Evaluation parity, deep supervision flags, uninit decoder guard
 │   ├── test_integration_3d.py    # End-to-end smoke test integrations for training and evaluation
-│   ├── test_losses_3d.py         # FIFO token memory queue, cosine annealing, VisReg, SigReg
+│   ├── test_losses_3d.py         # VisReg SWD shape, SigReg Epps-Pulley, cosine annealing, Dice, BCE, Tversky
 │   ├── test_metrics_3d.py        # Volumetric metrics, cKDTree 3D HD95, Effective Rank S^2
 │   └── test_models_3d.py         # ViT encoder, predictor, FPN, UNETR hybrid, DynUNet, Residual UNet
 │

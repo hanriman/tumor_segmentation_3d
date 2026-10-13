@@ -17,6 +17,7 @@ from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
     CONFIGS_DIR,
     METRICS_DIR,
+    OUTPUTS_DIR,
     ensure_directories,
     get_dataset_dir,
     load_yaml_config,
@@ -101,6 +102,18 @@ def parse_args():
         action="store_false",
         dest="deep_supervision",
         help="Disable deep supervision heads",
+    )
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default=None,
+        help="Path to 3D dataset directory (default: auto-detected)",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Output directory for checkpoints and metrics",
     )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     return parser.parse_args()
@@ -209,10 +222,13 @@ def train_and_eval(
 
 def main():
     args = parse_args()
-    ensure_directories()
+    out_dir = Path(args.output_dir).resolve() if getattr(args, "output_dir", None) else OUTPUTS_DIR
+    checkpoints_dir = (out_dir / "checkpoints") if (out_dir / "checkpoints").exists() else out_dir
+    metrics_dir = out_dir / "metrics"
+    ensure_directories(out_dir)
     set_seed(args.seed)
     device = get_device()
-    logger = setup_logger("low_data_3d", METRICS_DIR / "low_data_3d.log")
+    logger = setup_logger("low_data_3d", metrics_dir / "low_data_3d.log")
     logger.info("Starting 3D Low-Data Label Efficiency Benchmark...")
 
     fractions = [0.01, 0.10] if args.smoke_test else args.fractions
@@ -220,8 +236,9 @@ def main():
 
     aug_tf = VolumetricAugmentations3D(is_training=True)
 
+    resolved_data_dir = Path(args.data_dir).resolve() if getattr(args, "data_dir", None) else None
     try:
-        test_dataset = BraTS3DDataset(split="test")
+        test_dataset = BraTS3DDataset(split="test", data_dir=resolved_data_dir)
     except FileNotFoundError:
         if not args.smoke_test:
             raise
@@ -306,18 +323,22 @@ def main():
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
             # Prioritize pre-trained SSL checkpoints (*_3d_best.pt or *_3d_epoch_*.pt), excluding downstream fine-tuned checkpoints
-            ssl_best_ckpts = [p for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*_3d_best.pt")) if "scratch" not in p.name.lower()]
-            ssl_epoch_ckpts = [p for p in sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{prefix}*_epoch_*.pt"))) if "scratch" not in p.name.lower()]
+            search_dirs = [checkpoints_dir] if checkpoints_dir == CHECKPOINTS_DIR else [checkpoints_dir, CHECKPOINTS_DIR]
+            ssl_best_ckpts, ssl_epoch_ckpts, fallback_ckpts = [], [], []
+            for sdir in search_dirs:
+                if sdir.exists():
+                    ssl_best_ckpts.extend([p for p in sorted(sdir.glob(f"{prefix}*_3d_best.pt")) if "scratch" not in p.name.lower()])
+                    ssl_epoch_ckpts.extend([p for p in sort_checkpoints_by_epoch(list(sdir.glob(f"{prefix}*_epoch_*.pt"))) if "scratch" not in p.name.lower()])
+                    fallback_ckpts.extend([
+                        p
+                        for p in sorted(sdir.glob(f"{prefix}*.pt"))
+                        if not any(dec in p.name.lower() for dec in ("multiscale", "bottleneck", "unetr_hybrid", "hybrid", "downstream", "scratch"))
+                    ])
             if ssl_best_ckpts:
                 ckpt_path = ssl_best_ckpts[-1]
             elif ssl_epoch_ckpts:
                 ckpt_path = ssl_epoch_ckpts[-1]
             else:
-                fallback_ckpts = [
-                    p
-                    for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*.pt"))
-                    if not any(dec in p.name.lower() for dec in ("multiscale", "bottleneck", "unetr_hybrid", "hybrid", "downstream", "scratch"))
-                ]
                 ckpt_path = fallback_ckpts[-1] if fallback_ckpts else None
 
             if not ckpt_path or not ckpt_path.exists():
@@ -343,7 +364,7 @@ def main():
             ckpt = torch.load(ckpt_path, map_location=device)
             check_pool_match(
                 ckpt.get("pool_fingerprint"),
-                dataset_fingerprint(get_dataset_dir()),
+                dataset_fingerprint(resolved_data_dir or get_dataset_dir()),
                 f"low-data/{name}",
             )
             res = m.load_pretrained_encoder(ckpt)
@@ -393,7 +414,7 @@ def main():
         logger.info(f"\n--- Evaluating Fraction: {frac * 100:.1f}% Labels ---")
         try:
             train_dataset = BraTS3DDataset(
-                split="train", fraction=frac, seed=args.seed, augmentations=aug_tf
+                split="train", fraction=frac, seed=args.seed, augmentations=aug_tf, data_dir=resolved_data_dir
             )
         except FileNotFoundError:
             if not args.smoke_test:
@@ -466,8 +487,8 @@ def main():
         records.append(row)
 
     new_df = pd.DataFrame(records)
-    csv_path = METRICS_DIR / "low_data_3d_summary.csv"
-    md_path = METRICS_DIR / "low_data_3d_summary.md"
+    csv_path = metrics_dir / "low_data_3d_summary.csv"
+    md_path = metrics_dir / "low_data_3d_summary.md"
 
     if csv_path.exists():
         try:

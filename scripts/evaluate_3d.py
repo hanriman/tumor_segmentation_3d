@@ -22,6 +22,7 @@ from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
     CONFIGS_DIR,
     METRICS_DIR,
+    OUTPUTS_DIR,
     ensure_directories,
     load_yaml_config,
 )
@@ -118,6 +119,18 @@ def parse_args():
         nargs=3,
         default=(1.0, 1.0, 1.0),
         help="Physical voxel spacing in mm (dz, dy, dx) for HD95; use nominal grid units if resampled",
+    )
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default=None,
+        help="Path to 3D dataset directory (default: auto-detected)",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Output directory for checkpoints and metrics",
     )
     parser.add_argument(
         "--no_write",
@@ -249,16 +262,20 @@ def evaluate_representation(
 
 def main():
     args = parse_args()
-    ensure_directories()
+    out_dir = Path(args.output_dir).resolve() if getattr(args, "output_dir", None) else OUTPUTS_DIR
+    checkpoints_dir = (out_dir / "checkpoints") if (out_dir / "checkpoints").exists() else out_dir
+    metrics_dir = out_dir / "metrics"
+    ensure_directories(out_dir)
     set_seed(args.seed)
     device = get_device()
-    logger = setup_logger("evaluate_3d", METRICS_DIR / "benchmark_3d.log")
+    logger = setup_logger("evaluate_3d", metrics_dir / "benchmark_3d.log")
     logger.info("Initializing Master 3D Volumetric Benchmark...")
     if args.tta:
         logger.info("TTA enabled: 4-fold orthogonal-reflection averaging (4x forward passes per volume).")
 
+    resolved_data_dir = Path(args.data_dir).resolve() if getattr(args, "data_dir", None) else None
     try:
-        test_dataset = BraTS3DDataset(split="test", augmentations=None)
+        test_dataset = BraTS3DDataset(split="test", augmentations=None, data_dir=resolved_data_dir)
     except FileNotFoundError:
         if not args.smoke_test:
             raise
@@ -340,36 +357,42 @@ def main():
                     f"--checkpoint was specified ({args.checkpoint}), but multiple models are being evaluated. "
                     f"Using default checkpoint path for {label}."
                 )
+            search_dirs = [checkpoints_dir] if checkpoints_dir == CHECKPOINTS_DIR else [checkpoints_dir, CHECKPOINTS_DIR]
             if model_type == "unet_3d":
-                ckpt_file = CHECKPOINTS_DIR / "unet_3d_best.pt"
+                ckpt_file = next((d / "unet_3d_best.pt" for d in search_dirs if (d / "unet_3d_best.pt").exists()), checkpoints_dir / "unet_3d_best.pt")
             elif model_type == "nnunet_3d":
-                ckpt_file = CHECKPOINTS_DIR / "nnunet_3d_best.pt"
+                ckpt_file = next((d / "nnunet_3d_best.pt" for d in search_dirs if (d / "nnunet_3d_best.pt").exists()), checkpoints_dir / "nnunet_3d_best.pt")
             elif is_scratch:
-                scratch_ckpts = sorted(
-                    CHECKPOINTS_DIR.glob(f"{model_type}_{decoder_type}_scratch_best.pt")
-                ) or sorted(CHECKPOINTS_DIR.glob(f"*{model_type}*scratch*best.pt"))
+                scratch_ckpts = []
+                for d in search_dirs:
+                    if d.exists():
+                        scratch_ckpts.extend(sorted(d.glob(f"{model_type}_{decoder_type}_scratch_best.pt")) or sorted(d.glob(f"*{model_type}*scratch*best.pt")))
                 if scratch_ckpts:
                     ckpt_file = scratch_ckpts[-1]
                 else:
-                    ckpt_file = CHECKPOINTS_DIR / f"{model_type}_{decoder_type}_scratch_best.pt"
+                    ckpt_file = checkpoints_dir / f"{model_type}_{decoder_type}_scratch_best.pt"
             else:
-                downstream_ckpts = [
-                    p for p in sorted(CHECKPOINTS_DIR.glob(f"{model_type}_{decoder_type}_best.pt"))
-                    if "scratch" not in p.name.lower()
-                ] or [
-                    p for p in sorted(CHECKPOINTS_DIR.glob(f"{model_type}*best.pt"))
-                    if "scratch" not in p.name.lower()
-                ]
-                pretrain_ckpts = [
-                    p for p in sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{model_type}*epoch*.pt")))
-                    if "scratch" not in p.name.lower()
-                ]
+                downstream_ckpts = []
+                pretrain_ckpts = []
+                for d in search_dirs:
+                    if d.exists():
+                        downstream_ckpts.extend([
+                            p for p in sorted(d.glob(f"{model_type}_{decoder_type}_best.pt"))
+                            if "scratch" not in p.name.lower()
+                        ] or [
+                            p for p in sorted(d.glob(f"{model_type}*best.pt"))
+                            if "scratch" not in p.name.lower()
+                        ])
+                        pretrain_ckpts.extend([
+                            p for p in sort_checkpoints_by_epoch(list(d.glob(f"{model_type}*epoch*.pt")))
+                            if "scratch" not in p.name.lower()
+                        ])
                 if downstream_ckpts:
                     ckpt_file = downstream_ckpts[-1]
                 elif pretrain_ckpts:
                     ckpt_file = pretrain_ckpts[-1]
                 else:
-                    ckpt_file = CHECKPOINTS_DIR / f"{model_type}_{decoder_type}_best.pt"
+                    ckpt_file = checkpoints_dir / f"{model_type}_{decoder_type}_best.pt"
 
         if model_type == "unet_3d":
             if not ckpt_file.exists():
@@ -381,7 +404,7 @@ def main():
             unet_cfg = load_yaml_config(unet_cfg_path) if unet_cfg_path.exists() else {}
             model = BraTS3DUNet(
                 in_channels=unet_cfg.get("in_channels", 4),
-                out_channels=unet_cfg.get("out_channels", 1),
+                out_channels=unet_cfg.get("out_channels", 5),
                 channels=tuple(unet_cfg.get("channels", (32, 64, 128, 256, 512))),
                 strides=tuple(unet_cfg.get("strides", (2, 2, 2, 2))),
                 num_res_units=unet_cfg.get("num_res_units", 2),
@@ -406,7 +429,7 @@ def main():
             nnunet_cfg = load_yaml_config(nnunet_cfg_path) if nnunet_cfg_path.exists() else {}
             model = BraTS3DnnUNet(
                 in_channels=nnunet_cfg.get("in_channels", 4),
-                out_channels=nnunet_cfg.get("out_channels", 1),
+                out_channels=nnunet_cfg.get("out_channels", 5),
                 deep_supervision=nnunet_cfg.get("deep_supervision", True),
                 deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
                 res_block=nnunet_cfg.get("res_block", True),
@@ -518,10 +541,10 @@ def main():
         return
 
     df_new = pd.DataFrame(results)
-    csv_path = METRICS_DIR / "benchmark_3d_summary.csv"
-    master_csv_path = METRICS_DIR / "master_3d_benchmark.csv"
-    md_path = METRICS_DIR / "benchmark_3d_summary.md"
-    master_md_path = METRICS_DIR / "master_3d_benchmark.md"
+    csv_path = metrics_dir / "benchmark_3d_summary.csv"
+    master_csv_path = metrics_dir / "master_3d_benchmark.csv"
+    md_path = metrics_dir / "benchmark_3d_summary.md"
+    master_md_path = metrics_dir / "master_3d_benchmark.md"
 
     if csv_path.exists() and len(models_to_evaluate) < len(all_models_list):
         try:

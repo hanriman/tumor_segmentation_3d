@@ -17,6 +17,7 @@ from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
     CONFIGS_DIR,
     LOGS_DIR,
+    OUTPUTS_DIR,
     ensure_directories,
     get_dataset_dir,
     load_yaml_config,
@@ -73,7 +74,24 @@ def parse_args():
         "--dataset_config", type=str, default=None, help="Path to dataset YAML config"
     )
     parser.add_argument(
-        "--exp_config", type=str, default=None, help="Path to experiment YAML config"
+        "--exp_config",
+        "--experiment_config",
+        dest="exp_config",
+        type=str,
+        default=None,
+        help="Path to experiment YAML config",
+    )
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default=None,
+        help="Path to 3D dataset directory (default: auto-detected)",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Output directory for checkpoints and logs",
     )
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=2)
@@ -170,12 +188,15 @@ def main():
     if Path(exp_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(exp_cfg_path), args)
 
-    ensure_directories()
+    out_dir = Path(args.output_dir).resolve() if getattr(args, "output_dir", None) else OUTPUTS_DIR
+    checkpoints_dir = out_dir / "checkpoints"
+    logs_dir = out_dir / "logs"
+    ensure_directories(out_dir)
     set_seed(args.seed)
     device = get_device()
     suffix = "_scratch" if args.from_scratch else ""
     logger = setup_logger(
-        "downstream_3d", LOGS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_downstream.log"
+        "downstream_3d", logs_dir / f"{args.model_type}_{args.decoder_type}{suffix}_downstream.log"
     )
     logger.info(
         f"Starting 3D Downstream Fine-Tuning: Model={args.model_type}, Decoder={args.decoder_type}, "
@@ -190,9 +211,10 @@ def main():
         is_training=True,
     )
 
+    resolved_data_dir = Path(args.data_dir).resolve() if getattr(args, "data_dir", None) else None
     try:
-        train_dataset = BraTS3DDataset(split="train", augmentations=aug_tf)
-        val_dataset = BraTS3DDataset(split="val", augmentations=None)
+        train_dataset = BraTS3DDataset(split="train", augmentations=aug_tf, data_dir=resolved_data_dir)
+        val_dataset = BraTS3DDataset(split="val", augmentations=None, data_dir=resolved_data_dir)
     except FileNotFoundError:
         if not args.smoke_test:
             raise
@@ -270,26 +292,29 @@ def main():
     elif args.pretrained_checkpoint:
         ckpt_path = Path(args.pretrained_checkpoint)
     else:
-        ssl_best = sorted(CHECKPOINTS_DIR.glob(f"{args.model_type}*_3d_best.pt"))
-        ssl_epochs = sort_checkpoints_by_epoch(list(CHECKPOINTS_DIR.glob(f"{args.model_type}*_epoch_*.pt")))
+        search_dirs = [checkpoints_dir] if checkpoints_dir == CHECKPOINTS_DIR else [checkpoints_dir, CHECKPOINTS_DIR]
+        ssl_best, ssl_epochs, candidates = [], [], []
+        for sdir in search_dirs:
+            if sdir.exists():
+                ssl_best.extend(sorted(sdir.glob(f"{args.model_type}*_3d_best.pt")))
+                ssl_epochs.extend(sort_checkpoints_by_epoch(list(sdir.glob(f"{args.model_type}*_epoch_*.pt"))))
+                candidates.extend([
+                    p
+                    for p in sorted(sdir.glob(f"{args.model_type}*.pt"))
+                    if not any(dec in p.name for dec in ("multiscale", "bottleneck", "unetr_hybrid", "hybrid", "downstream"))
+                ])
         if ssl_best:
             ckpt_path = ssl_best[-1]
         elif ssl_epochs:
             ckpt_path = ssl_epochs[-1]
-        else:
-            candidates = [
-                p
-                for p in sorted(CHECKPOINTS_DIR.glob(f"{args.model_type}*.pt"))
-                if not any(dec in p.name for dec in ("multiscale", "bottleneck", "unetr_hybrid", "hybrid", "downstream"))
-            ]
-            if candidates:
-                ckpt_path = candidates[-1]
+        elif candidates:
+            ckpt_path = candidates[-1]
 
     if not args.from_scratch and ckpt_path and ckpt_path.exists():
         ckpt = torch.load(ckpt_path, map_location=device)
         check_pool_match(
             ckpt.get("pool_fingerprint"),
-            dataset_fingerprint(get_dataset_dir()),
+            dataset_fingerprint(resolved_data_dir or get_dataset_dir()),
             "downstream",
         )
         res = model.load_pretrained_encoder(ckpt)
@@ -430,18 +455,18 @@ def main():
         if val_metrics["val_dice"] > best_val_dice or args.smoke_test:
             best_val_dice = val_metrics["val_dice"]
             state_dict_to_save["best_val_dice"] = best_val_dice
-            best_ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_best.pt"
+            best_ckpt_path = checkpoints_dir / f"{args.model_type}_{args.decoder_type}{suffix}_best.pt"
             torch.save(state_dict_to_save, best_ckpt_path)
             logger.info(f"New best model saved: {best_ckpt_path} (Val Dice: {best_val_dice:.4f})")
 
         # 2. Latest checkpoint saved every epoch for safe resumption
-        latest_ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_latest.pt"
+        latest_ckpt_path = checkpoints_dir / f"{args.model_type}_{args.decoder_type}{suffix}_latest.pt"
         torch.save(state_dict_to_save, latest_ckpt_path)
 
         # 3. Optional periodic checkpoint if save_freq > 0
         save_freq = getattr(args, "save_freq", 0)
         if save_freq > 0 and epoch % save_freq == 0 and not args.smoke_test:
-            periodic_ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_epoch_{epoch}.pt"
+            periodic_ckpt_path = checkpoints_dir / f"{args.model_type}_{args.decoder_type}{suffix}_epoch_{epoch}.pt"
             torch.save(state_dict_to_save, periodic_ckpt_path)
             logger.info(f"Periodic checkpoint saved: {periodic_ckpt_path}")
 
@@ -457,8 +482,8 @@ def main():
             torch.cuda.empty_cache()
 
     suffix = "_scratch" if args.from_scratch else ""
-    tracker.save_json(LOGS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_downstream_metrics.json")
-    tracker.save_csv(LOGS_DIR / f"{args.model_type}_{args.decoder_type}{suffix}_downstream_metrics.csv")
+    tracker.save_json(logs_dir / f"{args.model_type}_{args.decoder_type}{suffix}_downstream_metrics.json")
+    tracker.save_csv(logs_dir / f"{args.model_type}_{args.decoder_type}{suffix}_downstream_metrics.csv")
     logger.info(
         f"3D Downstream Fine-Tuning finished ({'from scratch' if args.from_scratch else 'pre-trained'})."
     )

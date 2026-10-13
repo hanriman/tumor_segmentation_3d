@@ -31,7 +31,7 @@ To prevent representation collapse without relying on momentum teacher networks 
     ▼ (4-Layer Predictor: D=192)        │
 [Predicted Embeddings: D=384] ──────────┼──► Smooth L1 Prediction Loss
                                         │
-                                        └──► FIFO Token Queue + VisReg Loss
+                                        └──► VisReg Regularization Loss
                                              (Center + Scale + Sliced-Wasserstein)
 ```
 

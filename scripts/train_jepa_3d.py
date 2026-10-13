@@ -18,6 +18,7 @@ from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
     CONFIGS_DIR,
     LOGS_DIR,
+    OUTPUTS_DIR,
     ensure_directories,
     get_dataset_dir,
     load_yaml_config,
@@ -56,7 +57,24 @@ def parse_args():
         "--dataset_config", type=str, default=None, help="Path to dataset YAML config"
     )
     parser.add_argument(
-        "--exp_config", type=str, default=None, help="Path to experiment YAML config"
+        "--exp_config",
+        "--experiment_config",
+        dest="exp_config",
+        type=str,
+        default=None,
+        help="Path to experiment YAML config",
+    )
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default=None,
+        help="Path to 3D dataset directory (default: auto-detected)",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Output directory for checkpoints and logs",
     )
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=4)
@@ -132,10 +150,13 @@ def main():
     if Path(exp_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(exp_cfg_path), args)
 
-    ensure_directories()
+    out_dir = Path(args.output_dir).resolve() if getattr(args, "output_dir", None) else OUTPUTS_DIR
+    checkpoints_dir = out_dir / "checkpoints"
+    logs_dir = out_dir / "logs"
+    ensure_directories(out_dir)
     set_seed(args.seed)
     device = get_device()
-    logger = setup_logger(f"train_{args.model_type}", LOGS_DIR / f"{args.model_type}_pretrain.log")
+    logger = setup_logger(f"train_{args.model_type}", logs_dir / f"{args.model_type}_pretrain.log")
     logger.info(
         f"Starting 3D JEPA Pre-training: Model={args.model_type}, Device={device}, AMP={args.amp}"
     )
@@ -188,13 +209,16 @@ def main():
         is_training=True,
     )
 
+    resolved_data_dir = Path(args.data_dir).resolve() if getattr(args, "data_dir", None) else None
     try:
         train_dataset = BraTS3DDataset(
+            data_dir=resolved_data_dir,
             split="train",
             masking_transform=masking_tf,
             augmentations=aug_tf,
         )
         val_dataset = BraTS3DDataset(
+            data_dir=resolved_data_dir,
             split="val",
             masking_transform=masking_tf,
             augmentations=None,
@@ -527,7 +551,7 @@ def main():
         val_score = avg_val_sublosses.get("val_jepa_loss", avg_val_loss)
         if val_score < best_val_loss:
             best_val_loss = val_score
-            best_ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_3d_best.pt"
+            best_ckpt_path = checkpoints_dir / f"{args.model_type}_3d_best.pt"
             torch.save(
                 {
                     "epoch": epoch,
@@ -537,7 +561,7 @@ def main():
                     "loss": avg_train_loss,
                     "val_loss": avg_val_loss,
                     "val_jepa_loss": val_score,
-                    "pool_fingerprint": dataset_fingerprint(get_dataset_dir()),
+                    "pool_fingerprint": dataset_fingerprint(resolved_data_dir or get_dataset_dir()),
                 },
                 best_ckpt_path,
             )
@@ -548,7 +572,7 @@ def main():
         # Save periodic checkpoint
         save_freq = getattr(args, "save_freq", 10)
         if epoch % save_freq == 0 or epoch == epochs or args.smoke_test:
-            ckpt_path = CHECKPOINTS_DIR / f"{args.model_type}_3d_epoch_{epoch}.pt"
+            ckpt_path = checkpoints_dir / f"{args.model_type}_3d_epoch_{epoch}.pt"
             torch.save(
                 {
                     "epoch": epoch,
@@ -557,7 +581,7 @@ def main():
                     "optimizer_state_dict": optimizer.state_dict(),
                     "loss": avg_train_loss,
                     "val_loss": avg_val_loss,
-                    "pool_fingerprint": dataset_fingerprint(get_dataset_dir()),
+                    "pool_fingerprint": dataset_fingerprint(resolved_data_dir or get_dataset_dir()),
                 },
                 ckpt_path,
             )
@@ -579,8 +603,8 @@ def main():
             torch.cuda.empty_cache()
 
     # Save metrics history
-    tracker.save_json(LOGS_DIR / f"{args.model_type}_pretrain_metrics.json")
-    tracker.save_csv(LOGS_DIR / f"{args.model_type}_pretrain_metrics.csv")
+    tracker.save_json(logs_dir / f"{args.model_type}_pretrain_metrics.json")
+    tracker.save_csv(logs_dir / f"{args.model_type}_pretrain_metrics.csv")
     logger.info("3D JEPA Pre-training completed successfully.")
 
 

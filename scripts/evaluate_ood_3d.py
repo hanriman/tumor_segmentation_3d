@@ -25,6 +25,7 @@ from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
     CONFIGS_DIR,
     METRICS_DIR,
+    OUTPUTS_DIR,
     ensure_directories,
     get_dataset_dir,
     load_yaml_config,
@@ -81,6 +82,18 @@ def parse_args():
         choices=["multiscale", "bottleneck", "unetr_hybrid"],
     )
     parser.add_argument(
+        "--data_dir",
+        type=str,
+        default=None,
+        help="Path to 3D dataset directory (default: auto-detected)",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Output directory for checkpoints and metrics",
+    )
+    parser.add_argument(
         "--tta", action="store_true", default=False,
         help="4-fold orthogonal-reflection test-time augmentation",
     )
@@ -129,14 +142,18 @@ def evaluate_perturbation(
 
 def main():
     args = parse_args()
-    ensure_directories()
+    out_dir = Path(args.output_dir).resolve() if getattr(args, "output_dir", None) else OUTPUTS_DIR
+    checkpoints_dir = (out_dir / "checkpoints") if (out_dir / "checkpoints").exists() else out_dir
+    metrics_dir = out_dir / "metrics"
+    ensure_directories(out_dir)
     set_seed(args.seed)
     device = get_device()
-    logger = setup_logger("evaluate_ood_3d", METRICS_DIR / "ood_3d.log")
+    logger = setup_logger("evaluate_ood_3d", metrics_dir / "ood_3d.log")
     logger.info("Starting 3D Out-of-Distribution Scanner Shift Benchmark...")
 
+    resolved_data_dir = Path(args.data_dir).resolve() if getattr(args, "data_dir", None) else None
     try:
-        test_dataset = BraTS3DDataset(split="test")
+        test_dataset = BraTS3DDataset(split="test", data_dir=resolved_data_dir)
     except FileNotFoundError:
         if not args.smoke_test:
             raise
@@ -188,15 +205,18 @@ def main():
     else:
         selected_models = all_models
 
+    search_dirs = [checkpoints_dir] if checkpoints_dir == CHECKPOINTS_DIR else [checkpoints_dir, CHECKPOINTS_DIR]
+
     def get_model(name: str):
         if name == "3D ViT-FPN (From Scratch)":
             jepa_cfg_path = CONFIGS_DIR / "model" / "visreg_jepa_3d.yaml"
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
-            scratch_candidates = sorted(CHECKPOINTS_DIR.glob("*visreg*scratch*best.pt")) or sorted(
-                CHECKPOINTS_DIR.glob("*scratch*best.pt")
-            )
-            ckpt = scratch_candidates[-1] if scratch_candidates else (CHECKPOINTS_DIR / "visreg_jepa_multiscale_scratch_best.pt")
+            scratch_candidates = []
+            for sdir in search_dirs:
+                if sdir.exists():
+                    scratch_candidates.extend(sorted(sdir.glob("*visreg*scratch*best.pt")) or sorted(sdir.glob("*scratch*best.pt")))
+            ckpt = scratch_candidates[-1] if scratch_candidates else (checkpoints_dir / "visreg_jepa_multiscale_scratch_best.pt")
 
             if not ckpt.exists():
                 logger.warning(f"Checkpoint for {name} not found at {ckpt}. Skipping OOD evaluation.")
@@ -239,9 +259,12 @@ def main():
             jepa_cfg_path = CONFIGS_DIR / "model" / f"{prefix}_3d.yaml"
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
-            dec_candidates = [p for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*{args.decoder_type}*best.pt")) if "scratch" not in p.name.lower()]
-            ms_candidates = [p for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*multiscale*best.pt")) if "scratch" not in p.name.lower()]
-            all_candidates = [p for p in sorted(CHECKPOINTS_DIR.glob(f"{prefix}*best.pt")) if "scratch" not in p.name.lower()]
+            dec_candidates, ms_candidates, all_candidates = [], [], []
+            for sdir in search_dirs:
+                if sdir.exists():
+                    dec_candidates.extend([p for p in sorted(sdir.glob(f"{prefix}*{args.decoder_type}*best.pt")) if "scratch" not in p.name.lower()])
+                    ms_candidates.extend([p for p in sorted(sdir.glob(f"{prefix}*multiscale*best.pt")) if "scratch" not in p.name.lower()])
+                    all_candidates.extend([p for p in sorted(sdir.glob(f"{prefix}*best.pt")) if "scratch" not in p.name.lower()])
             candidates = dec_candidates or ms_candidates or all_candidates
             ckpt = candidates[-1] if candidates else None
 
@@ -271,7 +294,7 @@ def main():
                 ckpt_raw = torch.load(ckpt, map_location=device)
                 check_pool_match(
                     ckpt_raw.get("pool_fingerprint"),
-                    dataset_fingerprint(get_dataset_dir()),
+                    dataset_fingerprint(resolved_data_dir or get_dataset_dir()),
                     f"ood/{name}",
                 )
                 sd = ckpt_raw.get("model_state_dict", ckpt_raw)
@@ -308,7 +331,7 @@ def main():
                 deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
                 res_block=nnunet_cfg.get("res_block", True),
             )
-            ckpt = CHECKPOINTS_DIR / "nnunet_3d_best.pt"
+            ckpt = next((d / "nnunet_3d_best.pt" for d in search_dirs if (d / "nnunet_3d_best.pt").exists()), checkpoints_dir / "nnunet_3d_best.pt")
             if ckpt.exists():
                 sd = torch.load(ckpt, map_location=device)
                 sd = sd.get("model_state_dict", sd)
@@ -335,7 +358,7 @@ def main():
                 num_res_units=unet_cfg.get("num_res_units", 2),
                 dropout=unet_cfg.get("dropout", 0.1),
             )
-            ckpt = CHECKPOINTS_DIR / "unet_3d_best.pt"
+            ckpt = next((d / "unet_3d_best.pt" for d in search_dirs if (d / "unet_3d_best.pt").exists()), checkpoints_dir / "unet_3d_best.pt")
             if ckpt.exists():
                 sd = torch.load(ckpt, map_location=device)
                 sd = sd.get("model_state_dict", sd)
@@ -410,8 +433,8 @@ def main():
         records.append(row)
 
     new_df = pd.DataFrame(records)
-    csv_path = METRICS_DIR / "ood_3d_summary.csv"
-    md_path = METRICS_DIR / "ood_3d_summary.md"
+    csv_path = metrics_dir / "ood_3d_summary.csv"
+    md_path = metrics_dir / "ood_3d_summary.md"
 
     if csv_path.exists():
         try:

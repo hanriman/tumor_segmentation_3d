@@ -21,7 +21,7 @@ To ensure mathematical rigor, benchmark reproducibility, and peer-review defensi
       Phase 2: Tier 2 Pre-Training Upgrades
   ┌──────────────────────────────────────────────┐
   │ A. Option B 3D Target Aspect-Ratio Jitter    │
-  │ B. FIFO Token Memory Queue (K=128 patients)  │
+  │ B. Dense Volumetric Token Regularization     │
   │ C. Dual Cosine Schedulers (LR & Reg Scale)   │
   └──────────────────────────────────────────────┘
 ```
@@ -76,34 +76,27 @@ $$\text{Total Target Tokens} = 27 + 18 + 18 + 18 + 8 + 8 = \mathbf{97\text{ toke
 
 ---
 
-### 3.2 Upgrade B: FIFO Token Memory Queue (`FIFOTokenQueue`)
+### 3.2 Upgrade B: Dense Volumetric Token Regularization
 
-#### The Statistical Problem
-VisReg and SigReg regularizers compute empirical covariance and Sliced-Wasserstein distances over batch tokens. At practical 3D batch sizes ($B=8$ or $B=16$), the number of batch tokens ($N = B \times 192$) exhibits high sampling noise when estimating 128-dimensional covariance matrices (standard error $\approx 1.28\%$).
-
-#### Algorithmic Formulation
-[`src/brats_jepa_3d/losses/token_queue.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/losses/token_queue.py) implements a circular FIFO buffer maintaining representation tokens from the preceding $K$ patients:
-- **Queue Capacity**: $K = 128$ patients $\times 192$ context tokens $= \mathbf{24,576\text{ tokens}}$.
-- **VRAM Footprint**: $24,576 \times 128 \times 4\text{ bytes} \approx \mathbf{12.6\text{ MB}}$ (negligible).
-- **Statistical Benefit**: Increases empirical sample size from $1,536$ to $26,112$ tokens per step, slashing covariance standard error from $1.28\%$ down to **$0.42\%$** ($3\times$ reduction).
+#### The Statistical Formulation
+VisReg and SigReg regularizers compute empirical covariance and Sliced-Wasserstein distances over token representations. Unlike 2D image models where token counts per batch are modest, full 3D volumetric token grids generate dense token populations in every mini-batch:
+- **Token Density**: At $B=8$ or $B=16$ with patch size $16^3$ ($512$ tokens per volume) or $8^3$ ($4,096$ tokens per volume), each mini-batch provides $N = B \times N_{\text{tokens}} = \mathbf{4,096\text{ to }65,536\text{ tokens}}$.
+- **Statistical Fidelity**: Computing regularizers directly across active mini-batch tokens avoids historical cross-batch queue staleness (where tokens from past optimization steps no longer reflect current encoder weights) while delivering high statistical power for Sliced-Wasserstein projections ($K=64$) and empirical covariance estimation.
+- **Autograd Purity**: 100% of tokens in the regularizer receive active, non-stale gradients backpropagated directly into the context encoder backbone.
 
 ```
-Current Batch Tokens [B*192, 128] (requires_grad=True)
+Current Batch Tokens [B * N_tokens, D] (requires_grad=True)
                  │
-                 ├──► Concatenate ──► VisReg Loss Computation
-                 │                    (Center, Scale, SWD Shape)
-                 │
-                 ▼ (detach & push)
-        ┌────────────────────────────────────────────────┐
-        │   FIFOTokenQueue Buffer: Capacity = 24,576     │
-        │   (requires_grad=False, persistent=False)      │
-        └────────────────────────────────────────────────┘
+                 ├──► VisReg Loss Computation (Center, Scale, SWD Shape)
+                 │    or SigReg Loss Computation (Epps-Pulley Test)
+                 ▼
+         Backpropagate directly to Context Encoder
 ```
 
 #### Architectural Safeguards:
-1. **Autograd Isolation**: Historical tokens stored in the queue are strictly detached (`requires_grad=False`). Gradients flow exclusively into the current batch tokens ($0\%$ backward memory overhead).
-2. **Checkpoint Isolation**: Registered via `register_buffer(..., persistent=False)`. Transient historical tokens are never serialized into model checkpoints.
-3. **Validation Bypass**: During validation (`model.training == False`), `FIFOTokenQueue` automatically bypasses cached tokens, computing evaluation metrics strictly on the validation batch.
+1. **Autograd Isolation**: Center and scale statistics ($\mu, \sigma$) in VisReg are detached when normalizing representations for the Sliced-Wasserstein shape loss, preventing gradient interference.
+2. **Gradient Scaling**: SigReg applies an explicit $N$-multiplier scaling factor to match the test statistic gradient scale across arbitrary batch sizes.
+3. **Decoupled Evaluation**: Representation collapse metrics (Effective Rank, Centered Cosine Sim, Feature Variance) are computed in `eval()` mode strictly on holdout validation volumes.
 
 ---
 
@@ -146,7 +139,7 @@ The upgrades are covered by the consolidated 6-suite regression harness:
 | **Data Suite** | [`test_data_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_data_3d.py) | 27 | 0% leakage, Option B token counts, proportional tissue rejection, fallback bounds. |
 | **Evaluation Suite** | [`test_evaluation_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_evaluation_3d.py) | 39 | Deep supervision parity, Simpson's paradox elimination, uninit decoder guard. |
 | **Integration Suite** | [`test_integration_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_integration_3d.py) | 10 | End-to-end smoke tests for training and low-data evaluation pipelines. |
-| **Losses Suite** | [`test_losses_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_losses_3d.py) | 34 | FIFO autograd detachment, queue capacity, circular updates, regularizer scaling. |
+| **Losses Suite** | [`test_losses_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_losses_3d.py) | 32 | VisReg SWD shape loss, SigReg Epps-Pulley test, Dice/BCE/Tversky, deep supervision, cosine annealing. |
 | **Metrics Suite** | [`test_metrics_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_metrics_3d.py) | 19 | 3D HD95, Dice, IoU calculation, multi-region zero handling. |
 | **Models Suite** | [`test_models_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_models_3d.py) | 32 | ViT encoder, predictor, FPN, UNETR hybrid, DynUNet, Residual UNet architectures. |
-| **Total** | — | **161** | **100% Pass Rate** |
+| **Total** | — | **159** | **100% Pass Rate** |

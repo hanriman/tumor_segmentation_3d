@@ -17,6 +17,7 @@ from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
     CONFIGS_DIR,
     LOGS_DIR,
+    OUTPUTS_DIR,
     ensure_directories,
     load_yaml_config,
     merge_config_with_args,
@@ -42,7 +43,24 @@ def parse_args():
         "--dataset_config", type=str, default=None, help="Path to dataset YAML config"
     )
     parser.add_argument(
-        "--exp_config", type=str, default=None, help="Path to experiment YAML config"
+        "--exp_config",
+        "--experiment_config",
+        dest="exp_config",
+        type=str,
+        default=None,
+        help="Path to experiment YAML config",
+    )
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default=None,
+        help="Path to 3D dataset directory (default: auto-detected)",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Output directory for checkpoints and logs",
     )
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=2)
@@ -143,10 +161,13 @@ def main():
     if Path(exp_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(exp_cfg_path), args)
 
-    ensure_directories()
+    out_dir = Path(args.output_dir).resolve() if getattr(args, "output_dir", None) else OUTPUTS_DIR
+    checkpoints_dir = out_dir / "checkpoints"
+    logs_dir = out_dir / "logs"
+    ensure_directories(out_dir)
     set_seed(args.seed)
     device = get_device()
-    logger = setup_logger("train_unet_3d", LOGS_DIR / "unet_3d_train.log")
+    logger = setup_logger("train_unet_3d", logs_dir / "unet_3d_train.log")
     logger.info(f"Starting 3D Residual UNet Training: Device={device}, AMP={args.amp}")
     logger.info(f"Deep supervision: {getattr(args, 'deep_supervision', True)}")
 
@@ -158,9 +179,10 @@ def main():
         is_training=True,
     )
 
+    resolved_data_dir = Path(args.data_dir).resolve() if getattr(args, "data_dir", None) else None
     try:
-        train_dataset = BraTS3DDataset(split="train", augmentations=aug_tf)
-        val_dataset = BraTS3DDataset(split="val", augmentations=None)
+        train_dataset = BraTS3DDataset(split="train", augmentations=aug_tf, data_dir=resolved_data_dir)
+        val_dataset = BraTS3DDataset(split="val", augmentations=None, data_dir=resolved_data_dir)
     except FileNotFoundError:
         if not args.smoke_test:
             raise
@@ -339,18 +361,18 @@ def main():
         if val_metrics["val_dice"] > best_val_dice or args.smoke_test:
             best_val_dice = val_metrics["val_dice"]
             state_dict_to_save["best_val_dice"] = best_val_dice
-            best_ckpt_path = CHECKPOINTS_DIR / "unet_3d_best.pt"
+            best_ckpt_path = checkpoints_dir / "unet_3d_best.pt"
             torch.save(state_dict_to_save, best_ckpt_path)
             logger.info(f"New best model saved: {best_ckpt_path} (Val Dice: {best_val_dice:.4f})")
 
         # 2. Latest checkpoint saved every epoch for safe resumption (overwritten in place)
-        latest_ckpt_path = CHECKPOINTS_DIR / "unet_3d_latest.pt"
+        latest_ckpt_path = checkpoints_dir / "unet_3d_latest.pt"
         torch.save(state_dict_to_save, latest_ckpt_path)
 
         # 3. Optional periodic checkpoint if save_freq > 0
         save_freq = getattr(args, "save_freq", 0)
         if save_freq > 0 and epoch % save_freq == 0 and not args.smoke_test:
-            periodic_ckpt_path = CHECKPOINTS_DIR / f"unet_3d_epoch_{epoch}.pt"
+            periodic_ckpt_path = checkpoints_dir / f"unet_3d_epoch_{epoch}.pt"
             torch.save(state_dict_to_save, periodic_ckpt_path)
             logger.info(f"Periodic checkpoint saved: {periodic_ckpt_path}")
 
@@ -365,8 +387,8 @@ def main():
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
-    tracker.save_json(LOGS_DIR / "unet_3d_metrics.json")
-    tracker.save_csv(LOGS_DIR / "unet_3d_metrics.csv")
+    tracker.save_json(logs_dir / "unet_3d_metrics.json")
+    tracker.save_csv(logs_dir / "unet_3d_metrics.csv")
     logger.info("3D Residual UNet training completed.")
 
 
