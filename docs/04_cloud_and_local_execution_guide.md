@@ -16,7 +16,7 @@
 
 ## 2. Canonical Notebook Suite Mapping
 
-The repository organizes workflows into self-contained Jupyter notebooks with unified CLI runner compatibility:
+The repository organizes workflows into self-contained Jupyter notebooks with unified CLI runner compatibility and explicit top-level configuration blocks:
 
 ```text
 notebooks/                                    # BraTS 2024 WT/TC/ET (5-class, v2 dataset)
@@ -31,7 +31,10 @@ notebooks/                                    # BraTS 2024 WT/TC/ET (5-class, v2
 └── colab_a100_visreg_pretrain.ipynb       # Dedicated NVIDIA A100 (Google Colab Web UI) pre-training
 ```
 
+All downstream notebooks (`03`–`08`) share a standardized reproducibility configuration cell (Cell 3) defining `SEED = 42`, `NUM_WORKERS = 4`, `PATCH_SIZE = 16`, `BATCH_SIZE = 2`, `EPOCHS = 30`, `LOW_DATA_EPOCHS = 15`, `LEARNING_RATE = 3e-4`, and `WEIGHT_DECAY = 1e-4`, which are dynamically injected into CLI commands without magic numbers.
+
 ---
+
 
 ## 3. Data Preparation & Packaging Workflow
 

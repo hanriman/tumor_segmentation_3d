@@ -60,9 +60,17 @@ To prevent representation collapse without relying on momentum teacher networks 
 2. **Target Masking (Option B: Anisotropic Aspect-Ratio Jitter)**:
    - Implements 6 anisotropic cuboid target slots:
      $$\mathcal{S} = \big[(3,3,3),\, (2,3,3),\, (3,2,3),\, (3,3,2),\, (2,2,2),\, (2,2,2)\big]$$
-   - Target token volumes: $27 + 18 + 18 + 18 + 8 + 8 = \mathbf{97\text{ tokens total}}$ ($18.9\%$ of grid).
+   - Target token volumes on $8^3$ grid ($16^3$ patch size): $27 + 18 + 18 + 18 + 8 + 8 = \mathbf{97\text{ tokens total}}$ ($18.9\%$ of grid).
    - **Proportional Tissue Filtering**: Candidates are accepted if $\text{tissue\_count} \ge \max(4, \lfloor 0.40 \times \text{vol} \rfloor)$. Prevents rejection deadlock on small slots while ensuring targets never sample empty background air.
    - **Multi-Aspect Fallback Bounds**: Fallback cuboid sizes are dynamically constrained within $[2, 3]^3$, preserving 3D aspect diversity even under dense anatomical constraints.
+
+3. **Resolution & Patch Size Scaling ($16^3$ vs. $8^3$ Patches)**:
+   - **Standard Resolution ($16^3$ patch, $8^3 = 512$ grid):** $N_{\text{ctx}} = 192$ ($37.5\%$), $N_{\text{tgt}} = 97$ ($18.9\%$).
+   - **High Resolution ($8^3$ patch, $16^3 = 4,096$ grid):** Targets scale $2\times$ per axis to maintain identical physical millimeter volume:
+     $$\mathcal{S}_{16\text{-grid}} = \big[(6,6,6),\, (4,6,6),\, (6,4,6),\, (6,6,4),\, (4,4,4),\, (4,4,4)\big]$$
+     Yielding $N_{\text{tgt}} = 776$ tokens ($18.9\%$) and $N_{\text{ctx}} = 1,536$ tokens ($37.5\%$).
+   - **Physical Millimeter Invariance:** Both configurations cover identical anatomical volumes ($48\text{ mm}$ macro cube, $32 \times 48 \times 48\text{ mm}$ planar slabs, and $32\text{ mm}$ regional meso cubes).
+
 
 ---
 

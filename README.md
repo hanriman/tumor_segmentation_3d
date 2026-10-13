@@ -34,7 +34,7 @@ Gliomas (glioblastomas and astrocytomas) are intrinsically **three-dimensional, 
 | **Grid Resampling** | Non-zero brain bounding box $\to$ trilinear resampling to canonical $128^3$ isotropic grid (bounding box stretched to cube; aspect ratio **not** preserved). | **Isensee et al. (2021)** (*Nature Methods*). Prevents anatomical truncation of peripheral cortex at the cost of anisotropic geometric distortion (physical-mm metrics inherit this warp). |
 | **Parenchyma Normalization** | $X_{c, \text{norm}}(v) = \frac{X_c(v) - \mu_{c,\text{nz}}}{\sigma_{c,\text{nz}} + \epsilon}$ for non-zero voxels. | **Isensee et al. (2021)**. Harmonizes scanner-dependent intensity drift across institutions. |
 | **Random Modality Dropout** | $m_c \sim \text{Bernoulli}(1 - p_{\text{drop}})$, $p_{\text{drop}}=0.25$, fallback $\sum_c m_c \ge 1$, kept channels rescaled $C/\text{keep}$ (inverted dropout). | **Havaei et al. (2017)**; **Dorent et al. (2019)**. Simulates missing MRI sequences, enforcing representation independence; rescaling preserves train/test magnitude. |
-| **3D Context / Target Masking (Option B Jitter)** | 6 Anisotropic target cuboids ($\mathcal{S} = [(3,3,3), (2,3,3), (3,2,3), (3,3,2), (2,2,2), (2,2,2)]$, $N_{\text{tgt}} = 97$ tokens) + 3D Connected BFS Context ($N_{\text{ctx}} = 192$), **brain-aware**: proportional tissue filtering ($\ge \max(4, \lfloor 0.40 \times \text{vol} \rfloor)$), fallback bounds $[2, 3]^3$, tissue-only VisReg regularization. | **Assran et al. (2023)** (*CVPR*). Prevents spatial interpolation shortcuts; anisotropic aspect-ratio jitter captures directional non-axis-aligned glioma morphology; constant $N_{\text{ctx}}$ maximizes Tensor Core throughput. |
+| **3D Context / Target Masking (Option B Jitter)** | 6 Anisotropic target cuboids ($\mathcal{S}_{8\text{-grid}} = [(3,3,3), (2,3,3), (3,2,3), (3,3,2), (2,2,2), (2,2,2)]$, $N_{\text{tgt}} = 97$ tokens on $16^3$ patch; $\mathcal{S}_{16\text{-grid}} = 2\times$ scaled, $N_{\text{tgt}} = 776$ tokens on $8^3$ patch preserving identical physical mm volume) + 3D Connected BFS Context ($N_{\text{ctx}} = 37.5\%$ volume), **brain-aware**: proportional tissue filtering ($\ge \max(4, \lfloor 0.40 \times \text{vol} \rfloor)$), fallback bounds $[2, 3]^3$, tissue-only VisReg regularization. | **Assran et al. (2023)** (*CVPR*). Prevents spatial interpolation shortcuts; anisotropic aspect-ratio jitter captures directional non-axis-aligned glioma morphology; constant $N_{\text{ctx}}$ maximizes Tensor Core throughput. |
 | **3D Positional Embeddings** | Separable 3D Sinusoidal Coordinate Embeddings (frozen, requires_grad=False) $[\text{PE}(z) \,\|\, \text{PE}(y) \,\|\, \text{PE}(x)]$. | **Vaswani et al. (2017)**; **Feichtenhofer et al. (2022)**. Imparts immediate 3D metric spatial topology from step 0. |
 | **Context Gather (Zero Leakage)** | $\mathbf{Z}_{\text{ctx}} = \text{Encoder}(\text{gather}(\mathbf{Z}_0, \text{idx}_{\text{ctx}})) \in \mathbb{R}^{B \times 192 \times 384}$. | **Assran et al. (2023)**. Evaluates strictly visible tokens; reduces self-attention FLOPs by $85.9\%$ ($192^2 / 512^2$). |
 | **Projector MLP** | $z = W_2(\text{GELU}(\text{LN}(W_1 h + b_1))) + b_2: 384 \to 1024 \to 128$. | **Tishby et al. (2000)**; **Balestriero & LeCun (2025)**. Information Bottleneck decouples task representations from Gaussian forces. |
@@ -86,14 +86,14 @@ thesis_3d/
 ├── configs/                      # Modular YAML configuration hierarchy
 │   ├── base.yaml                 # System paths, seed, device, AMP configs
 │   ├── dataset/
-│   │   └── brats3d.yaml          # Grid geometry (128^3), patch size (16^3), modalities
+│   │   └── brats3d.yaml          # Grid geometry (128^3), patch size, modalities, augmentations
 │   ├── model/
 │   │   ├── sigreg_jepa_3d.yaml   # 3D SigReg JEPA + Epps-Pulley parameters
 │   │   ├── visreg_jepa_3d.yaml   # 3D VisReg JEPA + Sliced-Wasserstein parameters
 │   │   ├── unet_3d.yaml          # 3D Residual UNet parameters
 │   │   └── nnunet_3d.yaml        # 3D DynUNet + Deep Supervision parameters
 │   └── experiment/
-│       ├── pretrain.yaml         # 3D SSL pre-training schedule
+│       ├── pretrain.yaml         # 3D SSL pre-training schedule & scale-aware Option B masking
 │       └── finetune.yaml         # 3D downstream fine-tuning schedule
 │
 ├── src/

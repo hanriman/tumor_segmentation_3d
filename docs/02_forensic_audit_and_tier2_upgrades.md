@@ -66,13 +66,17 @@ Conventional 3D JEPA designs typically use isotropic cubic target blocks ($3 \ti
 Option B specifies 6 target slots with varying aspect ratios and token volumes:
 $$\mathcal{S}_{\text{slots}} = \big[(3,3,3),\, (2,3,3),\, (3,2,3),\, (3,3,2),\, (2,2,2),\, (2,2,2)\big]$$
 
-$$\text{Total Target Tokens} = 27 + 18 + 18 + 18 + 8 + 8 = \mathbf{97\text{ tokens}} \quad (18.9\% \text{ of 512-token grid})$$
+$$\text{Total Target Tokens (8³ Grid)} = 27 + 18 + 18 + 18 + 8 + 8 = \mathbf{97\text{ tokens}} \quad (18.9\% \text{ of 512-token grid})$$
 
-1. **Volume Preservation**: Maintains dense supervisory signal ($\approx 100$ tokens), avoiding the $65.7\%$ supervisory collapse of naive sub-cuboid proposals.
+When running on high-resolution $16^3$ token grids (e.g., $8^3$ voxel patch size on NVIDIA A100), the cuboids automatically scale $2\times$ per axis to preserve the exact same physical millimeter anatomical coverage:
+$$\mathcal{S}_{16\text{-grid}} = \big[(6,6,6),\, (4,6,6),\, (6,4,6),\, (6,6,4),\, (4,4,4),\, (4,4,4)\big]$$
+$$\text{Total Target Tokens (16³ Grid)} = 216 + 144 + 144 + 144 + 64 + 64 = \mathbf{776\text{ tokens}} \quad (18.9\% \text{ of 4,096-token grid})$$
+
+1. **Volume & Physical Millimeter Preservation**: Maintains dense supervisory signal ($\approx 100$ tokens on $8^3$ grid, $776$ tokens on $16^3$ grid) corresponding to an identical $48\text{ mm}$ isotropic cube, $32 \times 48 \times 48\text{ mm}$ planar slabs, and $32\text{ mm}$ regional meso blocks.
 2. **Proportional Tissue Filtering**:
    $$\text{min\_tissue} = \max\big(4, \, \lfloor 0.40 \times (c_z \times c_y \times c_x) \rfloor\big)$$
    This proportional threshold prevents rejection deadlock on small 8-token and 18-token cuboids while guaranteeing that no target samples empty background air.
-3. **Multi-Aspect Fallback Bounds**: When sampling falls back due to high tissue occupancy constraints, dimensions are clamped strictly within $[2, 3]^3$, preserving anisotropic diversity.
+3. **Multi-Aspect Fallback Bounds**: When sampling falls back due to high tissue occupancy constraints, dimensions are clamped strictly within $[2, 3]^3$ (or $[4, 6]^3$ for $16^3$ grid), preserving anisotropic diversity.
 
 ---
 

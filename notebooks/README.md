@@ -19,6 +19,44 @@ tables with legacy v1 binary whole-tumor results.
 | `colab_a100_visreg_pretrain.ipynb` | Dedicated NVIDIA A100 (Google Colab Web UI) high-resolution 8³ voxel patch pre-training with private Kaggle API download and Google Drive checkpoint persistence. |
 
 
+## Unified Configuration & Reproducibility Schema
+
+All notebooks (`01` through `08` and `colab_a100_visreg_pretrain`) share a standardized top-level configuration block (Cell 3 / Cell 6) eliminating hardcoded CLI magic numbers:
+
+```python
+SEED = 42                 # Deterministic seed for weight init, augmentations, and data splits
+NUM_WORKERS = 4          # Parallel CPU data loading workers (Kaggle T4 provides 4 vCPUs)
+PATCH_SIZE = 16          # 16³ voxel patch (512 token grid) on T4; 8³ voxel patch (4096 token grid) on A100
+BATCH_SIZE = 2           # Volumetric downstream batch size (nnU-Net: ~7.4 GB VRAM at B=2 with DS)
+EPOCHS = 30              # Supervised training / fine-tuning epochs (pre-training: 50–100)
+LOW_DATA_EPOCHS = 15     # Low-data label efficiency evaluation epochs
+LEARNING_RATE = 3e-4     # Base AdamW learning rate (pre-training: 5e-4 with cosine schedule)
+WEIGHT_DECAY = 1e-4      # AdamW weight decay (pre-training: 0.05)
+```
+
+CLI execution cells uniformly interpolate these parameters:
+```bash
+!python scripts/train_downstream_3d.py \
+    --data_dir {data_dir} \
+    --patch_size {PATCH_SIZE} {PATCH_SIZE} {PATCH_SIZE} \
+    --seed {SEED} \
+    --epochs {EPOCHS} \
+    --batch_size {BATCH_SIZE} \
+    --num_workers {NUM_WORKERS} \
+    --learning_rate {LEARNING_RATE} \
+    --weight_decay {WEIGHT_DECAY} \
+    --amp
+```
+
+## Resolution-Aware JEPA Masking
+
+Masking configuration is decoupled from the dataset contract ([configs/dataset/brats3d.yaml](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/dataset/brats3d.yaml)) and managed by the self-supervised schedule ([configs/experiment/pretrain.yaml](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/experiment/pretrain.yaml)):
+* **Context Budget:** Always fixed to `context_fraction: 0.375` (37.5% of total volume: 192 tokens on $8^3$ grid, 1,536 tokens on $16^3$ grid).
+* **Option B Cuboid Target Shapes:**
+  * **$8^3$ Token Grid ($16^3$ patch size, Kaggle T4):** $\mathcal{S} = [(3,3,3), (2,3,3), (3,2,3), (3,3,2), (2,2,2), (2,2,2)]$ ($97\text{ tokens total}$).
+  * **$16^3$ Token Grid ($8^3$ patch size, Colab A100):** $\mathcal{S} = [(6,6,6), (4,6,6), (6,4,6), (6,6,4), (4,4,4), (4,4,4)]$ ($776\text{ tokens total}$).
+  * **Physical millimeter invariance:** In both grid resolutions, target cuboids correspond to the exact same anatomical volume ($48\text{ mm}$ macro cube, $32 \times 48 \times 48\text{ mm}$ planar slabs, and $32\text{ mm}$ regional meso cubes).
+
 ## Battery reporting (v2 regions protocol)
 
 Test (`evaluate_3d`), low-data (`evaluate_low_data_3d`), and OOD
@@ -38,3 +76,4 @@ were removed with the multiregion-only cleanup (recoverable from git history).
   column). Kaggle attachments pin versions — a stale v1 pin silently mounts
   binary masks and voids every number.
 * Code: branch `main` (configs default `out_channels=5`).
+
