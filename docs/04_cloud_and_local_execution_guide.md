@@ -19,12 +19,12 @@
 The repository organizes workflows into self-contained Jupyter notebooks with unified CLI runner compatibility:
 
 ```text
-notebooks/multiregion/                        # BraTS 2024 WT/TC/ET (5-class, v2 dataset)
+notebooks/                                    # BraTS 2024 WT/TC/ET (5-class, v2 dataset)
 ├── 01_train_visreg_3d.ipynb               # 3D VisReg JEPA SSL pre-training (exports encoder checkpoint)
-├── 02_train_nnunet_3d.ipynb               # 3D nnU-Net baseline (DynUNet with deep supervision)
-├── 03_train_unet_3d.ipynb                 # 3D Residual UNet baseline
-├── 04_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT-FPN ablation (random initialization)
-├── 05_diagnose_visreg_3d.ipynb            # Label-free pre-training masking diagnostics (D1–D3)
+├── 02_diagnose_visreg_3d.ipynb            # Label-free pre-training masking diagnostics (D1–D3)
+├── 03_train_nnunet_3d.ipynb               # 3D nnU-Net baseline (DynUNet with deep supervision)
+├── 04_train_unet_3d.ipynb                 # 3D Residual UNet baseline
+├── 05_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT-FPN ablation (random initialization)
 ├── 06_vit_unetr_hybrid_ablation_3d.ipynb  # From-scratch ViT-UNETR hybrid ablation (convolutional stem)
 ├── 07_finetune_visreg_multiscale_3d.ipynb # VisReg + multiscale FPN downstream fine-tuning
 └── 08_finetune_visreg_unetr_3d.ipynb      # VisReg + hybrid UNETR downstream fine-tuning

@@ -1,21 +1,22 @@
-# Multiregion notebooks (v2 protocol)
+# Research Notebook Suite (BraTS 2024 GLI Multiregion Protocol)
 
 **Protocol: BraTS 2024 WT/TC/ET on the v2 dataset version.** 5-class outputs
 (bg/NCR/ED/NET/ET); eval emits one row per `(model, region)`. Never mix these
-tables with v1 binary whole-tumor results.
+tables with legacy v1 binary whole-tumor results.
 
 ## Files
 
 | Notebook | Purpose |
 |---|---|
-| `01_train_visreg_3d.ipynb` | SSL pretraining (label-free; identical on either pool — prefer v2 attachment so fingerprints match downstream). |
-| `02_train_nnunet_3d.ipynb` | nnU-Net v2 baseline (5-class via config). |
-| `03_train_unet_3d.ipynb` | Phase 2 gate: UNet full-data on v2 (sane WT → lower TC → lowest ET). ET-collapse fallback: `--loss_type tversky`. |
-| `04_train_vit_from_scratch_ablation_3d.ipynb` | From-scratch multiscale ablation (v2). |
-| `05_diagnose_visreg_3d.ipynb` | Label-free SSL masking diagnostics (D1 air fractions; D2/D3 with a VisReg checkpoint). Rerun if masking code changes. |
-| `06_vit_unetr_hybrid_ablation_3d.ipynb` | From-scratch hybrid ablation (v2). |
-| `07_finetune_visreg_multiscale_3d.ipynb` | VisReg FPN finetune on the shared SSL encoder + full battery. |
-| `08_finetune_visreg_unetr_3d.ipynb` | VisReg hybrid finetune on the shared SSL encoder + full battery. |
+| `01_train_visreg_3d.ipynb` | SSL pre-training (label-free; exports `visreg_pretrain_outputs.zip` encoder checkpoint). |
+| `02_diagnose_visreg_3d.ipynb` | Label-free SSL masking diagnostics (D1 air fractions; D2/D3 with a VisReg checkpoint). |
+| `03_train_nnunet_3d.ipynb` | 3D nnU-Net baseline (DynUNet with multi-scale deep supervision). |
+| `04_train_unet_3d.ipynb` | 3D Residual UNet baseline (MONAI ResUNet). |
+| `05_train_vit_from_scratch_ablation_3d.ipynb` | From-scratch ViT + Multi-Scale FPN ablation (random initialization control). |
+| `06_vit_unetr_hybrid_ablation_3d.ipynb` | From-scratch ViT + Hybrid UNETR ablation (random initialization control). |
+| `07_finetune_visreg_multiscale_3d.ipynb` | VisReg + Multi-Scale FPN downstream fine-tuning on shared SSL encoder. |
+| `08_finetune_visreg_unetr_3d.ipynb` | VisReg + Hybrid UNETR downstream fine-tuning on shared SSL encoder. |
+
 
 ## Battery reporting (v2 regions protocol)
 
