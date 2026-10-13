@@ -393,23 +393,16 @@ def main():
             g["tumor_quartile"] = pd.qcut(
                 g["num_voxels_tumor"], q=4, labels=False, duplicates="drop"
             )
-            # Form composite stratum (tumor size quartile x ET presence) when multi-region
-            if "has_et" in g.columns:
-                g["_strata"] = g["tumor_quartile"].astype(str) + "_" + g["has_et"].astype(str)
-            else:
-                g["_strata"] = g["tumor_quartile"].astype(str)
-
-            strat_col = "_strata" if g["_strata"].value_counts().min() >= 3 else "tumor_quartile"
-            q_counts = g[strat_col].value_counts()
+            q_counts = g["tumor_quartile"].value_counts()
             if q_counts.min() >= 3:
                 train_g, temp_g = train_test_split(
-                    g, test_size=0.30, random_state=args.seed, stratify=g[strat_col]
+                    g, test_size=0.30, random_state=args.seed, stratify=g["tumor_quartile"]
                 )
                 val_g, test_g = train_test_split(
                     temp_g,
                     test_size=0.50,
                     random_state=args.seed,
-                    stratify=temp_g[strat_col],
+                    stratify=temp_g["tumor_quartile"],
                 )
                 split_map = {r.base_id: "train" for r in train_g.itertuples()}
                 split_map.update({r.base_id: "val" for r in val_g.itertuples()})
