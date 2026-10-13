@@ -18,9 +18,9 @@ To ensure mathematical rigor, benchmark reproducibility, and peer-review defensi
   └──────────────────────┬───────────────────────┘
                          │
                          ▼
-      Phase 2: Tier 2 Pre-Training Upgrades
+       Phase 2: Tier 2 Pre-Training Upgrades
   ┌──────────────────────────────────────────────┐
-  │ A. Option B 3D Target Aspect-Ratio Jitter    │
+  │ A. Anisotropic 3D Target Jitter Masking      │
   │ B. Dense Volumetric Token Regularization     │
   │ C. Dual Cosine Schedulers (LR & Reg Scale)   │
   └──────────────────────────────────────────────┘
@@ -57,13 +57,13 @@ To ensure mathematical rigor, benchmark reproducibility, and peer-review defensi
 
 ## 3. Phase 2: Tier 2 Pre-Training Upgrades
 
-### 3.1 Upgrade A: Option B 3D Anisotropic Target Masking Jitter
+### 3.1 Upgrade A: Anisotropic 3D Target Jitter Masking
 
 #### The Mathematical Problem
 Conventional 3D JEPA designs typically use isotropic cubic target blocks ($3 \times 3 \times 3 = 27$ tokens). In 3D MRI, gliomas display irregular, anisotropic morphology (infiltrating along planar white matter tracts and sulcal boundaries). Fixed isotropic targets fail to force the predictor to learn directional spatial correlations.
 
 #### Algorithmic Formulation
-Option B specifies 6 target slots with varying aspect ratios and token volumes:
+The target masking strategy specifies 6 multi-aspect slots with varying aspect ratios and token volumes:
 $$\mathcal{S}_{\text{slots}} = \big[(3,3,3),\, (2,3,3),\, (3,2,3),\, (3,3,2),\, (2,2,2),\, (2,2,2)\big]$$
 
 $$\text{Total Target Tokens (8³ Grid)} = 27 + 18 + 18 + 18 + 8 + 8 = \mathbf{97\text{ tokens}} \quad (18.9\% \text{ of 512-token grid})$$
@@ -140,7 +140,7 @@ The upgrades are covered by the consolidated 6-suite regression harness:
 
 | Suite | File | Test Count | Scope |
 | :--- | :--- | :---: | :--- |
-| **Data Suite** | [`test_data_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_data_3d.py) | 27 | 0% leakage, Option B token counts, proportional tissue rejection, fallback bounds. |
+| **Data Suite** | [`test_data_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_data_3d.py) | 28 | 0% leakage, anisotropic jitter token counts, proportional tissue rejection, fallback bounds. |
 | **Evaluation Suite** | [`test_evaluation_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_evaluation_3d.py) | 39 | Deep supervision parity, Simpson's paradox elimination, uninit decoder guard. |
 | **Integration Suite** | [`test_integration_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_integration_3d.py) | 10 | End-to-end smoke tests for training and low-data evaluation pipelines. |
 | **Losses Suite** | [`test_losses_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_losses_3d.py) | 32 | VisReg SWD shape loss, SigReg Epps-Pulley test, Dice/BCE/Tversky, deep supervision, cosine annealing. |

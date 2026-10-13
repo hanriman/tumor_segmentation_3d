@@ -77,15 +77,15 @@ def test_jepa_masking_collate_3d():
     assert collated["images"].shape == (2, 4, 128, 128, 128)
     assert collated["masks"].shape == (2, 1, 128, 128, 128)
     assert collated["context_indices"].shape == (2, 192)
-    # Option B default: 6 target cuboids with shapes [27, 18, 18, 18, 8, 8]
+    # Default: 6 anisotropic target cuboids with shapes [27, 18, 18, 18, 8, 8]
     assert len(collated["target_indices_list"]) == 6
     expected_shapes = [(2, 27), (2, 18), (2, 18), (2, 18), (2, 8), (2, 8)]
     for m, expected_shape in enumerate(expected_shapes):
         assert collated["target_indices_list"][m].shape == expected_shape
 
 
-def test_option_b_target_shapes_and_total_tokens():
-    """Option B: 6 target cuboid slots totaling exactly 97 tokens with strict disjointness."""
+def test_anisotropic_target_shapes_and_total_tokens():
+    """Anisotropic target jitter: 6 target cuboid slots totaling exactly 97 tokens with strict disjointness."""
     tf = JEPAMaskingTransform3D()
     res = tf()
 
@@ -115,7 +115,7 @@ def test_option_b_target_shapes_and_total_tokens():
     assert len(ctx_set) == 192
 
 
-def test_option_b_legacy_parameter_compatibility():
+def test_masking_legacy_parameter_compatibility():
     """Explicit legacy parameters num_target_cuboids=4, target_cuboid_size=(3,3,3) must be honored."""
     tf = JEPAMaskingTransform3D(num_target_cuboids=4, target_cuboid_size=(3, 3, 3))
     res = tf()
@@ -179,9 +179,9 @@ def test_brain_aware_masking_legacy_compat():
     assert out["context_indices"].shape == (192,)
 
 
-def test_option_b_zero_overlap_500_seeds():
-    """500 masks with Option B (6 target slots, 97 tokens) -> zero pairwise overlap and zero context collision."""
-    tf = JEPAMaskingTransform3D()  # Option B by default
+def test_anisotropic_zero_overlap_500_seeds():
+    """500 masks with anisotropic target jitter (6 target slots, 97 tokens) -> zero pairwise overlap and zero context collision."""
+    tf = JEPAMaskingTransform3D()  # Anisotropic target jitter by default
     for seed in range(500):
         g = torch.Generator()
         g.manual_seed(seed)
@@ -196,8 +196,8 @@ def test_option_b_zero_overlap_500_seeds():
                 assert not (blocks[i] & blocks[j]), f"Target overlap between {i} and {j} at seed {seed}"
 
 
-def test_option_b_brain_aware_masking():
-    """Option B with token_brain_frac selects tissue for both targets and context."""
+def test_anisotropic_brain_aware_masking():
+    """Anisotropic masking with token_brain_frac selects tissue for both targets and context."""
     tf = JEPAMaskingTransform3D()
     frac = _proxy_brain_frac()
     tissue_set = {i for i in range(512) if frac[i] >= 0.10}
@@ -593,8 +593,8 @@ def test_prepare_data_3d_grouped_base_id_zero_leakage():
     assert len(train_bases | val_bases | test_bases) == 25
 
 
-def test_resolution_scaled_option_b_masking():
-    """Verify that JEPAMaskingTransform3D correctly scales Option B cuboids and context for 16^3 grid."""
+def test_resolution_scaled_anisotropic_masking():
+    """Verify that JEPAMaskingTransform3D correctly scales anisotropic cuboids and context for 16^3 grid."""
     from brats_jepa_3d.data.masking import (
         DEFAULT_TARGET_CUBOID_SIZES_8GRID,
         DEFAULT_TARGET_CUBOID_SIZES_16GRID,

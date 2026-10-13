@@ -599,12 +599,12 @@ def test_residual_tissue_filter_rejects_non3d():
         filter_tissue_tokens(torch.randn(10, 128), torch.ones(10, dtype=torch.bool))
 
 
-def test_option_b_full_model_forward_and_loss_backward():
-    """Verify VisRegJEPA3D and SigRegJEPA3D with Option B 6-slot target masking."""
+def test_anisotropic_full_model_forward_and_loss_backward():
+    """Verify VisRegJEPA3D and SigRegJEPA3D with anisotropic 6-slot target masking."""
     from brats_jepa_3d.data.masking import JEPAMaskingTransform3D, jepa_masking_collate_fn_3d
     from brats_jepa_3d.losses import VisRegLoss, SigRegLoss
 
-    tf = JEPAMaskingTransform3D()  # Option B: 6 slots, 97 tokens
+    tf = JEPAMaskingTransform3D()  # Anisotropic target jitter: 6 slots, 97 tokens
     batch_raw = [
         {"image": torch.randn(4, 128, 128, 128), "patient_id": f"p_{i}", **tf()}
         for i in range(2)

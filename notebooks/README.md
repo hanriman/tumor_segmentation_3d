@@ -8,7 +8,7 @@ tables with legacy v1 binary whole-tumor results.
 
 | Notebook | Purpose |
 |---|---|
-| `01_train_visreg_3d.ipynb` | SSL pre-training (label-free; Option B 3D target jitter [97 tokens across 6 cuboids], dual cosine schedules [LR warmup + regularizer annealing]; exports `visreg_pretrain_outputs.zip` encoder checkpoint). |
+| `01_train_visreg_3d.ipynb` | SSL pre-training (label-free; Anisotropic 3D target jitter [97 tokens across 6 cuboids], dual cosine schedules [LR warmup + regularizer annealing]; exports `visreg_pretrain_outputs.zip` encoder checkpoint). |
 | `02_diagnose_visreg_3d.ipynb` | Label-free SSL masking diagnostics (D1 air fractions; D2/D3 with a VisReg checkpoint). |
 | `03_train_nnunet_3d.ipynb` | 3D nnU-Net baseline (DynUNet with multi-scale deep supervision). |
 | `04_train_unet_3d.ipynb` | 3D Residual UNet baseline (MONAI ResUNet). |
@@ -52,7 +52,7 @@ CLI execution cells uniformly interpolate these parameters:
 
 Masking configuration is decoupled from the dataset contract ([configs/dataset/brats3d.yaml](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/dataset/brats3d.yaml)) and managed by the self-supervised schedule ([configs/experiment/pretrain.yaml](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/experiment/pretrain.yaml)):
 * **Context Budget:** Always fixed to `context_fraction: 0.375` (37.5% of total volume: 192 tokens on $8^3$ grid, 1,536 tokens on $16^3$ grid).
-* **Option B Cuboid Target Shapes:**
+* **Anisotropic Multi-Aspect Target Cuboid Shapes:**
   * **$8^3$ Token Grid ($16^3$ patch size, Kaggle T4):** $\mathcal{S} = [(3,3,3), (2,3,3), (3,2,3), (3,3,2), (2,2,2), (2,2,2)]$ ($97\text{ tokens total}$).
   * **$16^3$ Token Grid ($8^3$ patch size, Colab A100):** $\mathcal{S} = [(6,6,6), (4,6,6), (6,4,6), (6,6,4), (4,4,4), (4,4,4)]$ ($776\text{ tokens total}$).
   * **Physical millimeter invariance:** In both grid resolutions, target cuboids correspond to the exact same anatomical volume ($48\text{ mm}$ macro cube, $32 \times 48 \times 48\text{ mm}$ planar slabs, and $32\text{ mm}$ regional meso cubes).

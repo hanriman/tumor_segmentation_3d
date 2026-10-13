@@ -34,7 +34,7 @@ Gliomas (glioblastomas and astrocytomas) are intrinsically **three-dimensional, 
 | **Grid Resampling** | Non-zero brain bounding box $\to$ trilinear resampling to canonical $128^3$ isotropic grid (bounding box stretched to cube; aspect ratio **not** preserved). | **Isensee et al. (2021)** (*Nature Methods*). Prevents anatomical truncation of peripheral cortex at the cost of anisotropic geometric distortion (physical-mm metrics inherit this warp). |
 | **Parenchyma Normalization** | $X_{c, \text{norm}}(v) = \frac{X_c(v) - \mu_{c,\text{nz}}}{\sigma_{c,\text{nz}} + \epsilon}$ for non-zero voxels. | **Isensee et al. (2021)**. Harmonizes scanner-dependent intensity drift across institutions. |
 | **Random Modality Dropout** | $m_c \sim \text{Bernoulli}(1 - p_{\text{drop}})$, $p_{\text{drop}}=0.25$, fallback $\sum_c m_c \ge 1$, kept channels rescaled $C/\text{keep}$ (inverted dropout). | **Havaei et al. (2017)**; **Dorent et al. (2019)**. Simulates missing MRI sequences, enforcing representation independence; rescaling preserves train/test magnitude. |
-| **3D Context / Target Masking (Option B Jitter)** | 6 Anisotropic target cuboids ($\mathcal{S}_{8\text{-grid}} = [(3,3,3), (2,3,3), (3,2,3), (3,3,2), (2,2,2), (2,2,2)]$, $N_{\text{tgt}} = 97$ tokens on $16^3$ patch; $\mathcal{S}_{16\text{-grid}} = 2\times$ scaled, $N_{\text{tgt}} = 776$ tokens on $8^3$ patch preserving identical physical mm volume) + 3D Connected BFS Context ($N_{\text{ctx}} = 37.5\%$ volume), **brain-aware**: proportional tissue filtering ($\ge \max(4, \lfloor 0.40 \times \text{vol} \rfloor)$), fallback bounds $[2, 3]^3$, tissue-only VisReg regularization. | **Assran et al. (2023)** (*CVPR*). Prevents spatial interpolation shortcuts; anisotropic aspect-ratio jitter captures directional non-axis-aligned glioma morphology; constant $N_{\text{ctx}}$ maximizes Tensor Core throughput. |
+| **3D Context / Target Masking (Anisotropic Target Jitter)** | 6 Anisotropic target cuboids ($\mathcal{S}_{8\text{-grid}} = [(3,3,3), (2,3,3), (3,2,3), (3,3,2), (2,2,2), (2,2,2)]$, $N_{\text{tgt}} = 97$ tokens on $16^3$ patch; $\mathcal{S}_{16\text{-grid}} = 2\times$ scaled, $N_{\text{tgt}} = 776$ tokens on $8^3$ patch preserving identical physical mm volume) + 3D Connected BFS Context ($N_{\text{ctx}} = 37.5\%$ volume), **brain-aware**: proportional tissue filtering ($\ge \max(4, \lfloor 0.40 \times \text{vol} \rfloor)$), fallback bounds $[2, 3]^3$, tissue-only VisReg regularization. | **Assran et al. (2023)** (*CVPR*). Prevents spatial interpolation shortcuts; anisotropic aspect-ratio jitter captures directional non-axis-aligned glioma morphology; constant $N_{\text{ctx}}$ maximizes Tensor Core throughput. |
 | **3D Positional Embeddings** | Separable 3D Sinusoidal Coordinate Embeddings (frozen, requires_grad=False) $[\text{PE}(z) \,\|\, \text{PE}(y) \,\|\, \text{PE}(x)]$. | **Vaswani et al. (2017)**; **Feichtenhofer et al. (2022)**. Imparts immediate 3D metric spatial topology from step 0. |
 | **Context Gather (Zero Leakage)** | $\mathbf{Z}_{\text{ctx}} = \text{Encoder}(\text{gather}(\mathbf{Z}_0, \text{idx}_{\text{ctx}})) \in \mathbb{R}^{B \times 192 \times 384}$. | **Assran et al. (2023)**. Evaluates strictly visible tokens; reduces self-attention FLOPs by $85.9\%$ ($192^2 / 512^2$). |
 | **Projector MLP** | $z = W_2(\text{GELU}(\text{LN}(W_1 h + b_1))) + b_2: 384 \to 1024 \to 128$. | **Tishby et al. (2000)**; **Balestriero & LeCun (2025)**. Information Bottleneck decouples task representations from Gaussian forces. |
@@ -68,7 +68,7 @@ thesis_3d/
 ├── docs/
 │   ├── README.md                         # Documentation index & guide overview
 │   ├── 01_visreg_jepa_architecture_and_pipeline.md # Complete dataflow, tokenization & VisReg loss formulation
-│   ├── 02_forensic_audit_and_tier2_upgrades.md     # Audit remediations, Option B target jitter, token regularization & annealing
+│   ├── 02_forensic_audit_and_tier2_upgrades.md     # Audit remediations, anisotropic target jitter, token regularization & annealing
 │   ├── 03_scientific_rationales_and_benchmarks.md  # Brain-aware masking, HD95 decoupling, fairness & official WT/TC/ET results
 │   └── 04_cloud_and_local_execution_guide.md       # Kaggle & Colab Pro A100 execution, data packaging & aggregation
 │
@@ -93,7 +93,7 @@ thesis_3d/
 │   │   ├── unet_3d.yaml          # 3D Residual UNet parameters
 │   │   └── nnunet_3d.yaml        # 3D DynUNet + Deep Supervision parameters
 │   └── experiment/
-│       ├── pretrain.yaml         # 3D SSL pre-training schedule & scale-aware Option B masking
+│       ├── pretrain.yaml         # 3D SSL pre-training schedule & resolution-scaled anisotropic target masking
 │       └── finetune.yaml         # 3D downstream fine-tuning schedule
 │
 ├── src/
@@ -147,7 +147,7 @@ thesis_3d/
 │
 ├── tests/                        # Consolidated pytest regression test suite (159 tests, 100% pass)
 │   ├── conftest.py               # Synthetic 3D volume fixtures & hardware mocks
-│   ├── test_data_3d.py           # Dataset, 0% leakage, Option B 3D target jitter & BFS masking
+│   ├── test_data_3d.py           # Dataset, 0% leakage, anisotropic 3D target jitter & BFS masking
 │   ├── test_evaluation_3d.py     # Evaluation parity, deep supervision flags, uninit decoder guard
 │   ├── test_integration_3d.py    # End-to-end smoke test integrations for training and evaluation
 │   ├── test_losses_3d.py         # VisReg SWD shape, SigReg Epps-Pulley, cosine annealing, Dice, BCE, Tversky
@@ -210,7 +210,7 @@ python scripts/prepare_data_3d.py --limit 100 --dtype float16 --num_workers 4
 # 3D SigReg JEPA (Epps-Pulley Gaussianity test, scale factor N)
 python scripts/train_jepa_3d.py --model_type sigreg_jepa --epochs 50 --batch_size 4 --amp
 
-# 3D VisReg JEPA (Decoupled Center, Scale, Shape SWD + Option B Jitter + Dual Cosine Schedules)
+# 3D VisReg JEPA (Decoupled Center, Scale, Shape SWD + Anisotropic Target Jitter + Dual Cosine Schedules)
 python scripts/train_jepa_3d.py --model_type visreg_jepa --epochs 50 --batch_size 4 --amp \
     --reg_warmup_epochs 15 --reg_min_scale 0.10
 
@@ -273,16 +273,16 @@ python scripts/run_full_pipeline_3d.py --model_type all
 
 ### 7. Cloud Execution (Kaggle & Colab A100) & Streamlined Local Aggregation
 
-#### Option A: Zero-Setup Parallel Execution on Kaggle (Free NVIDIA Tesla T4 16 GB)
+#### Workflow A: Zero-Setup Parallel Execution on Kaggle (Free NVIDIA Tesla T4 16 GB)
 1. **Package Data**: Run `python scripts/package_for_kaggle.py` and upload `dist_kaggle/brats_3d_full.zip` to Kaggle as a dataset named `brats-3d-full` (1,621 scans, grouped split: train 1,144 / val 235 / test 242).
 2. **Train Models in Parallel**:
    - Run `notebooks/03_train_nnunet_3d.ipynb` and `notebooks/04_train_unet_3d.ipynb` across concurrent GPU sessions.
    - For VisReg JEPA, run `notebooks/01_train_visreg_3d.ipynb` once (SSL pre-training, 100 epochs), publish its `visreg_pretrain_outputs.zip` checkpoint as a Kaggle dataset input, then run `notebooks/07_finetune_visreg_multiscale_3d.ipynb` and `notebooks/08_finetune_visreg_unetr_3d.ipynb` in parallel on the identical encoder (controlled decoder ablation).
    - Each downstream/baseline notebook evaluates its own test split performance, low-data label efficiency, and OOD robustness self-contained on the GPU before exporting.
 
-#### Option B: High-Throughput & High-Resolution Pre-Training on Google Colab (NVIDIA A100 SXM 40/80 GB)
+#### Workflow B: High-Throughput & High-Resolution Pre-Training on Google Colab (NVIDIA A100 SXM 40/80 GB)
 - Run `notebooks/colab_a100_visreg_pretrain.ipynb` directly in the Colab Web UI with runtime set to **A100 GPU (High-RAM)**.
-- Pre-trains with high-resolution $8^3$ voxel patch size ($16^3 = 4,096$ token grid, $2\times$ sharper spatial granularity than Kaggle's $16^3$ patch size), `batch_size: 16`, scaled Option B target masking (776 tokens), and cosine regularizer annealing.
+- Pre-trains with high-resolution $8^3$ voxel patch size ($16^3 = 4,096$ token grid, $2\times$ sharper spatial granularity than Kaggle's $16^3$ patch size), `batch_size: 16`, resolution-scaled anisotropic target masking (776 tokens), and cosine regularizer annealing.
 - Securely authenticates private Kaggle datasets via Colab Secrets (`KAGGLE_USERNAME`, `KAGGLE_KEY`), unzips to fast local NVMe (`/content/data/`), and synchronizes checkpoints directly to Google Drive.
 
 #### 1-Click Local Aggregation (Zero Cloud Re-Upload):

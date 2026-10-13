@@ -23,7 +23,7 @@ To prevent representation collapse without relying on momentum teacher networks 
          │
     ┌────┴──────────────────────────────┐
     ▼                                   ▼
-[Context Tokens: N=192]        [Option B Target Slots: N=97]
+[Context Tokens: N=192]        [Anisotropic Target Slots: N=97]
     │                                   │
     ▼ (8-Layer Context Encoder)         ▼ (Target Encoder Pass)
 [Context Representations: D=384]    [Ground-Truth Embeddings]
@@ -57,7 +57,7 @@ To prevent representation collapse without relying on momentum teacher networks 
    - Visible tokens are gathered into a compact sequence: $Z_{\text{ctx}} \in \mathbb{R}^{B \times 192 \times 384}$.
    - Evaluating only visible tokens reduces self-attention compute by **$85.9\%$** ($192^2 / 512^2$) compared to dense masking.
 
-2. **Target Masking (Option B: Anisotropic Aspect-Ratio Jitter)**:
+2. **Target Masking (Anisotropic Aspect-Ratio Jitter)**:
    - Implements 6 anisotropic cuboid target slots:
      $$\mathcal{S} = \big[(3,3,3),\, (2,3,3),\, (3,2,3),\, (3,3,2),\, (2,2,2),\, (2,2,2)\big]$$
    - Target token volumes on $8^3$ grid ($16^3$ patch size): $27 + 18 + 18 + 18 + 8 + 8 = \mathbf{97\text{ tokens total}}$ ($18.9\%$ of grid).

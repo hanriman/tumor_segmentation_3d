@@ -96,7 +96,7 @@ When scaling the Vision Transformer patch embedding from $16^3$ down to $8^3$ vo
 1. **Computational & Token Sequence Expansion**:
    - For an identical $128^3$ volume, $8^3$ voxel patches generate $(128/8)^3 = 16^3 = \mathbf{4,096\text{ tokens}}$ ($8\times$ longer than the $8^3 = 512$ token sequence at $16^3$ patch size).
    - Self-attention computational complexity and activation storage scale quadratically: $(4,096 / 512)^2 = \mathbf{64\times}$.
-   - Option B anisotropic target masking scales proportionally to maintain identical physical anatomical coverage: $776$ target tokens ($18.95\%$ of 4,096) and $1,536$ context tokens ($37.5\%$).
+   - Anisotropic target masking scales proportionally to maintain identical physical anatomical coverage: $776$ target tokens ($18.95\%$ of 4,096) and $1,536$ context tokens ($37.5\%$).
 2. **Downstream Memory and Latency Spillover**:
    - If downstream segmentation adopts the fine-grained $8^3$ encoder, lateral skip feature maps are emitted at $16^3$ spatial resolution ($8\times$ more spatial tokens per intermediate layer).
    - Backward pass activation memory under multi-scale deep supervision expands from $\approx 7.4\,\text{GB}$ to $>30\,\text{GB}$, requiring A100-tier hardware or micro-batching ($B=1$) with gradient accumulation. Downstream inference latency also increases $\approx 4\text{--}8\times$.

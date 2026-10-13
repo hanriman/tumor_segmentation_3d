@@ -202,7 +202,7 @@ def main():
     elif context_num_patches == 192 and grid_size == (16, 16, 16):
         context_num_patches = 1536
 
-    # Resolve resolution-scaled Option B cuboids if not explicitly passed
+    # Resolve resolution-scaled anisotropic target cuboids if not explicitly passed
     if target_cuboid_sizes is None and target_cuboid_size is None:
         if grid_size == (16, 16, 16):
             target_cuboid_sizes = getattr(args, "target_cuboid_sizes_16grid", None)

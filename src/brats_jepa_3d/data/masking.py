@@ -13,7 +13,7 @@ MIN_TISSUE_TOKENS_PER_TARGET = 14
 # Minimum tissue context tokens before falling back to unfiltered regularization.
 MIN_TISSUE_CONTEXT_TOKENS = 32
 
-# Default Option B (3D Aspect-Ratio Jitter): 6 target cuboids spanning isotropic macro,
+# Anisotropic 3D Target Jitter Masking: 6 multi-aspect target cuboids spanning isotropic macro,
 # axial, coronal, and sagittal planar slabs, plus regional meso blocks (97 tokens for 8³ grid).
 DEFAULT_TARGET_CUBOID_SIZES_8GRID: tuple[tuple[int, int, int], ...] = (
     (3, 3, 3),  # 27 tokens: Macro isotropic cube (48mm)
@@ -25,7 +25,7 @@ DEFAULT_TARGET_CUBOID_SIZES_8GRID: tuple[tuple[int, int, int], ...] = (
 )
 DEFAULT_TARGET_CUBOID_SIZES = DEFAULT_TARGET_CUBOID_SIZES_8GRID
 
-# Scaled Option B for 16³ grid (patch_size 8³): 776 tokens total across 6 target cuboids
+# Resolution-scaled target cuboids for 16³ grid (patch_size 8³): 776 tokens total across 6 target cuboids
 # Preserves identical physical millimeter volume coverage (48mm, 32x48x48mm, 32mm).
 DEFAULT_TARGET_CUBOID_SIZES_16GRID: tuple[tuple[int, int, int], ...] = tuple(
     (s[0] * 2, s[1] * 2, s[2] * 2) for s in DEFAULT_TARGET_CUBOID_SIZES_8GRID
@@ -54,7 +54,7 @@ class JEPAMaskingTransform3D:
        Target and context index sets satisfy:
            \text{ctx} \cap \left(\bigcup_{m=1}^M \text{tgt}_m\right) = \emptyset
        ensuring zero attention leakage from target into the context encoder.
-    5. 3D Aspect-Ratio Jitter Target Cuboids (Option B: 97 / 776 tokens):
+    5. Anisotropic 3D Aspect-Ratio Jitter Target Cuboids (97 / 776 tokens):
        Sampling multi-aspect cuboids [(3,3,3), (2,3,3), (3,2,3), (3,3,2), (2,2,2), (2,2,2)]
        trains the predictor across axial, coronal, and sagittal anatomical planes, while maintaining
        dense supervision (89.8% retention of baseline) and zero ragged padding via slot-uniform shapes.

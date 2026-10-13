@@ -14,12 +14,12 @@ amp: true
 save_freq: 10
 eval_freq: 5
 
-# 3D JEPA Masking Parameters (Option B: Multi-aspect-ratio jitter cuboids)
+# 3D JEPA Masking Parameters: Anisotropic Multi-Aspect-Ratio Jitter Cuboids
 masking:
   max_target_overlap: 0.0
   context_fraction: 0.375         # 37.5% volume coverage (192 tokens for 8³ grid, 1536 tokens for 16³ grid)
   context_connectivity: 26         # 3D BFS connectivity
-  # Default Option B cuboid shapes in token units for 8³ grid (patch_size 16³)
+  # Multi-aspect cuboid shapes in token units for 8³ grid (patch_size 16³)
   target_cuboid_sizes_8grid:
     - [3, 3, 3]    # 27 tokens: Macro isotropic cube (48mm)
     - [2, 3, 3]    # 18 tokens: Axial planar slab (32x48x48mm)
@@ -27,7 +27,7 @@ masking:
     - [3, 3, 2]    # 18 tokens: Sagittal planar slab (48x48x32mm)
     - [2, 2, 2]    #  8 tokens: Regional meso cube (32mm)
     - [2, 2, 2]    #  8 tokens: Regional meso cube (32mm)
-  # Scaled Option B cuboid shapes in token units for 16³ grid (patch_size 8³) -> identical physical mm coverage
+  # Resolution-scaled cuboid shapes in token units for 16³ grid (patch_size 8³) -> identical physical mm coverage
   target_cuboid_sizes_16grid:
     - [6, 6, 6]    # 216 tokens: Macro isotropic cube (48mm)
     - [4, 6, 6]    # 144 tokens: Axial planar slab (32x48x48mm)
