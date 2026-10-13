@@ -112,13 +112,13 @@ For high-resolution self-supervised pre-training ($8^3$ voxel patch size $\to$ $
          --data_dir /content/data \
          --output_dir /content/outputs/visreg_jepa_a100 \
          --patch_size 8 8 8 \
-         --batch_size 16 \
+         --batch_size 32 \
          --epochs 50 \
          --reg_warmup_epochs 15 \
          --reg_min_scale 0.10 \
          --amp
      ```
-   - Features: High-resolution $8^3$ voxel patch size ($16^3 = 4,096$ token grid), $B=16$, AMP FP16, Anisotropic Target Masking Jitter (776 tokens across 6 cuboids preserving identical physical volume), and Dual Cosine Schedulers (5-epoch linear warmup learning rate schedule $5 \times 10^{-4} \to 1 \times 10^{-5}$ and 15-epoch regularizer annealing $1.0 \to 0.10$).
+   - Features: High-resolution $8^3$ voxel patch size ($16^3 = 4,096$ token grid), $B=32$, AMP FP16, Anisotropic Target Masking Jitter (776 tokens across 6 cuboids preserving identical physical volume), and Dual Cosine Schedulers (5-epoch linear warmup learning rate schedule $5 \times 10^{-4} \to 1 \times 10^{-5}$ and 15-epoch regularizer annealing $1.0 \to 0.10$).
 7. **Diagnostics & Drive Mirroring**:
    - Executes `scripts/diagnose_visreg_3d.py` to plot Effective Rank, Cosine Similarity, and Feature Variance curves.
    - Automatically synchronizes all weights and metrics to Google Drive.

@@ -282,7 +282,7 @@ python scripts/run_full_pipeline_3d.py --model_type all
 
 #### Workflow B: High-Throughput & High-Resolution Pre-Training on Google Colab (NVIDIA A100 SXM 40/80 GB)
 - Run `notebooks/colab_a100_visreg_pretrain.ipynb` directly in the Colab Web UI with runtime set to **A100 GPU (High-RAM)**.
-- Pre-trains with high-resolution $8^3$ voxel patch size ($16^3 = 4,096$ token grid, $2\times$ sharper spatial granularity than Kaggle's $16^3$ patch size), `batch_size: 16`, resolution-scaled anisotropic target masking (776 tokens), and cosine regularizer annealing.
+- Pre-trains with high-resolution $8^3$ voxel patch size ($16^3 = 4,096$ token grid, $2\times$ sharper spatial granularity than Kaggle's $16^3$ patch size), `batch_size: 32`, resolution-scaled anisotropic target masking (776 tokens), and cosine regularizer annealing.
 - Securely authenticates private Kaggle datasets via Colab Secrets (`KAGGLE_USERNAME`, `KAGGLE_KEY`), unzips to fast local NVMe (`/content/data/`), and synchronizes checkpoints directly to Google Drive.
 
 #### 1-Click Local Aggregation (Zero Cloud Re-Upload):
