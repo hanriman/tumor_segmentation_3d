@@ -173,7 +173,16 @@ class JEPAMaskingTransform3D:
         if token_brain_frac is None:
             return None
         fr = token_brain_frac.reshape(-1)
-        return {i for i in range(self.num_patches) if float(fr[i].item()) >= self.tissue_token_frac}
+        if len(fr) != self.num_patches:
+            import torch.nn.functional as _F
+            fr = _F.interpolate(
+                fr.view(1, 1, -1), size=self.num_patches, mode="nearest"
+            ).reshape(-1)
+        return {
+            i
+            for i in range(self.num_patches)
+            if i < len(fr) and float(fr[i].item()) >= self.tissue_token_frac
+        }
 
     def _sample_target_cuboids(
         self,

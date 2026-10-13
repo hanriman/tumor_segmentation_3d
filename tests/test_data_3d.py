@@ -622,3 +622,24 @@ def test_resolution_scaled_anisotropic_masking():
     vol16 = tf16.context_num_patches * (8**3)
     assert vol8 == vol16, "Context physical volume differs across resolutions"
 
+
+def test_16grid_masking_with_token_brain_frac():
+    """Verify that JEPAMaskingTransform3D with grid_size=(16,16,16) handles token_brain_frac without IndexError."""
+    tf16 = JEPAMaskingTransform3D(grid_size=(16, 16, 16))
+    g = torch.Generator()
+    g.manual_seed(42)
+
+    # Test with exactly 4096 tokens
+    frac4096 = torch.rand(4096)
+    out16 = tf16(token_brain_frac=frac4096, generator=g)
+    assert out16["context_indices"].shape == (1536,)
+    assert "context_tissue_mask" in out16
+    assert len(out16["context_tissue_mask"]) == 1536
+
+    # Test with mismatched size (e.g. legacy 512 tokens) - should auto-interpolate safely without error
+    frac512 = torch.rand(512)
+    out_mismatched = tf16(token_brain_frac=frac512, generator=g)
+    assert out_mismatched["context_indices"].shape == (1536,)
+    assert "context_tissue_mask" in out_mismatched
+    assert len(out_mismatched["context_tissue_mask"]) == 1536
+

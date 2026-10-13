@@ -178,11 +178,20 @@ class BraTS3DDataset(Dataset):
                 import torch.nn.functional as _F
 
                 bm = brain_mask.detach().float()
+                # Dynamically derive pooling target matching the masking grid
+                if hasattr(self.masking_transform, "grid_size"):
+                    target_grid = tuple(int(x) for x in self.masking_transform.grid_size)
+                else:
+                    target_grid = (8, 8, 8)
+
                 if bm.dim() == 4 and bm.shape[0] == 1:
-                    pooled = _F.avg_pool3d(bm.unsqueeze(0), kernel_size=16, stride=16)
+                    pooled = _F.adaptive_avg_pool3d(bm.unsqueeze(0), output_size=target_grid)
                     token_frac = pooled.reshape(-1)
                 elif bm.dim() == 3:
-                    pooled = _F.avg_pool3d(bm.unsqueeze(0).unsqueeze(0), kernel_size=16, stride=16)
+                    pooled = _F.adaptive_avg_pool3d(bm.unsqueeze(0).unsqueeze(0), output_size=target_grid)
+                    token_frac = pooled.reshape(-1)
+                elif bm.dim() == 4:
+                    pooled = _F.adaptive_avg_pool3d(bm.mean(dim=0, keepdim=True).unsqueeze(0), output_size=target_grid)
                     token_frac = pooled.reshape(-1)
                 else:
                     logger.warning(
