@@ -7,9 +7,20 @@ import sys
 
 import pytest
 import torch
+import shutil
 from torch.utils.data import DataLoader
 
 from brats_jepa_3d.config import PROJECT_ROOT
+
+
+@pytest.fixture(scope="module", autouse=True)
+def cleanup_integration_test_outputs():
+    yield
+    # Teardown: Clean up temporary smoke-test outputs created during integration tests
+    for folder in ["checkpoints", "logs", "metrics", "figures"]:
+        p = PROJECT_ROOT / "outputs" / folder
+        if p.exists():
+            shutil.rmtree(p, ignore_errors=True)
 
 
 # =========================================================================
