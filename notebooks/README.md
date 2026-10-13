@@ -8,7 +8,7 @@ tables with legacy v1 binary whole-tumor results.
 
 | Notebook | Purpose |
 |---|---|
-| `01_train_visreg_3d.ipynb` | SSL pre-training (label-free; exports `visreg_pretrain_outputs.zip` encoder checkpoint). |
+| `01_train_visreg_3d.ipynb` | SSL pre-training (label-free; Option B 3D target jitter [97 tokens across 6 cuboids], dual cosine schedules [LR warmup + regularizer annealing]; exports `visreg_pretrain_outputs.zip` encoder checkpoint). |
 | `02_diagnose_visreg_3d.ipynb` | Label-free SSL masking diagnostics (D1 air fractions; D2/D3 with a VisReg checkpoint). |
 | `03_train_nnunet_3d.ipynb` | 3D nnU-Net baseline (DynUNet with multi-scale deep supervision). |
 | `04_train_unet_3d.ipynb` | 3D Residual UNet baseline (MONAI ResUNet). |
