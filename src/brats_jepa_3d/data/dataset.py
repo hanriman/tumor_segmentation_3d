@@ -37,7 +37,16 @@ class BraTS3DDataset(Dataset):
         seed: int = 42,
     ):
         super().__init__()
-        self.data_dir = Path(data_dir).resolve() if data_dir else get_dataset_dir("brats_gli_3d")
+        # Resolve data directory safely with metadata validation
+        resolved_dir = None
+        if data_dir:
+            candidate = Path(data_dir).resolve()
+            if candidate.exists() and (candidate / "metadata.csv").exists():
+                resolved_dir = candidate
+        if resolved_dir is None:
+            resolved_dir = get_dataset_dir("brats_gli_3d_v2")
+
+        self.data_dir = resolved_dir
         self.split = split
         self.masking_transform = masking_transform
         self.augmentations = augmentations
@@ -46,7 +55,9 @@ class BraTS3DDataset(Dataset):
 
         metadata_file = self.data_dir / "metadata.csv"
         if not metadata_file.exists():
-            metadata_file = get_metadata_path("brats_gli_3d")
+            metadata_file = get_metadata_path("brats_gli_3d_v2")
+            if metadata_file.exists():
+                self.data_dir = metadata_file.parent
 
         if not metadata_file.exists():
             raise FileNotFoundError(f"Metadata file not found: {metadata_file}")

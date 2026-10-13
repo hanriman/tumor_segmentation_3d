@@ -44,31 +44,34 @@ def get_dataset_dir(dataset_name: str = "brats_gli_3d") -> Path:
 
     # 2. Check Kaggle input mounts
     if Path("/kaggle/input").exists():
-        # Known dataset directory variants, newest full pool first.
-        # v2 (integer masks) ships as brats_gli_3d_v2; accept it alongside the
-        # legacy brats_gli_3d_full folder so either Kaggle packaging resolves.
-        name_variants = [dataset_name]
-        for alias in ("brats_gli_3d_v2", "brats_gli_3d_full", "brats_gli_3d"):
-            if alias not in name_variants:
-                name_variants.append(alias)
-        for variant in name_variants:
+        name_variants = ["brats_gli_3d_v2", "brats_gli_3d_full", dataset_name]
+        seen_variants = set()
+        unique_variants = [x for x in name_variants if not (x in seen_variants or seen_variants.add(x))]
+
+        for variant in unique_variants:
             kaggle_matches = list(Path("/kaggle/input").glob(f"**/{variant}"))
             for m in kaggle_matches:
                 if m.is_dir() and (m / "metadata.csv").exists():
                     return m.resolve()
-            for cand in Path("/kaggle/input").iterdir():
-                if cand.is_dir() and (cand / variant).is_dir():
+
+        # Check subdirectories of each input folder
+        for cand in Path("/kaggle/input").iterdir():
+            if cand.is_dir():
+                for variant in unique_variants:
                     sub = cand / variant
-                    if (sub / "metadata.csv").exists():
+                    if sub.is_dir() and (sub / "metadata.csv").exists():
                         return sub.resolve()
-                # Dataset root carrying metadata directly (flat layout).
-                if cand.is_dir() and (cand / "metadata.csv").exists():
-                    return cand.resolve()
+
+        # Check if an input folder directly contains metadata.csv (flat layout)
+        for cand in Path("/kaggle/input").iterdir():
+            if cand.is_dir() and (cand / "metadata.csv").exists():
+                return cand.resolve()
 
     # 3. Check Google Colab local & Drive mounts
     if Path("/content").exists():
         colab_candidates = [
             Path("/content") / "data" / "processed" / dataset_name,
+            Path("/content") / "data" / "processed" / "brats_gli_3d_v2",
             Path("/content") / dataset_name,
             Path("/content") / "brats_3d_datasets" / dataset_name,
             Path("/content/drive/MyDrive") / "thesis_3d" / "data" / "processed" / dataset_name,
@@ -82,10 +85,13 @@ def get_dataset_dir(dataset_name: str = "brats_gli_3d") -> Path:
             return colab_matches[0].resolve()
 
     # 4. Local project processed dataset directory
-    local_target = (DATA_DIR / "processed" / dataset_name).resolve()
-    if local_target.exists():
-        return local_target
+    local_variants = ["brats_gli_3d_v2", "brats_gli_3d_full", dataset_name]
+    for variant in local_variants:
+        cand = (DATA_DIR / "processed" / variant).resolve()
+        if cand.is_dir() and (cand / "metadata.csv").exists():
+            return cand
 
+    local_target = (DATA_DIR / "processed" / dataset_name).resolve()
     return local_target
 
 

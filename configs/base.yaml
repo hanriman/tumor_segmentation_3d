@@ -5,4 +5,4 @@ amp: true            # Automatic Mixed Precision
 num_workers: 2
 pin_memory: true
 output_dir: "outputs"
-data_dir: "data/processed/brats_gli_3d"
+data_dir: null       # Dynamically auto-detected across Kaggle, Colab, env vars, and local storage
