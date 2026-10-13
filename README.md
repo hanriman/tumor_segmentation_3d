@@ -142,10 +142,10 @@ thesis_3d/
 │   ├── evaluate_ood_3d.py        # 3D Scanner shift runner (Rician noise, B1 bias field)
 │   ├── generate_figures_3d.py    # Multi-planar orthogonal & publication figures
 │   ├── package_for_kaggle.py     # Packages processed 3D dataset into dist_kaggle/ archive
-│   ├── combine_and_generate_paper_artifacts.py # 1-Click master multi-experiment aggregator & LaTeX exporter
-│   └── run_full_pipeline_3d.py   # Master automation orchestrator
+│   └── combine_and_generate_paper_artifacts.py # 1-Click master multi-experiment aggregator & LaTeX exporter
 │
-├── tests/                        # Consolidated pytest regression test suite (159 tests, 100% pass)
+├── tests/                        # Consolidated pytest regression test suite & smoke runners
+│   ├── smoke_test_pipeline.py    # End-to-end multi-model pipeline smoke test runner
 │   ├── conftest.py               # Synthetic 3D volume fixtures & hardware mocks
 │   ├── test_data_3d.py           # Dataset, 0% leakage, anisotropic 3D target jitter & BFS masking
 │   ├── test_evaluation_3d.py     # Evaluation parity, deep supervision flags, uninit decoder guard
@@ -258,17 +258,14 @@ python scripts/evaluate_ood_3d.py --model_type visreg_jepa --amp
 python scripts/generate_figures_3d.py
 ```
 
-### 6. Automated Pipeline Orchestrator
-To run all stages sequentially:
+### 6. Automated Pipeline Smoke Test Runner
+To verify all stages end-to-end via a rapid smoke test:
 ```bash
 # Fast smoke test across all modules (default: visreg_jepa)
-python scripts/run_full_pipeline_3d.py --smoke_test
+python tests/smoke_test_pipeline.py
 
-# Full pipeline execution for primary model
-python scripts/run_full_pipeline_3d.py --model_type visreg_jepa
-
-# Full pipeline across SSL models (visreg_jepa, sigreg_jepa)
-python scripts/run_full_pipeline_3d.py --model_type all
+# Smoke test across both SSL variants (visreg_jepa, sigreg_jepa)
+python tests/smoke_test_pipeline.py --model_type all
 ```
 
 ### 7. Cloud Execution (Kaggle & Colab A100) & Streamlined Local Aggregation

@@ -14,9 +14,11 @@ tables with legacy v1 binary whole-tumor results.
 | `04_train_unet_3d.ipynb` | 3D Residual UNet baseline (MONAI ResUNet). |
 | `05_train_vit_from_scratch_ablation_3d.ipynb` | From-scratch ViT + Multi-Scale FPN ablation (random initialization control). |
 | `06_vit_unetr_hybrid_ablation_3d.ipynb` | From-scratch ViT + Hybrid UNETR ablation (random initialization control). |
-| `07_finetune_visreg_multiscale_3d.ipynb` | VisReg + Multi-Scale FPN downstream fine-tuning on shared SSL encoder. |
-| `08_finetune_visreg_unetr_3d.ipynb` | VisReg + Hybrid UNETR downstream fine-tuning on shared SSL encoder. |
+| `07_finetune_visreg_multiscale_3d.ipynb` | VisReg + Multi-Scale FPN downstream fine-tuning on shared SSL encoder (Kaggle T4, 16³ patch). |
+| `08_finetune_visreg_unetr_3d.ipynb` | VisReg + Hybrid UNETR downstream fine-tuning on shared SSL encoder (Kaggle T4, 16³ patch). |
 | `colab_a100_visreg_pretrain.ipynb` | Dedicated NVIDIA A100 (Google Colab Web UI) high-resolution 8³ voxel patch pre-training with private Kaggle API download and Google Drive checkpoint persistence. |
+| `colab_a100_finetune_visreg_multiscale.ipynb` | Dedicated NVIDIA A100 (Google Colab Web UI) VisReg + Multi-Scale FPN downstream fine-tuning and evaluation suite (Google Drive intake, 8³ or 16³ patch). |
+| `colab_a100_finetune_visreg_unetr.ipynb` | Dedicated NVIDIA A100 (Google Colab Web UI) VisReg + Hybrid UNETR downstream fine-tuning and evaluation suite (Google Drive intake, 8³ or 16³ patch). |
 
 
 ## Unified Configuration & Reproducibility Schema

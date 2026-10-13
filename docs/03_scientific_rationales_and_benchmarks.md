@@ -10,17 +10,17 @@ On the **BraTS 2024 GLI** benchmark under the official three-region protocol (**
 
 | Model Architecture | Encoder Backbone | Decoder Type | Mean Dice (WT/TC/ET) | WT Dice | TC Dice | ET Dice | 1% Low-Data Mean Dice | Latency (128³) |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **3D nnU-Net** | DynUNet CNN | Deep Supervised | **79.33%** | **88.19%** | **83.00%** | **67.98%** | 28.05% | 235 ms |
-| **3D Residual UNet** | ResUNet CNN | Residual 3D | 77.05% | 87.20% | 80.52% | 63.42% | 7.03% *(Collapse)* | **76 ms** |
-| **3D VisReg UNETR** | 3D ViT (JEPA Pretrained) | UNETR Hybrid | 73.11% | 84.74% | 75.77% | 58.83% | **32.09%** *(Top Result)* | 128 ms |
-| **3D ViT-UNETR** | 3D ViT (From Scratch) | UNETR Hybrid | 72.82% | 84.51% | 75.29% | 58.67% | 29.61% | 128 ms |
-| **3D ViT-FPN** | 3D ViT (From Scratch) | Multi-Scale FPN | 67.38% | 80.12% | 68.61% | 53.40% | 17.00% | 115 ms |
-| **3D VisReg JEPA** | 3D ViT (JEPA Pretrained) | Multi-Scale FPN | 67.67% | 80.40% | 68.96% | 53.64% | 15.35% | 115 ms |
+| **3D nnU-Net** | DynUNet CNN | Deep Supervised | **79.72%** | **88.19%** | **83.00%** | **67.98%** | 28.05% | 968 ms (TTA) / 235 ms |
+| **3D Residual UNet** | ResUNet CNN | Residual 3D | 77.96% | 86.59% | 80.46% | 66.84% | 7.03% *(Collapse)* | **260 ms (TTA) / 76 ms** |
+| **3D VisReg UNETR** | 3D ViT (JEPA Pretrained) | UNETR Hybrid | 73.11% | 84.74% | 75.77% | 58.83% | **32.09%** *(Top Result)* | 987 ms (TTA) / 128 ms |
+| **3D ViT-UNETR** | 3D ViT (From Scratch) | UNETR Hybrid | 73.37% | 84.84% | 76.17% | 59.10% | 29.61% | 945 ms (TTA) / 128 ms |
+| **3D ViT-FPN** | 3D ViT (From Scratch) | Multi-Scale FPN | 67.93% | 80.30% | 68.90% | 54.58% | 17.00% | 471 ms (TTA) / 115 ms |
+| **3D VisReg JEPA** | 3D ViT (JEPA Pretrained) | Multi-Scale FPN | 67.82% | 80.31% | 68.96% | 54.20% | 15.35% | 465 ms (TTA) / 115 ms |
 
 ### Key Scientific Takeaways ([`AGENTS.md`](../AGENTS.md)):
 1. **Full Data Regime**: Supervised 3D CNNs achieve higher overall Dice than Vision Transformers, confirming that localized 3D convolutional inductive biases are superior for volumetric dense prediction when annotations are abundant.
-2. **Hybrid Convolutions Resolve the Token Bottleneck**: Adding a convolutional stem in UNETR provides a **$+5.44\text{pp}$** mean Dice gain over pure ViT-FPN, successfully bridging the spatial granularity deficit of $16^3$ patch tokenization.
-3. **Severe Label Scarcity ($1\%$ Labels / 11 Volumes)**: Standard 3D Residual UNet experiences catastrophic background collapse ($7.03\%$). In contrast, 3D VisReg JEPA paired with the UNETR hybrid decoder achieves the top performance ($\mathbf{32.09\%}$), outperforming from-scratch UNETR ($29.61\%$, $\mathbf{+2.48\text{pp}}$) and deeply supervised nnU-Net ($28.05\%$, $\mathbf{+4.04\text{pp}}$), while exceeding standard 3D Residual UNet by $\mathbf{+25.06\text{pp}}$.
+2. **Hybrid Convolutions Resolve the Token Bottleneck**: Adding a convolutional stem in UNETR provides a **$+5.44\text{pp}$** mean Dice gain over pure ViT-FPN ($73.37\%$ vs.\ $67.93\%$), successfully bridging the spatial granularity deficit of $16^3$ patch tokenization.
+3. **Severe Label Scarcity ($1\%$ Labels / 12 Volumes)**: Standard 3D Residual UNet experiences catastrophic background collapse ($7.03\%$). In contrast, 3D VisReg JEPA paired with the UNETR hybrid decoder achieves the top performance ($\mathbf{32.09\%}$), outperforming from-scratch UNETR ($29.61\%$, $\mathbf{+2.48\text{pp}}$) and deeply supervised nnU-Net ($28.05\%$, $\mathbf{+4.04\text{pp}}$), while exceeding standard 3D Residual UNet by $\mathbf{+25.06\text{pp}}$.
 
 ---
 
@@ -120,8 +120,8 @@ $$\Delta_{\text{JEPA}} = \text{Score}(\text{VisReg JEPA}) - \text{Score}(\text{V
 
 ### Empirical Decomposition:
 1. **Full-Data Regime ($100\%$ Labels)**:
-   - $\Delta_{\text{Arch}} = 72.82\% - 79.33\% = \mathbf{-6.51\text{pp}}$ (architectural inductive bias penalty of ViTs on volumetric imaging).
-   - $\Delta_{\text{JEPA}} = 73.11\% - 72.82\% = \mathbf{+0.29\text{pp}}$ (pre-training provides minimal benefit under abundant supervised data).
-2. **Extreme Scarcity Regime ($1\%$ Labels)**:
+   - $\Delta_{\text{Arch}} = 73.37\% - 79.72\% = \mathbf{-6.35\text{pp}}$ (architectural inductive bias penalty of ViTs on volumetric imaging).
+   - $\Delta_{\text{JEPA}} = 73.11\% - 73.37\% = \mathbf{-0.26\text{pp}}$ (pre-training matches from-scratch optimization under abundant supervised data).
+2. **Extreme Scarcity Regime ($1\%$ Labels / 12 Volumes)**:
    - $\Delta_{\text{Arch}} = 29.61\% - 28.05\% = \mathbf{+1.56\text{pp}}$ (hybrid CNN skip connections preserve localization and prevent the catastrophic collapse seen in pure CNNs: ResUNet collapses to $7.03\%$).
    - $\Delta_{\text{JEPA}} = 32.09\% - 29.61\% = \mathbf{+2.48\text{pp}}$ (JEPA pre-training provides an additional representation prior, securing top overall performance of $32.09\%$ and outperforming standard 3D Residual UNet by $\mathbf{+25.06\text{pp}}$).

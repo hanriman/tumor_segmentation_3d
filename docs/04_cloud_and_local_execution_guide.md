@@ -79,49 +79,47 @@ Outputs are exported as self-contained zip archives:
 
 ## 5. Execution on Google Colab (NVIDIA A100 SXM4)
 
-For high-resolution self-supervised pre-training ($8^3$ voxel patch size $\to$ $16^3 = 4,096$ token grid) with full batch capacity ($B=16$) and regularizer schedule annealing, use the dedicated notebook:
-`notebooks/colab_a100_visreg_pretrain.ipynb`.
+For high-resolution self-supervised pre-training ($8^3$ voxel patch size $\to$ $16^3 = 4,096$ token grid) and downstream fine-tuning with full batch capacity ($B=32$ pretrain, $B=4$ downstream) and regularizer schedule annealing, use the dedicated Colab suite:
+* `notebooks/colab_a100_visreg_pretrain.ipynb`: 200-epoch SSL pre-training with Anisotropic 3D Target Jitter.
+* `notebooks/colab_a100_finetune_visreg_multiscale.ipynb`: Downstream fine-tuning with Multi-Scale 3D FPN decoder.
+* `notebooks/colab_a100_finetune_visreg_unetr.ipynb`: Downstream fine-tuning with Hybrid UNETR decoder.
 
-### 5.1 Why the Colab Web UI?
-- **Seamless Secrets Integration**: Secure access to private Kaggle datasets using Colab's built-in Secret Manager (`KAGGLE_USERNAME`, `KAGGLE_KEY`).
-- **Resilient Execution**: Does not drop background processes if a local VS Code remote SSH tunnel disconnects.
-- **Drive Persistence**: Checkpoints and diagnostics stream directly to `/content/drive/MyDrive/checkpoints/visreg_jepa_a100_50ep/`.
+### 5.1 Google Drive `thesis/` Hierarchy
+All Colab notebooks operate on a standardized, organized Google Drive directory layout:
+
+```text
+My Drive/
+└── thesis/
+    ├── data/
+    │   └── brats-3d-v2.zip              <-- Upload your dataset .zip here
+    ├── pretrain model/                  <-- Pre-training checkpoints and exported zip
+    │   ├── visreg_jepa_3d_best.pt
+    │   └── visreg_pretrain_outputs_a100.zip
+    └── downstream/                      <-- Fine-tuning checkpoints and evaluation archives
+        ├── multiscale/
+        │   └── visreg_multiscale_outputs_a100.zip
+        └── unetr/
+            └── visreg_unetr_outputs_a100.zip
+```
 
 ### 5.2 Step-by-Step Launch Procedure
-1. **Open the Notebook**: In Google Colab, open `notebooks/colab_a100_visreg_pretrain.ipynb` from GitHub (`hanriman/tumor_segmentation_3d`).
-2. **Select A100 GPU**:
+1. **Prepare Google Drive**:
+   - In Google Drive, create the folder `thesis/` with subfolders `data/` and `pretrain model/`.
+   - Upload your `brats-3d-v2.zip` (or `brats_3d_full.zip`) into `My Drive/thesis/data/`.
+2. **Open Notebook in Colab**:
+   - Open `notebooks/colab_a100_visreg_pretrain.ipynb` from GitHub (`hanriman/tumor_segmentation_3d`).
+3. **Select A100 GPU**:
    - Menu $\to$ **Runtime** $\to$ **Change runtime type**.
-   - Hardware accelerator: **A100 GPU**.
-   - Runtime shape: **High-RAM**.
-3. **Authenticate Private Kaggle Dataset**:
-   - Open **Secrets** (key 🔑 icon) in the left sidebar.
-   - Add `KAGGLE_USERNAME` and `KAGGLE_KEY` with notebook access toggled on (or upload `kaggle.json` interactively when prompted).
-4. **Fast NVMe Extraction**:
-   - Set `KAGGLE_DATASET = "yourusername/brats-3d-full"` in Cell 6.
-   - The notebook downloads and unzips directly to `/content/data/` on the local NVMe, avoiding slow Google Drive I/O during DataLoader iterations.
-5. **Pre-Flight Smoke Test**:
-   - Runs a 2-minute verification pass:
-     ```bash
-     python scripts/train_jepa_3d.py --model_type visreg_jepa --smoke_test --reg_warmup_epochs 2 --reg_min_scale 0.10
-     ```
-6. **Production Pre-training**:
-   - Executes with explicit A100 configuration arguments matching the Kaggle suite:
-     ```bash
-     python scripts/train_jepa_3d.py \
-         --model_type visreg_jepa \
-         --data_dir /content/data \
-         --output_dir /content/outputs/visreg_jepa_a100 \
-         --patch_size 8 8 8 \
-         --batch_size 32 \
-         --epochs 200 \
-         --reg_warmup_epochs 30 \
-         --reg_min_scale 0.10 \
-         --amp
-     ```
-   - Features: High-resolution $8^3$ voxel patch size ($16^3 = 4,096$ token grid), $B=32$, AMP FP16, Anisotropic Target Masking Jitter (776 tokens across 6 cuboids preserving identical physical volume), and Dual Cosine Schedulers (20-epoch linear warmup learning rate schedule $5 \times 10^{-4} \to 1 \times 10^{-5}$ and 30-epoch regularizer annealing $1.0 \to 0.10$).
-7. **Diagnostics & Drive Mirroring**:
-   - Executes `scripts/diagnose_visreg_3d.py` to plot Effective Rank, Cosine Similarity, and Feature Variance curves.
-   - Automatically synchronizes all weights and metrics to Google Drive.
+   - Hardware accelerator: **A100 GPU**, Runtime shape: **High-RAM**.
+4. **Mount Drive & Local NVMe Extraction**:
+   - Cell 1 mounts Google Drive.
+   - Cell 6 automatically detects `brats-3d-v2.zip` in `/content/drive/MyDrive/thesis/data/` and unzips it once to `/content/data/` (local NVMe SSD), ensuring 100% GPU saturation without Google Drive FUSE latency.
+5. **Execute Pre-training & Export**:
+   - Runs pre-training with explicit parameters (`--patch_size 8 8 8`, `--batch_size 32`, `--epochs 200`, `--reg_warmup_epochs 30`, `--reg_min_scale 0.10`, `--amp`).
+   - Exports weights directly to `My Drive/thesis/pretrain model/`.
+6. **Execute Downstream Fine-Tuning**:
+   - Open `notebooks/colab_a100_finetune_visreg_multiscale.ipynb` or `notebooks/colab_a100_finetune_visreg_unetr.ipynb`.
+   - Both notebooks automatically detect the pre-trained weights in `My Drive/thesis/pretrain model/`, run 30-epoch fine-tuning, execute full test + low-data ($1\%$–$100\%$) + OOD evaluations, and package reports directly into `My Drive/thesis/downstream/`.
 
 ---
 

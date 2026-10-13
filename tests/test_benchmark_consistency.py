@@ -15,6 +15,8 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CSV_PATH = REPO_ROOT / "outputs" / "multiregion" / "low_data_3d_summary.csv"
+MASTER_CSV_PATH = REPO_ROOT / "outputs" / "multiregion" / "master_3d_benchmark.csv"
+OOD_CSV_PATH = REPO_ROOT / "outputs" / "multiregion" / "ood_3d_summary.csv"
 TEX_PATH = REPO_ROOT / "paper" / "latex" / "main.tex"
 DOCS_PATH = REPO_ROOT / "docs" / "03_scientific_rationales_and_benchmarks.md"
 
@@ -106,3 +108,109 @@ def test_docs03_matches_benchmark():
     assert "32.09%" in docs_content, "VisReg UNETR score 32.09% missing from docs/03"
     assert "7.03% *(Collapse)*" in docs_content, "ResUNet collapse 7.03% missing from docs/03"
     assert "+2.48" in docs_content, "+2.48pp JEPA gain missing from docs/03"
+
+
+def test_low_data_volume_counts_consistent():
+    """Verify that paper Table 2 and abstract report ceil-based volumes (12, 58, 115)."""
+    assert TEX_PATH.exists()
+    tex_content = TEX_PATH.read_text(encoding="utf-8")
+    assert r"1\% (12 Vols)" in tex_content, "Table 2 header should report '1\\% (12 Vols)'"
+    assert r"5\% (58 Vols)" in tex_content, "Table 2 header should report '5\\% (58 Vols)'"
+    assert r"10\% (115 Vols)" in tex_content, "Table 2 header should report '10\\% (115 Vols)'"
+    assert r"($1\%$ labels, $12$ volumes)" in tex_content, "Abstract should report 12 volumes"
+
+
+def test_latex_table1_matches_master_csv():
+    """Verify Table 1 in paper/latex/main.tex matches master_3d_benchmark.csv."""
+    assert MASTER_CSV_PATH.exists()
+    assert TEX_PATH.exists()
+
+    df = pd.read_csv(MASTER_CSV_PATH)
+    df_indexed = df.set_index("Model Architecture")
+    tex_content = TEX_PATH.read_text(encoding="utf-8")
+
+    table_match = re.search(
+        r"\\label\{tab:benchmark_results\}(.*?)\\end\{table\}",
+        tex_content,
+        re.DOTALL,
+    )
+    assert table_match is not None, "Could not locate Table 1 block in LaTeX"
+    table_text = table_match.group(1)
+
+    models = [
+        ("3D nnU-Net (DynUNet)", "3D nnU-Net (DynUNet)"),
+        ("3D Residual UNet", "3D Residual UNet"),
+        ("3D ViT-UNETR Hybrid (Scratch)", "3D ViT-FPN (From Scratch) [unetr_hybrid]"),
+        ("3D VisReg JEPA (UNETR Hybrid)", "3D VisReg JEPA (FPN) [unetr_hybrid]"),
+        ("3D ViT-FPN (From Scratch)", "3D ViT-FPN (From Scratch)"),
+        ("3D VisReg JEPA (Multiscale FPN)", "3D VisReg JEPA (FPN)"),
+    ]
+
+    for tex_name, csv_prefix in models:
+        pattern = rf"^[ \t]*{re.escape(tex_name)}\s*&(.*?)\\\\\s*$"
+        match = re.search(pattern, table_text, re.MULTILINE)
+        assert match is not None, f"Could not find row '{tex_name}' in Table 1"
+        row_cells = match.group(1).split("&")
+        assert len(row_cells) == 8, f"Expected 8 cells in row '{tex_name}', got {len(row_cells)}"
+
+        # WT Dice
+        wt_cell = row_cells[0]
+        wt_num = float(re.search(r"(\d+\.\d+)", wt_cell).group(1))
+        wt_csv_val = float(df_indexed.loc[f"{csv_prefix} [WT]", "Dice (%)"].split("±")[0].strip())
+        assert abs(wt_num - wt_csv_val) < 0.05, f"WT mismatch for {tex_name}: {wt_num} vs {wt_csv_val}"
+
+        # TC Dice
+        tc_cell = row_cells[1]
+        tc_num = float(re.search(r"(\d+\.\d+)", tc_cell).group(1))
+        tc_csv_val = float(df_indexed.loc[f"{csv_prefix} [TC]", "Dice (%)"].split("±")[0].strip())
+        assert abs(tc_num - tc_csv_val) < 0.05, f"TC mismatch for {tex_name}: {tc_num} vs {tc_csv_val}"
+
+        # ET Dice
+        et_cell = row_cells[2]
+        et_num = float(re.search(r"(\d+\.\d+)", et_cell).group(1))
+        et_csv_val = float(df_indexed.loc[f"{csv_prefix} [ET]", "Dice (%)"].split("±")[0].strip())
+        assert abs(et_num - et_csv_val) < 0.05, f"ET mismatch for {tex_name}: {et_num} vs {et_csv_val}"
+
+
+def test_latex_table3_and_4_match_ood_csv():
+    """Verify Table 3 & Table 4 in paper/latex/main.tex match ood_3d_summary.csv."""
+    assert OOD_CSV_PATH.exists()
+    assert TEX_PATH.exists()
+
+    df = pd.read_csv(OOD_CSV_PATH).set_index("Regime")
+    tex_content = TEX_PATH.read_text(encoding="utf-8")
+
+    # Table 3: Synthetic Scanner Shifts (tab:ood_synthetic_results)
+    table3_match = re.search(
+        r"\\label\{tab:ood_synthetic_results\}(.*?)\\end\{table\}",
+        tex_content,
+        re.DOTALL,
+    )
+    assert table3_match is not None, "Could not locate Table 3 block in LaTeX"
+    table3_text = table3_match.group(1)
+
+    # Clean Baseline nnU-Net
+    match3 = re.search(r"Clean Baseline\s*&\s*3D nnU-Net Baseline\s*&(.*?)\\\\\s*$", table3_text, re.MULTILINE)
+    assert match3 is not None
+    cells3 = match3.group(1).split("&")
+    mean_val = float(re.search(r"(\d+\.\d+)", cells3[3]).group(1))
+    csv_mean = float(str(df.loc["Clean Baseline", "3D nnU-Net [mean]"]).replace("%", "").strip())
+    assert abs(mean_val - csv_mean) < 0.05, f"Mismatch on Clean Baseline nnU-Net: {mean_val} vs {csv_mean}"
+
+    # Table 4: Missing Modality Emergency Triage (tab:missing_modality_results)
+    table4_match = re.search(
+        r"\\label\{tab:missing_modality_results\}(.*?)\\end\{table\}",
+        tex_content,
+        re.DOTALL,
+    )
+    assert table4_match is not None, "Could not locate Table 4 block in LaTeX"
+    table4_text = table4_match.group(1)
+
+    # FLAIR Only nnU-Net
+    match4 = re.search(r"FLAIR Only.*?&\s*3D nnU-Net Baseline\s*&(.*?)\\\\\s*$", table4_text, re.MULTILINE)
+    assert match4 is not None
+    cells4 = match4.group(1).split("&")
+    flair_wt = float(re.search(r"(\d+\.\d+)", cells4[0]).group(1))
+    csv_flair_wt = float(str(df.loc["Missing Modalities: FLAIR Only", "3D nnU-Net [WT]"]).replace("%", "").strip())
+    assert abs(flair_wt - csv_flair_wt) < 0.05, f"Mismatch on FLAIR Only nnU-Net WT: {flair_wt} vs {csv_flair_wt}"
+

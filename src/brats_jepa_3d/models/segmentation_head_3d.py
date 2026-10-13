@@ -33,30 +33,54 @@ class ViTSegmentationDecoder3D(nn.Module):
         super().__init__()
         self.in_dim = in_dim
         self.grid_size = grid_size
+        gz = grid_size[0]
 
-        self.decoder = nn.Sequential(
-            # Stage 1: 8^3 -> 16^3
-            nn.ConvTranspose3d(in_dim, 192, kernel_size=2, stride=2),
-            nn.GroupNorm(16, 192),
-            nn.GELU(),
-            # Stage 2: 16^3 -> 32^3
-            nn.ConvTranspose3d(192, 96, kernel_size=2, stride=2),
-            nn.GroupNorm(8, 96),
-            nn.GELU(),
-            # Stage 3: 32^3 -> 64^3
-            nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
-            nn.GroupNorm(4, 48),
-            nn.GELU(),
-            # Stage 4: 64^3 -> 128^3
-            nn.ConvTranspose3d(48, 24, kernel_size=2, stride=2),
-            nn.GroupNorm(4, 24),
-            nn.GELU(),
-            # Projection head to logits
-            nn.Conv3d(24, out_channels, kernel_size=1),
-        )
+        if gz == 16:
+            # Resolution-scaled 16³ grid (patch_size 8³ on 128³ volume):
+            # Latent tokens are already at 16³ spatial resolution.
+            # Stage 1 operates at native token resolution (16³ -> 16³),
+            # followed by 3 stages of 2x upsampling (16³ -> 32³ -> 64³ -> 128³).
+            self.decoder = nn.Sequential(
+                nn.Conv3d(in_dim, 192, kernel_size=3, padding=1),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+                nn.ConvTranspose3d(192, 96, kernel_size=2, stride=2),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+                nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+                nn.ConvTranspose3d(48, 24, kernel_size=2, stride=2),
+                nn.GroupNorm(4, 24),
+                nn.GELU(),
+                nn.Conv3d(24, out_channels, kernel_size=1),
+            )
+        else:
+            # Canonical 8³ token grid (patch_size 16³ on 128³ volume):
+            # 4 stages of 2x upsampling (8³ -> 16³ -> 32³ -> 64³ -> 128³).
+            self.decoder = nn.Sequential(
+                # Stage 1: 8^3 -> 16^3
+                nn.ConvTranspose3d(in_dim, 192, kernel_size=2, stride=2),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+                # Stage 2: 16^3 -> 32^3
+                nn.ConvTranspose3d(192, 96, kernel_size=2, stride=2),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+                # Stage 3: 32^3 -> 64^3
+                nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+                # Stage 4: 64^3 -> 128^3
+                nn.ConvTranspose3d(48, 24, kernel_size=2, stride=2),
+                nn.GroupNorm(4, 24),
+                nn.GELU(),
+                # Projection head to logits
+                nn.Conv3d(24, out_channels, kernel_size=1),
+            )
 
     def forward(self, patch_tokens: torch.Tensor) -> torch.Tensor:
-        # patch_tokens: [B, N=512, D=384] -> [B, D, 8, 8, 8]
+        # patch_tokens: [B, N, D=384] -> [B, D, gz, gy, gx]
         B, _N, D = patch_tokens.shape
         gz, gy, gx = self.grid_size
         x = patch_tokens.permute(0, 2, 1).reshape(B, D, gz, gy, gx)
@@ -91,65 +115,124 @@ class MultiScaleViTSegmentationDecoder3D(nn.Module):
         self.in_dim = in_dim
         self.grid_size = grid_size
         self.deep_supervision = deep_supervision
+        gz = grid_size[0]
 
-        # Stage 1: Bottleneck 8^3 -> 16^3
-        self.up1 = nn.Sequential(
-            nn.ConvTranspose3d(in_dim, 192, kernel_size=2, stride=2),
-            nn.GroupNorm(16, 192),
-            nn.GELU(),
-        )
-        # Skip connection from L6 (8^3 -> 16^3)
-        self.skip_l6 = nn.Sequential(
-            nn.ConvTranspose3d(in_dim, 192, kernel_size=2, stride=2),
-            nn.GroupNorm(16, 192),
-            nn.GELU(),
-        )
-        self.fuse1 = nn.Sequential(
-            nn.Conv3d(192 + 192, 192, kernel_size=3, padding=1),
-            nn.GroupNorm(16, 192),
-            nn.GELU(),
-        )
+        if gz == 16:
+            # High-resolution 16³ grid (patch_size 8³ on 128³ volume):
+            # Latent tokens are already at 16³ resolution.
+            # Stage 1: 16³ -> 16³ (stride 1 conv)
+            self.up1 = nn.Sequential(
+                nn.Conv3d(in_dim, 192, kernel_size=3, padding=1),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+            )
+            # Skip connection from L6 (16³ -> 16³)
+            self.skip_l6 = nn.Sequential(
+                nn.Conv3d(in_dim, 192, kernel_size=3, padding=1),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+            )
+            self.fuse1 = nn.Sequential(
+                nn.Conv3d(192 + 192, 192, kernel_size=3, padding=1),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+            )
 
-        # Stage 2: 16^3 -> 32^3
-        self.up2 = nn.Sequential(
-            nn.ConvTranspose3d(192, 96, kernel_size=2, stride=2),
-            nn.GroupNorm(8, 96),
-            nn.GELU(),
-        )
-        # Skip connection from L4 (8^3 -> 32^3 via 4x transpose conv)
-        self.skip_l4 = nn.Sequential(
-            nn.ConvTranspose3d(in_dim, 96, kernel_size=4, stride=4),
-            nn.GroupNorm(8, 96),
-            nn.GELU(),
-        )
-        self.fuse2 = nn.Sequential(
-            nn.Conv3d(96 + 96, 96, kernel_size=3, padding=1),
-            nn.GroupNorm(8, 96),
-            nn.GELU(),
-        )
+            # Stage 2: 16³ -> 32³ (stride 2)
+            self.up2 = nn.Sequential(
+                nn.ConvTranspose3d(192, 96, kernel_size=2, stride=2),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+            )
+            # Skip connection from L4 (16³ -> 32³ via 2x transpose conv)
+            self.skip_l4 = nn.Sequential(
+                nn.ConvTranspose3d(in_dim, 96, kernel_size=2, stride=2),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+            )
+            self.fuse2 = nn.Sequential(
+                nn.Conv3d(96 + 96, 96, kernel_size=3, padding=1),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+            )
 
-        # Stage 3: 32^3 -> 64^3
-        self.up3 = nn.Sequential(
-            nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
-            nn.GroupNorm(4, 48),
-            nn.GELU(),
-        )
-        # Skip connection from L2 (8^3 -> 32^3 -> 64^3 via progressive transpose convs)
-        self.skip_l2 = nn.Sequential(
-            nn.ConvTranspose3d(in_dim, 96, kernel_size=4, stride=4),
-            nn.GroupNorm(8, 96),
-            nn.GELU(),
-            nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
-            nn.GroupNorm(4, 48),
-            nn.GELU(),
-        )
-        self.fuse3 = nn.Sequential(
-            nn.Conv3d(48 + 48, 48, kernel_size=3, padding=1),
-            nn.GroupNorm(4, 48),
-            nn.GELU(),
-        )
+            # Stage 3: 32³ -> 64³ (stride 2)
+            self.up3 = nn.Sequential(
+                nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+            )
+            # Skip connection from L2 (16³ -> 64³ via 4x transpose conv)
+            self.skip_l2 = nn.Sequential(
+                nn.ConvTranspose3d(in_dim, 48, kernel_size=4, stride=4),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+            )
+            self.fuse3 = nn.Sequential(
+                nn.Conv3d(48 + 48, 48, kernel_size=3, padding=1),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+            )
+        else:
+            # Canonical 8³ grid (patch_size 16³ on 128³ volume):
+            # Stage 1: Bottleneck 8³ -> 16³
+            self.up1 = nn.Sequential(
+                nn.ConvTranspose3d(in_dim, 192, kernel_size=2, stride=2),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+            )
+            # Skip connection from L6 (8³ -> 16³)
+            self.skip_l6 = nn.Sequential(
+                nn.ConvTranspose3d(in_dim, 192, kernel_size=2, stride=2),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+            )
+            self.fuse1 = nn.Sequential(
+                nn.Conv3d(192 + 192, 192, kernel_size=3, padding=1),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+            )
 
-        # Stage 4: 64^3 -> 128^3
+            # Stage 2: 16³ -> 32³
+            self.up2 = nn.Sequential(
+                nn.ConvTranspose3d(192, 96, kernel_size=2, stride=2),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+            )
+            # Skip connection from L4 (8³ -> 32³ via 4x transpose conv)
+            self.skip_l4 = nn.Sequential(
+                nn.ConvTranspose3d(in_dim, 96, kernel_size=4, stride=4),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+            )
+            self.fuse2 = nn.Sequential(
+                nn.Conv3d(96 + 96, 96, kernel_size=3, padding=1),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+            )
+
+            # Stage 3: 32³ -> 64³
+            self.up3 = nn.Sequential(
+                nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+            )
+            # Skip connection from L2 (8³ -> 32³ -> 64³ via progressive transpose convs)
+            self.skip_l2 = nn.Sequential(
+                nn.ConvTranspose3d(in_dim, 96, kernel_size=4, stride=4),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+                nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+            )
+            self.fuse3 = nn.Sequential(
+                nn.Conv3d(48 + 48, 48, kernel_size=3, padding=1),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+            )
+
+        # Stage 4: 64³ -> 128³
         self.up4 = nn.Sequential(
             nn.ConvTranspose3d(48, 24, kernel_size=2, stride=2),
             nn.GroupNorm(4, 24),
@@ -261,61 +344,119 @@ class HybridUNETRDecoder3D(nn.Module):
             nn.GELU(),
         )
 
-        # Stage 1: Bottleneck 8^3 -> 16^3 (identical to multiscale FPN).
-        self.up1 = nn.Sequential(
-            nn.ConvTranspose3d(in_dim, 192, kernel_size=2, stride=2),
-            nn.GroupNorm(16, 192),
-            nn.GELU(),
-        )
-        self.skip_l6 = nn.Sequential(
-            nn.ConvTranspose3d(in_dim, 192, kernel_size=2, stride=2),
-            nn.GroupNorm(16, 192),
-            nn.GELU(),
-        )
-        self.fuse1 = nn.Sequential(
-            nn.Conv3d(192 + 192, 192, kernel_size=3, padding=1),
-            nn.GroupNorm(16, 192),
-            nn.GELU(),
-        )
+        gz = grid_size[0]
 
-        # Stage 2: 16^3 -> 32^3 (identical to multiscale FPN).
-        self.up2 = nn.Sequential(
-            nn.ConvTranspose3d(192, 96, kernel_size=2, stride=2),
-            nn.GroupNorm(8, 96),
-            nn.GELU(),
-        )
-        self.skip_l4 = nn.Sequential(
-            nn.ConvTranspose3d(in_dim, 96, kernel_size=4, stride=4),
-            nn.GroupNorm(8, 96),
-            nn.GELU(),
-        )
-        self.fuse2 = nn.Sequential(
-            nn.Conv3d(96 + 96, 96, kernel_size=3, padding=1),
-            nn.GroupNorm(8, 96),
-            nn.GELU(),
-        )
+        if gz == 16:
+            # High-resolution 16³ grid (patch_size 8³ on 128³ volume):
+            # Stage 1: Tokens already at 16³ resolution (stride 1 conv)
+            self.up1 = nn.Sequential(
+                nn.Conv3d(in_dim, 192, kernel_size=3, padding=1),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+            )
+            self.skip_l6 = nn.Sequential(
+                nn.Conv3d(in_dim, 192, kernel_size=3, padding=1),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+            )
+            self.fuse1 = nn.Sequential(
+                nn.Conv3d(192 + 192, 192, kernel_size=3, padding=1),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+            )
 
-        # Stage 3: 32^3 -> 64^3 with stem_64 fusion (48 + 48 + 32 -> 48).
-        self.up3 = nn.Sequential(
-            nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
-            nn.GroupNorm(4, 48),
-            nn.GELU(),
-        )
-        self.skip_l2 = nn.Sequential(
-            nn.ConvTranspose3d(in_dim, 96, kernel_size=4, stride=4),
-            nn.GroupNorm(8, 96),
-            nn.GELU(),
-            nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
-            nn.GroupNorm(4, 48),
-            nn.GELU(),
-        )
-        self.fuse3 = nn.Sequential(
-            nn.Conv3d(48 + 48 + 32, 48, kernel_size=3, padding=1),
-            nn.GroupNorm(4, 48),
-            nn.GELU(),
-        )
+            # Stage 2: 16³ -> 32³ (stride 2)
+            self.up2 = nn.Sequential(
+                nn.ConvTranspose3d(192, 96, kernel_size=2, stride=2),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+            )
+            # Skip connection from L4 (16³ -> 32³ via 2x transpose conv)
+            self.skip_l4 = nn.Sequential(
+                nn.ConvTranspose3d(in_dim, 96, kernel_size=2, stride=2),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+            )
+            self.fuse2 = nn.Sequential(
+                nn.Conv3d(96 + 96, 96, kernel_size=3, padding=1),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+            )
 
-        # Stage 4: 64^3 -> 128^3 with stem_128 fusion (24 + 16 -> 24).
+            # Stage 3: 32³ -> 64³ with stem_64 fusion (48 + 48 + 32 -> 48)
+            self.up3 = nn.Sequential(
+                nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+            )
+            # Skip connection from L2 (16³ -> 64³ via 4x transpose conv)
+            self.skip_l2 = nn.Sequential(
+                nn.ConvTranspose3d(in_dim, 48, kernel_size=4, stride=4),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+            )
+            self.fuse3 = nn.Sequential(
+                nn.Conv3d(48 + 48 + 32, 48, kernel_size=3, padding=1),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+            )
+        else:
+            # Canonical 8³ grid (patch_size 16³ on 128³ volume):
+            # Stage 1: Bottleneck 8³ -> 16³ (identical to multiscale FPN).
+            self.up1 = nn.Sequential(
+                nn.ConvTranspose3d(in_dim, 192, kernel_size=2, stride=2),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+            )
+            self.skip_l6 = nn.Sequential(
+                nn.ConvTranspose3d(in_dim, 192, kernel_size=2, stride=2),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+            )
+            self.fuse1 = nn.Sequential(
+                nn.Conv3d(192 + 192, 192, kernel_size=3, padding=1),
+                nn.GroupNorm(16, 192),
+                nn.GELU(),
+            )
+
+            # Stage 2: 16³ -> 32³ (identical to multiscale FPN).
+            self.up2 = nn.Sequential(
+                nn.ConvTranspose3d(192, 96, kernel_size=2, stride=2),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+            )
+            self.skip_l4 = nn.Sequential(
+                nn.ConvTranspose3d(in_dim, 96, kernel_size=4, stride=4),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+            )
+            self.fuse2 = nn.Sequential(
+                nn.Conv3d(96 + 96, 96, kernel_size=3, padding=1),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+            )
+
+            # Stage 3: 32³ -> 64³ with stem_64 fusion (48 + 48 + 32 -> 48).
+            self.up3 = nn.Sequential(
+                nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+            )
+            self.skip_l2 = nn.Sequential(
+                nn.ConvTranspose3d(in_dim, 96, kernel_size=4, stride=4),
+                nn.GroupNorm(8, 96),
+                nn.GELU(),
+                nn.ConvTranspose3d(96, 48, kernel_size=2, stride=2),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+            )
+            self.fuse3 = nn.Sequential(
+                nn.Conv3d(48 + 48 + 32, 48, kernel_size=3, padding=1),
+                nn.GroupNorm(4, 48),
+                nn.GELU(),
+            )
+
+        # Stage 4: 64³ -> 128³ with stem_128 fusion (24 + 16 -> 24).
         self.up4 = nn.Sequential(
             nn.ConvTranspose3d(48, 24, kernel_size=2, stride=2),
             nn.GroupNorm(4, 24),
