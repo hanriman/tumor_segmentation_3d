@@ -76,7 +76,7 @@ Outputs are exported as self-contained zip archives:
 
 ## 5. Execution on Google Colab (NVIDIA A100 SXM4)
 
-For large-scale self-supervised pre-training ($8^3 = 512$ token grid) with full batch capacity ($B=16$) and regularizer schedule annealing, use the dedicated notebook:
+For high-resolution self-supervised pre-training ($8^3$ voxel patch size $\to$ $16^3 = 4,096$ token grid) with full batch capacity ($B=16$) and regularizer schedule annealing, use the dedicated notebook:
 `notebooks/colab_a100_visreg_pretrain.ipynb`.
 
 ### 5.1 Why the Colab Web UI?
@@ -110,7 +110,7 @@ For large-scale self-supervised pre-training ($8^3 = 512$ token grid) with full 
          --output_dir /content/outputs/visreg_jepa_a100 \
          --experiment_config configs/experiment/colab_a100_pretrain.yaml
      ```
-   - Features: $B=16$, AMP FP16, Option B Anisotropic Target Masking Jitter (97 tokens across 6 cuboids), and Cosine Regularizer Annealing (15 warmup epochs, min scale 0.10).
+   - Features: High-resolution $8^3$ voxel patch size ($16^3 = 4,096$ token grid), $B=16$, AMP FP16, Option B Anisotropic Target Masking Jitter (776 tokens across 6 cuboids preserving identical physical volume), and Cosine Regularizer Annealing (15 warmup epochs, min scale 0.10).
 7. **Diagnostics & Drive Mirroring**:
    - Executes `scripts/diagnose_visreg_3d.py` to plot Effective Rank, Cosine Similarity, and Feature Variance curves.
    - Automatically synchronizes all weights and metrics to Google Drive.

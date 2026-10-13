@@ -118,3 +118,8 @@ $$\mathcal{L}_{\text{VisReg}} = \lambda_{\text{c}} \frac{\|\mu\|_2^2}{D_{\text{p
 ### 5.4 Regularizer Schedule Annealing ($\lambda_{\text{reg}}(t)$)
 $$\lambda_{\text{reg}}(t) = \begin{cases} 1.0 & t \le T_{\text{warmup}} \\ 0.10 + 0.90 \times \frac{1}{2} \left(1 + \cos\left(\frac{t - T_{\text{warmup}}}{T_{\text{max}} - T_{\text{warmup}}} \pi\right)\right) & t > T_{\text{warmup}} \end{cases}$$
 With $T_{\text{warmup}} = 15$ epochs. Allows strong anti-collapse forces early, relaxing them late so the predictor focuses on anatomical prediction.
+
+### 5.5 Learning Rate Schedule ($\eta(t)$)
+$$\eta(t) = \begin{cases} \eta_{\text{base}} \times \frac{t}{T_{\text{lr\_warmup}}} & t \le T_{\text{lr\_warmup}} \\ \eta_{\text{min}} + \frac{1}{2}(\eta_{\text{base}} - \eta_{\text{min}})\left(1 + \cos\left(\frac{t - T_{\text{lr\_warmup}}}{T_{\text{max}} - T_{\text{lr\_warmup}}} \pi\right)\right) & t > T_{\text{lr\_warmup}} \end{cases}$$
+With $\eta_{\text{base}} = 5 \times 10^{-4}$, $\eta_{\text{min}} = 1 \times 10^{-5}$, and $T_{\text{lr\_warmup}} = 10$ epochs. Linearly warms up across the first 10 epochs to prevent early attention divergence, followed by cosine annealing decay down to $\eta_{\text{min}}$ over the remaining 90 epochs.
+

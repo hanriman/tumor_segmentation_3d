@@ -140,6 +140,13 @@ def main():
         f"Starting 3D JEPA Pre-training: Model={args.model_type}, Device={device}, AMP={args.amp}"
     )
 
+    spatial_shape = tuple(getattr(args, "spatial_shape", (128, 128, 128)))
+    patch_size = tuple(getattr(args, "patch_size", (16, 16, 16)))
+    computed_grid_size = tuple(s // p for s, p in zip(spatial_shape, patch_size))
+    grid_size = getattr(args, "grid_size", computed_grid_size)
+    if isinstance(grid_size, list):
+        grid_size = tuple(grid_size)
+
     # Initialize 3D Data Pipeline with config parameters
     target_cuboid_sizes = getattr(args, "target_cuboid_sizes", None)
     if isinstance(target_cuboid_sizes, list):
@@ -148,9 +155,22 @@ def main():
     if isinstance(target_cuboid_size, list):
         target_cuboid_size = tuple(int(x) for x in target_cuboid_size)
     num_target_cuboids = getattr(args, "num_target_cuboids", None)
-    grid_size = getattr(args, "grid_size", (8, 8, 8))
-    if isinstance(grid_size, list):
-        grid_size = tuple(grid_size)
+
+    # Scale context tokens proportionally (37.5% of total tokens) if not explicitly set
+    total_tokens = grid_size[0] * grid_size[1] * grid_size[2]
+    default_context_tokens = int(0.375 * total_tokens)
+    context_num_patches = getattr(args, "context_num_patches", default_context_tokens)
+
+    # If grid is (16, 16, 16) and target cuboids not set, use scaled Option B cuboids (776 tokens)
+    if grid_size == (16, 16, 16) and target_cuboid_sizes is None and target_cuboid_size is None:
+        target_cuboid_sizes = (
+            (6, 6, 6),
+            (4, 6, 6),
+            (6, 4, 6),
+            (6, 6, 4),
+            (4, 4, 4),
+            (4, 4, 4),
+        )
 
     masking_tf = JEPAMaskingTransform3D(
         grid_size=grid_size,
@@ -158,7 +178,7 @@ def main():
         target_cuboid_size=target_cuboid_size,
         target_cuboid_sizes=target_cuboid_sizes,
         max_target_overlap=getattr(args, "max_target_overlap", 0.0),
-        context_num_patches=getattr(args, "context_num_patches", 192),
+        context_num_patches=context_num_patches,
         connectivity=getattr(args, "context_connectivity", getattr(args, "connectivity", 26)),
     )
     aug_tf = VolumetricAugmentations3D(

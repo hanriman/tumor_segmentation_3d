@@ -22,7 +22,7 @@ To ensure mathematical rigor, benchmark reproducibility, and peer-review defensi
   ┌──────────────────────────────────────────────┐
   │ A. Option B 3D Target Aspect-Ratio Jitter    │
   │ B. FIFO Token Memory Queue (K=128 patients)  │
-  │ C. Cosine Regularizer Annealing (1.0 -> 0.1) │
+  │ C. Dual Cosine Schedulers (LR & Reg Scale)   │
   └──────────────────────────────────────────────┘
 ```
 
@@ -118,6 +118,22 @@ $$\lambda_{\text{reg}}(t) = \begin{cases} 1.0, & t \le T_{\text{warmup}} \\ 0.10
 
 - **Warmup Phase ($t \le 15$ epochs)**: Full strength ($\lambda_{\text{reg}} = 1.0$) rapidly pushes representations away from the trivial constant collapse basin.
 - **Annealing Phase ($t > 15$ epochs)**: Smooth cosine decay down to $\lambda_{\text{min}} = 0.10$, allowing the predictor to refine fine-grained anatomical representations without excessive regularizer penalty.
+
+---
+
+### 3.4 Upgrade D: Dual Schedule Synergy (Learning Rate Warmup & Cosine Decay)
+
+#### The Optimization Dynamics
+Pre-training 3D Vision Transformers on volumetric MRI with optimal transport regularizers presents dual optimization challenges: early attention gradient instability and late-stage regularizer interference. To resolve both, the training pipeline pairs two synchronized schedules:
+
+1. **Learning Rate Schedule with Linear Warmup**:
+   $$\eta(t) = \begin{cases} \eta_{\text{base}} \times \frac{t}{T_{\text{lr\_warmup}}}, & t \le T_{\text{lr\_warmup}} \\ \eta_{\text{min}} + \frac{1}{2}(\eta_{\text{base}} - \eta_{\text{min}})\left(1 + \cos\left(\frac{t - T_{\text{lr\_warmup}}}{T_{\text{max}} - T_{\text{lr\_warmup}}} \pi\right)\right), & t > T_{\text{lr\_warmup}} \end{cases}$$
+   With $\eta_{\text{base}} = 5 \times 10^{-4}$, $\eta_{\text{min}} = 1 \times 10^{-5}$, and $T_{\text{lr\_warmup}} = 10$ epochs (defaulting to $\max(1, T_{\text{max}} / 10)$).
+
+2. **Synergistic Phasing Across Training Epochs**:
+   - **Phase 1 (Epochs 1–10: Gradient Stabilization & Dispersal)**: $\eta(t)$ ramps up linearly while $\lambda_{\text{reg}} = 1.0$. The low early learning rate prevents self-attention divergence, while maximal regularizer forces actively repel token clusters outward across the latent hypersphere.
+   - **Phase 2 (Epochs 11–15: Latent Geometry Stabilization)**: $\eta(t)$ begins its cosine decay while $\lambda_{\text{reg}}$ remains clamped at $1.0$, allowing the backbone to consolidate the high-dimensional latent manifold before relaxation.
+   - **Phase 3 (Epochs 16–100: Asymptotic Predictor Convergence)**: Both $\eta(t)$ and $\lambda_{\text{reg}}(t)$ anneal via smooth cosine decay toward their floors ($\eta_{\text{min}} = 1 \times 10^{-5}$, $\lambda_{\text{min}} = 0.10$). As parameter updates become subtle, the predictor refines complex anatomical boundaries without fighting strong regularizer gradient repulsion.
 
 ---
 

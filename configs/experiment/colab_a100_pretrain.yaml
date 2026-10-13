@@ -1,4 +1,8 @@
 # 3D Self-Supervised JEPA Pre-training Schedule for NVIDIA A100 (Google Colab)
+# High-Resolution 8^3 Patch Size (16^3 = 4,096 Token Grid for A100 SXM 40/80 GB)
+patch_size: [8, 8, 8]
+spatial_shape: [128, 128, 128]
+
 epochs: 50
 warmup_epochs: 5
 batch_size: 16
@@ -17,3 +21,15 @@ pin_memory: true
 # Upgrades A & C: Regularizer Annealing Schedule
 reg_warmup_epochs: 15
 reg_min_scale: 0.10
+
+# Option B Anisotropic Target Masking Scaled for 16^3 Grid (4,096 tokens total)
+# Preserves identical physical anatomical volume (48mm macro cube, 32x48x48mm planar slabs, 32mm meso blocks)
+context_num_patches: 1536   # Exactly 37.5% of 4,096
+target_cuboid_sizes:
+  - [6, 6, 6]    # 216 tokens: Macro isotropic cube (48mm)
+  - [4, 6, 6]    # 144 tokens: Axial planar slab (32x48x48mm)
+  - [6, 4, 6]    # 144 tokens: Coronal planar slab (48x32x48mm)
+  - [6, 6, 4]    # 144 tokens: Sagittal planar slab (48x48x32mm)
+  - [4, 4, 4]    #  64 tokens: Regional meso cube (32mm)
+  - [4, 4, 4]    #  64 tokens: Regional meso cube (32mm)
+# Total target tokens: 776 tokens (18.95% of 4,096 tokens)
