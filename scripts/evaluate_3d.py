@@ -21,7 +21,6 @@ from tqdm import tqdm
 from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
     CONFIGS_DIR,
-    METRICS_DIR,
     OUTPUTS_DIR,
     ensure_directories,
     load_yaml_config,
@@ -32,7 +31,6 @@ from brats_jepa_3d.metrics import (
     brats_region_masks_from_target,
     compute_brats_regions_3d,
     compute_representation_collapse_metrics,
-    compute_volumetric_metrics_3d,
 )
 from brats_jepa_3d.models import (
     BraTS3DnnUNet,
@@ -151,8 +149,7 @@ def benchmark_model(
     voxel_spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
 ) -> dict[str, float]:
     model.eval()
-    dices, ious, hd95s, latencies = [], [], [], []
-    dices_tumor, ious_tumor, hd95s_tumor = [], [], []
+    latencies: list[float] = []
     region_acc: dict[str, dict[str, list]] | None = None
 
     with torch.no_grad():

@@ -88,15 +88,13 @@ thesis_3d/
 │   ├── dataset/
 │   │   └── brats3d.yaml          # Grid geometry (128^3), patch size (16^3), modalities
 │   ├── model/
-│   │   ├── ijepa_3d.yaml         # 3D I-JEPA architecture parameters
 │   │   ├── sigreg_jepa_3d.yaml   # 3D SigReg JEPA + Epps-Pulley parameters
 │   │   ├── visreg_jepa_3d.yaml   # 3D VisReg JEPA + Sliced-Wasserstein parameters
 │   │   ├── unet_3d.yaml          # 3D Residual UNet parameters
 │   │   └── nnunet_3d.yaml        # 3D DynUNet + Deep Supervision parameters
 │   └── experiment/
-│       ├── pretrain_50ep.yaml    # 3D SSL pre-training schedule
-│       ├── colab_a100_pretrain.yaml # NVIDIA A100 SSL pre-training schedule (B=16, reg annealing)
-│       └── finetune_30ep.yaml    # 3D downstream fine-tuning schedule
+│       ├── pretrain.yaml         # 3D SSL pre-training schedule
+│       └── finetune.yaml         # 3D downstream fine-tuning schedule
 │
 ├── src/
 │   └── brats_jepa_3d/            # Fully standalone Python package
@@ -109,14 +107,12 @@ thesis_3d/
 │       ├── models/
 │       │   ├── vision_transformer_3d.py # PatchEmbed3D + 3D Sincos Pos + ViTEncoder3D
 │       │   ├── predictor_3d.py          # JEPAPredictor3D (4 layers, self-attention)
-│       │   ├── ijepa_3d.py              # Dual-encoder with EMA teacher
 │       │   ├── sigreg_jepa_3d.py        # Single-encoder + Projector MLP (384 -> 1024 -> 128)
 │       │   ├── visreg_jepa_3d.py        # Single-encoder + Projector MLP
 │       │   ├── segmentation_head_3d.py  # Bottleneck, Multi-Scale FPN & Hybrid UNETR Decoders (native 128³/64³ stem)
 │       │   ├── unet_3d.py               # 3D Residual UNet (MONAI) + ds1/ds2/ds3 deep-supervision heads
 │       │   └── nnunet_3d.py             # 3D DynUNet with Deep Supervision (MONAI)
 │       ├── losses/
-│       │   ├── ijepa_loss.py            # Latent Smooth L1 on LayerNormed detached targets
 │       │   ├── sigreg_loss.py           # Epps-Pulley Gaussianity test (scale factor N, raw 1D rays)
 │       │   ├── visreg_loss.py           # Decoupled Center, Scale, Shape (SWD, stop-grad sigma)
 │       │   ├── dice_bce_loss_3d.py      # Combined Volumetric 3D Dice + Cross-Entropy (multi-class & binary)

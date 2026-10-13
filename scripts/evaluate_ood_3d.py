@@ -24,7 +24,6 @@ from torch.utils.data import DataLoader
 from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
     CONFIGS_DIR,
-    METRICS_DIR,
     OUTPUTS_DIR,
     ensure_directories,
     get_dataset_dir,
@@ -35,10 +34,7 @@ from brats_jepa_3d.data import (
     apply_b1_bias_field_3d,
     apply_rician_noise_3d,
 )
-from brats_jepa_3d.metrics import (
-    compute_brats_regions_3d,
-    compute_volumetric_metrics_3d,
-)
+from brats_jepa_3d.metrics import compute_brats_regions_3d
 from brats_jepa_3d.models import (
     BraTS3DnnUNet,
     BraTS3DUNet,
@@ -50,10 +46,9 @@ from brats_jepa_3d.utils import (
     dataset_fingerprint,
     get_autocast_context,
     get_device,
-    tta_predict_logits,
     set_seed,
     setup_logger,
-    sort_checkpoints_by_epoch,
+    tta_predict_logits,
 )
 
 

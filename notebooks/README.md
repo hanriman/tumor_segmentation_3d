@@ -16,7 +16,7 @@ tables with legacy v1 binary whole-tumor results.
 | `06_vit_unetr_hybrid_ablation_3d.ipynb` | From-scratch ViT + Hybrid UNETR ablation (random initialization control). |
 | `07_finetune_visreg_multiscale_3d.ipynb` | VisReg + Multi-Scale FPN downstream fine-tuning on shared SSL encoder. |
 | `08_finetune_visreg_unetr_3d.ipynb` | VisReg + Hybrid UNETR downstream fine-tuning on shared SSL encoder. |
-| `colab_a100_visreg_pretrain.ipynb` | Dedicated NVIDIA A100 (Google Colab Web UI) 50-epoch pre-training with private Kaggle API download and Google Drive checkpoint persistence. |
+| `colab_a100_visreg_pretrain.ipynb` | Dedicated NVIDIA A100 (Google Colab Web UI) high-resolution 8³ voxel patch pre-training with private Kaggle API download and Google Drive checkpoint persistence. |
 
 
 ## Battery reporting (v2 regions protocol)

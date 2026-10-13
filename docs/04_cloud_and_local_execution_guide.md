@@ -101,14 +101,19 @@ For high-resolution self-supervised pre-training ($8^3$ voxel patch size $\to$ $
      ```bash
      python scripts/train_jepa_3d.py --model_type visreg_jepa --smoke_test --reg_warmup_epochs 2 --reg_min_scale 0.10
      ```
-6. **50-Epoch Production Training**:
-   - Executes using the tuned A100 configuration ([`configs/experiment/colab_a100_pretrain.yaml`](../configs/experiment/colab_a100_pretrain.yaml)):
+6. **Production Pre-training**:
+   - Executes with explicit A100 configuration arguments matching the Kaggle suite:
      ```bash
      python scripts/train_jepa_3d.py \
          --model_type visreg_jepa \
          --data_dir /content/data \
          --output_dir /content/outputs/visreg_jepa_a100 \
-         --experiment_config configs/experiment/colab_a100_pretrain.yaml
+         --patch_size 8 8 8 \
+         --batch_size 16 \
+         --epochs 50 \
+         --reg_warmup_epochs 15 \
+         --reg_min_scale 0.10 \
+         --amp
      ```
    - Features: High-resolution $8^3$ voxel patch size ($16^3 = 4,096$ token grid), $B=16$, AMP FP16, Option B Anisotropic Target Masking Jitter (776 tokens across 6 cuboids preserving identical physical volume), and Dual Cosine Schedulers (5-epoch linear warmup learning rate schedule $5 \times 10^{-4} \to 1 \times 10^{-5}$ and 15-epoch regularizer annealing $1.0 \to 0.10$).
 7. **Diagnostics & Drive Mirroring**:

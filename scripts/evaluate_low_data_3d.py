@@ -16,7 +16,6 @@ from torch.utils.data import DataLoader
 from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
     CONFIGS_DIR,
-    METRICS_DIR,
     OUTPUTS_DIR,
     ensure_directories,
     get_dataset_dir,
@@ -24,10 +23,7 @@ from brats_jepa_3d.config import (
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
 from brats_jepa_3d.losses import build_segmentation_criterion, resolve_seg_loss_type
-from brats_jepa_3d.metrics import (
-    compute_brats_regions_3d,
-    compute_volumetric_metrics_3d,
-)
+from brats_jepa_3d.metrics import compute_brats_regions_3d
 from brats_jepa_3d.models import BraTS3DnnUNet, BraTS3DUNet, JEPASegmentationModel3D
 from brats_jepa_3d.utils import (
     check_pool_match,
@@ -134,10 +130,8 @@ def train_and_eval(
     tta: bool = False,
     include_background: bool | None = None,
 ) -> dict[str, float]:
-    """Trains on the fraction loader, then scores the test set.
-
-    Returns {"mean": dice} for binary (C=1) models (legacy v1 shape), else
-    per-region {"WT", "TC", "ET", "mean"} macro Dice (nan-aware over samples;
+    """Trains on the fraction loader, then scores the test set across canonical BraTS regions.
+    Returns per-region {"WT", "TC", "ET", "mean"} macro Dice (nan-aware over samples;
     ET-free volumes score 1.0 when correctly empty, matching evaluate_3d).
     "mean" is the average of the three regions for tier comparability.
     """
@@ -462,18 +456,13 @@ def main():
                 include_background=getattr(args, "include_background", None),
             )
             dname = _display_name(name)
-            if set(scores) == {"mean"}:
-                # Binary legacy: single column as before (v1 WT-only).
-                logger.info(f"{name} ({frac * 100:.1f}% labels) -> Test Dice: {scores['mean'] * 100:.2f}%")
-                row[dname] = f"{scores['mean'] * 100:.2f}%"
-            else:
-                # v2 regions protocol: one column per region + mean.
-                logger.info(
-                    f"{name} ({frac * 100:.1f}% labels) -> "
-                    f"WT {scores['WT'] * 100:.2f}% / TC {scores['TC'] * 100:.2f}% / "
-                    f"ET {scores['ET'] * 100:.2f}% (mean {scores['mean'] * 100:.2f}%)")
-                for r in ("WT", "TC", "ET", "mean"):
-                    row[f"{dname} [{r}]"] = f"{scores[r] * 100:.2f}%"
+            logger.info(
+                f"{name} ({frac * 100:.1f}% labels) -> "
+                f"WT {scores['WT'] * 100:.2f}% / TC {scores['TC'] * 100:.2f}% / "
+                f"ET {scores['ET'] * 100:.2f}% (mean {scores['mean'] * 100:.2f}%)"
+            )
+            for r in ("WT", "TC", "ET", "mean"):
+                row[f"{dname} [{r}]"] = f"{scores[r] * 100:.2f}%"
             del m
             gc.collect()
             if device.type == "cuda":

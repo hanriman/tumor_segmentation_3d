@@ -40,8 +40,6 @@ def parse_dice_value(val: Any) -> float:
     Unparseable / missing values return NaN so they sort last and never
     outrank real measurements.
     """
-    import math
-
     if val is None:
         return float("nan")
     try:

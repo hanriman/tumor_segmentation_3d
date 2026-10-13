@@ -15,9 +15,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from brats_jepa_3d.config import (
-    CHECKPOINTS_DIR,
     CONFIGS_DIR,
-    LOGS_DIR,
     OUTPUTS_DIR,
     ensure_directories,
     get_dataset_dir,
@@ -100,6 +98,13 @@ def parse_args():
     parser.add_argument(
         "--smoke_test", action="store_true", help="Run 1 epoch with 2 batches for fast verification"
     )
+    parser.add_argument(
+        "--patch_size",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Voxel patch size (e.g. 8 8 8 for high-res A100 or 16 16 16 for standard, default: from config or 16 16 16)",
+    )
     # Cosine Regularizer Annealing (Wu et al., 2026)
     parser.add_argument(
         "--reg_warmup_epochs",
@@ -146,7 +151,11 @@ def main():
     if Path(model_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(model_cfg_path), args)
 
-    exp_cfg_path = args.exp_config or (CONFIGS_DIR / "experiment" / "pretrain_50ep.yaml")
+    exp_cfg_path = args.exp_config or (CONFIGS_DIR / "experiment" / "pretrain.yaml")
+    if not Path(exp_cfg_path).exists():
+        legacy_exp = CONFIGS_DIR / "experiment" / "pretrain_50ep.yaml"
+        if legacy_exp.exists():
+            exp_cfg_path = legacy_exp
     if Path(exp_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(exp_cfg_path), args)
 
@@ -162,7 +171,13 @@ def main():
     )
 
     spatial_shape = tuple(getattr(args, "spatial_shape", (128, 128, 128)))
-    patch_size = tuple(getattr(args, "patch_size", (16, 16, 16)))
+    raw_patch = getattr(args, "patch_size", None) or (16, 16, 16)
+    if isinstance(raw_patch, int):
+        patch_size = (raw_patch, raw_patch, raw_patch)
+    elif len(raw_patch) == 1:
+        patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
+    else:
+        patch_size = tuple(int(x) for x in raw_patch)
     computed_grid_size = tuple(s // p for s, p in zip(spatial_shape, patch_size))
     grid_size = getattr(args, "grid_size", computed_grid_size)
     if isinstance(grid_size, list):
@@ -278,8 +293,6 @@ def main():
         f"Loaded {len(train_dataset)} training volumes and {len(val_dataset)} validation volumes."
     )
 
-    spatial_shape = tuple(getattr(args, "spatial_shape", (128, 128, 128)))
-    patch_size = tuple(getattr(args, "patch_size", (16, 16, 16)))
     in_channels = getattr(args, "in_channels", 4)
     embed_dim = getattr(args, "embed_dim", 384)
     encoder_depth = getattr(args, "encoder_depth", 8)

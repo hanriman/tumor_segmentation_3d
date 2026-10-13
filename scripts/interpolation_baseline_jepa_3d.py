@@ -40,24 +40,20 @@ from brats_jepa_3d.metrics.probing_metrics import (  # noqa: E402
 )
 from brats_jepa_3d.models.visreg_jepa_3d import VisRegJEPA3D  # noqa: E402
 
+_canonical_ckpt = PROJECT_ROOT / "outputs/checkpoints/visreg_jepa_3d_best.pt"
 _mr_ckpt = (
     PROJECT_ROOT
     / "outputs/multiregion/visreg_pretrain_outputs"
     / "checkpoints/visreg_jepa_3d_best.pt"
 )
-_legacy_ckpt = (
-    PROJECT_ROOT
-    / "outputs/archive/experiments/v1_fulldata_tumor_vs_healthy/visreg_pretrain_outputs"
-    / "checkpoints/visreg_jepa_3d_best.pt"
-)
-V1_PRETRAIN_CKPT = _mr_ckpt if _mr_ckpt.exists() else _legacy_ckpt
+DEFAULT_PRETRAIN_CKPT = _canonical_ckpt if _canonical_ckpt.exists() else _mr_ckpt
 GRID = (8, 8, 8)
 PATCH = 16
 
 
 def parse_args():
     p = argparse.ArgumentParser(description="JEPA vs interpolation diagnostic")
-    p.add_argument("--checkpoint", type=str, default=str(V1_PRETRAIN_CKPT))
+    p.add_argument("--checkpoint", type=str, default=str(DEFAULT_PRETRAIN_CKPT))
     p.add_argument("--n_vols", type=int, default=24)
     p.add_argument("--masks_per_vol", type=int, default=2)
     p.add_argument("--seed", type=int, default=0)

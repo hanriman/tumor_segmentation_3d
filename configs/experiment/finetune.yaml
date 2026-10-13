@@ -1,4 +1,4 @@
-# 3D Downstream Volumetric Fine-tuning Schedule
+# 3D Downstream Volumetric Fine-tuning Schedule (Canonical: 30 epochs, override via CLI --epochs)
 epochs: 30
 warmup_epochs: 3
 batch_size: 2

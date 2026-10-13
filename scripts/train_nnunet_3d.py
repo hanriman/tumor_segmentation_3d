@@ -13,9 +13,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from brats_jepa_3d.config import (
-    CHECKPOINTS_DIR,
     CONFIGS_DIR,
-    LOGS_DIR,
     OUTPUTS_DIR,
     ensure_directories,
     load_yaml_config,
@@ -23,7 +21,7 @@ from brats_jepa_3d.config import (
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
 from brats_jepa_3d.losses import build_segmentation_criterion, resolve_seg_loss_type
-from brats_jepa_3d.metrics import compute_volumetric_metrics_3d, validation_dice_iou
+from brats_jepa_3d.metrics import validation_dice_iou
 from brats_jepa_3d.models import BraTS3DnnUNet
 from brats_jepa_3d.utils import (
     MetricTracker,
@@ -162,7 +160,11 @@ def main():
     if Path(dataset_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(dataset_cfg_path), args)
 
-    exp_cfg_path = args.exp_config or (CONFIGS_DIR / "experiment" / "finetune_30ep.yaml")
+    exp_cfg_path = args.exp_config or (CONFIGS_DIR / "experiment" / "finetune.yaml")
+    if not Path(exp_cfg_path).exists():
+        legacy_exp = CONFIGS_DIR / "experiment" / "finetune_30ep.yaml"
+        if legacy_exp.exists():
+            exp_cfg_path = legacy_exp
     if Path(exp_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(exp_cfg_path), args)
 

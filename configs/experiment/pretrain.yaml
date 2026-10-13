@@ -1,0 +1,16 @@
+# 3D Self-Supervised JEPA Pre-training Schedule (Canonical: 100 epochs, override via CLI --epochs)
+epochs: 100
+warmup_epochs: 10
+batch_size: 4
+learning_rate: 0.0005
+min_lr: 0.00001
+weight_decay: 0.05
+reg_warmup_epochs: 15
+reg_min_scale: 0.10
+optimizer: "adamw"
+betas: [0.9, 0.95]
+clip_grad_norm: 1.0
+amp: true
+save_freq: 10
+eval_freq: 5
+

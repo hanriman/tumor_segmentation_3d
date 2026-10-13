@@ -16,7 +16,6 @@ from tqdm import tqdm
 from brats_jepa_3d.config import (
     CHECKPOINTS_DIR,
     CONFIGS_DIR,
-    LOGS_DIR,
     OUTPUTS_DIR,
     ensure_directories,
     get_dataset_dir,
@@ -25,7 +24,7 @@ from brats_jepa_3d.config import (
 )
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
 from brats_jepa_3d.losses import build_segmentation_criterion, resolve_seg_loss_type
-from brats_jepa_3d.metrics import compute_volumetric_metrics_3d, validation_dice_iou
+from brats_jepa_3d.metrics import validation_dice_iou
 from brats_jepa_3d.models import JEPASegmentationModel3D
 from brats_jepa_3d.utils import (
     MetricTracker,
@@ -138,6 +137,13 @@ def parse_args():
         default=5,
         help="Number of output segmentation classes (default: 5 for BraTS multi-region)",
     )
+    parser.add_argument(
+        "--patch_size",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Voxel patch size (e.g. 8 8 8 for high-res A100 or 16 16 16 for standard, default: from config or 16 16 16)",
+    )
     return parser.parse_args()
 
 
@@ -184,7 +190,11 @@ def main():
     if Path(dataset_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(dataset_cfg_path), args)
 
-    exp_cfg_path = args.exp_config or (CONFIGS_DIR / "experiment" / "finetune_30ep.yaml")
+    exp_cfg_path = args.exp_config or (CONFIGS_DIR / "experiment" / "finetune.yaml")
+    if not Path(exp_cfg_path).exists():
+        legacy_exp = CONFIGS_DIR / "experiment" / "finetune_30ep.yaml"
+        if legacy_exp.exists():
+            exp_cfg_path = legacy_exp
     if Path(exp_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(exp_cfg_path), args)
 
@@ -261,7 +271,13 @@ def main():
     )
 
     spatial_shape = tuple(getattr(args, "spatial_shape", (128, 128, 128)))
-    patch_size = tuple(getattr(args, "patch_size", (16, 16, 16)))
+    raw_patch = getattr(args, "patch_size", None) or (16, 16, 16)
+    if isinstance(raw_patch, int):
+        patch_size = (raw_patch, raw_patch, raw_patch)
+    elif len(raw_patch) == 1:
+        patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
+    else:
+        patch_size = tuple(int(x) for x in raw_patch)
     in_channels = getattr(args, "in_channels", 4)
     embed_dim = getattr(args, "embed_dim", 384)
     encoder_depth = getattr(args, "encoder_depth", 8)
