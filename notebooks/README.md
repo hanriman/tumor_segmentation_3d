@@ -16,19 +16,19 @@ tables with legacy v1 binary whole-tumor results.
 | `06_vit_unetr_hybrid_ablation_3d.ipynb` | From-scratch ViT + Hybrid UNETR ablation (random initialization control). |
 | `07_finetune_visreg_multiscale_3d.ipynb` | VisReg + Multi-Scale FPN downstream fine-tuning on shared SSL encoder (Kaggle T4, 16³ patch). |
 | `08_finetune_visreg_unetr_3d.ipynb` | VisReg + Hybrid UNETR downstream fine-tuning on shared SSL encoder (Kaggle T4, 16³ patch). |
-| `colab_a100_visreg_pretrain.ipynb` | Dedicated NVIDIA A100 (Google Colab Web UI) high-resolution 8³ voxel patch pre-training with private Kaggle API download and Google Drive checkpoint persistence. |
-| `colab_a100_finetune_visreg_multiscale.ipynb` | Dedicated NVIDIA A100 (Google Colab Web UI) VisReg + Multi-Scale FPN downstream fine-tuning and evaluation suite (Google Drive intake, 8³ or 16³ patch). |
-| `colab_a100_finetune_visreg_unetr.ipynb` | Dedicated NVIDIA A100 (Google Colab Web UI) VisReg + Hybrid UNETR downstream fine-tuning and evaluation suite (Google Drive intake, 8³ or 16³ patch). |
+| `colab_a100_visreg_pretrain.ipynb` | Google Colab GPU (L4 / A100 Web UI) high-resolution 8³ voxel patch pre-training with Google Drive checkpoint persistence. |
+| `colab_a100_finetune_visreg_multiscale.ipynb` | Google Colab GPU (L4 / A100 Web UI) VisReg + Multi-Scale FPN downstream fine-tuning and evaluation suite (Google Drive intake, 8³ or 16³ patch). |
+| `colab_a100_finetune_visreg_unetr.ipynb` | Google Colab GPU (L4 / A100 Web UI) VisReg + Hybrid UNETR downstream fine-tuning and evaluation suite (Google Drive intake, 8³ or 16³ patch). |
 
 
 ## Unified Configuration & Reproducibility Schema
 
-All notebooks (`01` through `08` and `colab_a100_visreg_pretrain`) share a standardized top-level configuration block (Cell 3 / Cell 6) eliminating hardcoded CLI magic numbers:
+All notebooks (`01` through `08` and the Colab GPU suite) share a standardized top-level configuration block (Cell 3 / Cell 6) eliminating hardcoded CLI magic numbers:
 
 ```python
 SEED = 42                 # Deterministic seed for weight init, augmentations, and data splits
-NUM_WORKERS = 4          # Parallel CPU data loading workers (Kaggle T4 provides 4 vCPUs)
-PATCH_SIZE = 16          # 16³ voxel patch (512 token grid) on T4; 8³ voxel patch (4096 token grid) on A100
+NUM_WORKERS = 4          # Parallel CPU data loading workers (Kaggle T4 / Colab GPU)
+PATCH_SIZE = 16          # 16³ voxel patch (512 token grid) on T4; 8³ voxel patch (4096 token grid) on Colab GPU (L4 / A100)
 BATCH_SIZE = 2           # Volumetric downstream batch size (nnU-Net: ~7.4 GB VRAM at B=2 with DS)
 EPOCHS = 30              # Supervised training / fine-tuning epochs (pre-training: 50–100)
 LOW_DATA_EPOCHS = 15     # Low-data label efficiency evaluation epochs
