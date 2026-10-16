@@ -283,14 +283,18 @@ def main():
             jepa_cfg_path = CONFIGS_DIR / "model" / f"{prefix}_3d.yaml"
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
-            dec_candidates, ms_candidates, all_candidates = [], [], []
+            ckpt = None
             for sdir in search_dirs:
                 if sdir.exists():
-                    dec_candidates.extend([p for p in sorted(sdir.glob(f"{prefix}*{args.decoder_type}*best.pt")) if "scratch" not in p.name.lower()])
-                    ms_candidates.extend([p for p in sorted(sdir.glob(f"{prefix}*multiscale*best.pt")) if "scratch" not in p.name.lower()])
-                    all_candidates.extend([p for p in sorted(sdir.glob(f"{prefix}*best.pt")) if "scratch" not in p.name.lower()])
-            candidates = dec_candidates or ms_candidates or all_candidates
-            ckpt = candidates[-1] if candidates else None
+                    cands = (
+                        [p for p in sorted(sdir.glob(f"{prefix}*{args.decoder_type}*best.pt")) if "scratch" not in p.name.lower()]
+                        or [p for p in sorted(sdir.glob(f"{prefix}*multiscale*best.pt")) if "scratch" not in p.name.lower()]
+                    )
+                    if cands:
+                        ckpt = cands[-1]
+                        break
+            if ckpt is None:
+                ckpt = checkpoints_dir / f"{prefix}_{args.decoder_type}_best.pt"
 
             ds_flag = False
             if ckpt and ckpt.exists():

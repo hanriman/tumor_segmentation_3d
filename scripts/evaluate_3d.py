@@ -368,35 +368,31 @@ def main():
             elif model_type == "nnunet_3d":
                 ckpt_file = next((d / "nnunet_3d_best.pt" for d in search_dirs if (d / "nnunet_3d_best.pt").exists()), checkpoints_dir / "nnunet_3d_best.pt")
             elif is_scratch:
-                scratch_ckpts = []
+                ckpt_file = None
                 for d in search_dirs:
                     if d.exists():
-                        scratch_ckpts.extend(sorted(d.glob(f"{model_type}_{decoder_type}_scratch_best.pt")) or sorted(d.glob(f"*{model_type}*scratch*best.pt")))
-                if scratch_ckpts:
-                    ckpt_file = scratch_ckpts[-1]
-                else:
+                        scratch_ckpts = (
+                            sorted(d.glob(f"{model_type}_{decoder_type}_scratch_best.pt"))
+                            or sorted(d.glob(f"*{model_type}*{decoder_type}*scratch*best.pt"))
+                            or sorted(d.glob(f"*{model_type}*scratch*best.pt"))
+                        )
+                        if scratch_ckpts:
+                            ckpt_file = scratch_ckpts[-1]
+                            break
+                if ckpt_file is None:
                     ckpt_file = checkpoints_dir / f"{model_type}_{decoder_type}_scratch_best.pt"
             else:
-                downstream_ckpts = []
-                pretrain_ckpts = []
+                ckpt_file = None
                 for d in search_dirs:
                     if d.exists():
-                        downstream_ckpts.extend([
-                            p for p in sorted(d.glob(f"{model_type}_{decoder_type}_best.pt"))
-                            if "scratch" not in p.name.lower()
-                        ] or [
-                            p for p in sorted(d.glob(f"{model_type}*best.pt"))
-                            if "scratch" not in p.name.lower()
-                        ])
-                        pretrain_ckpts.extend([
-                            p for p in sort_checkpoints_by_epoch(list(d.glob(f"{model_type}*epoch*.pt")))
-                            if "scratch" not in p.name.lower()
-                        ])
-                if downstream_ckpts:
-                    ckpt_file = downstream_ckpts[-1]
-                elif pretrain_ckpts:
-                    ckpt_file = pretrain_ckpts[-1]
-                else:
+                        downstream_ckpts = (
+                            [p for p in sorted(d.glob(f"{model_type}_{decoder_type}_best.pt")) if "scratch" not in p.name.lower()]
+                            or [p for p in sorted(d.glob(f"*{model_type}*{decoder_type}*best.pt")) if "scratch" not in p.name.lower()]
+                        )
+                        if downstream_ckpts:
+                            ckpt_file = downstream_ckpts[-1]
+                            break
+                if ckpt_file is None:
                     ckpt_file = checkpoints_dir / f"{model_type}_{decoder_type}_best.pt"
 
         if model_type == "unet_3d":
