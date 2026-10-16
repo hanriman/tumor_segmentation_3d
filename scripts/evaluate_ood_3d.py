@@ -200,7 +200,12 @@ def main():
 
     req_model = alias_map.get(args.model_type.lower(), args.model_type.lower())
     if args.from_scratch or req_model == "vit_scratch":
-        selected_models = [("3D ViT-FPN (From Scratch)", "vit_scratch")]
+        scratch_label = (
+            "3D ViT-UNETR (From Scratch)"
+            if args.decoder_type == "unetr_hybrid"
+            else "3D ViT-FPN (From Scratch)"
+        )
+        selected_models = [(scratch_label, "vit_scratch")]
     elif req_model != "all":
         selected_models = [m for m in all_models if m[1] == req_model]
         if not selected_models:
@@ -212,15 +217,19 @@ def main():
     search_dirs = get_checkpoint_search_dirs(checkpoints_dir)
 
     def get_model(name: str):
-        if name == "3D ViT-FPN (From Scratch)":
+        if "From Scratch" in name or name == "3D ViT-FPN (From Scratch)":
             jepa_cfg_path = CONFIGS_DIR / "model" / "visreg_jepa_3d.yaml"
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
 
             scratch_candidates = []
             for sdir in search_dirs:
                 if sdir.exists():
-                    scratch_candidates.extend(sorted(sdir.glob("*visreg*scratch*best.pt")) or sorted(sdir.glob("*scratch*best.pt")))
-            ckpt = scratch_candidates[-1] if scratch_candidates else (checkpoints_dir / "visreg_jepa_multiscale_scratch_best.pt")
+                    scratch_candidates.extend(
+                        sorted(sdir.glob(f"*{args.decoder_type}*scratch*best.pt"))
+                        or sorted(sdir.glob("*visreg*scratch*best.pt"))
+                        or sorted(sdir.glob("*scratch*best.pt"))
+                    )
+            ckpt = scratch_candidates[-1] if scratch_candidates else (checkpoints_dir / f"visreg_jepa_{args.decoder_type}_scratch_best.pt")
 
             if not ckpt.exists():
                 logger.warning(f"Checkpoint for {name} not found at {ckpt}. Skipping OOD evaluation.")

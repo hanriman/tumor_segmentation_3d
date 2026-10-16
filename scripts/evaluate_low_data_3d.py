@@ -289,7 +289,12 @@ def main():
 
     req_model = alias_map.get(args.model_type.lower(), args.model_type.lower())
     if args.from_scratch or req_model == "vit_scratch":
-        selected_models = [("3D ViT-FPN (From Scratch)", "vit_scratch")]
+        scratch_label = (
+            "3D ViT-UNETR (From Scratch)"
+            if args.decoder_type == "unetr_hybrid"
+            else "3D ViT-FPN (From Scratch)"
+        )
+        selected_models = [(scratch_label, "vit_scratch")]
     elif req_model != "all":
         selected_models = [m for m in all_models if m[1] == req_model]
         if not selected_models:
@@ -299,10 +304,10 @@ def main():
         selected_models = all_models
 
     def build_model(name: str):
-        if name == "3D ViT-FPN (From Scratch)":
+        if "From Scratch" in name or name == "3D ViT-FPN (From Scratch)":
             jepa_cfg_path = CONFIGS_DIR / "model" / "visreg_jepa_3d.yaml"
             jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
-            logger.info("Initializing 3D ViT-FPN from SCRATCH (random initialization, no pre-trained weights)")
+            logger.info(f"Initializing {name} from SCRATCH (random initialization, no pre-trained weights)")
             raw_patch = getattr(args, "patch_size", None)
             if raw_patch is not None:
                 if isinstance(raw_patch, int):
