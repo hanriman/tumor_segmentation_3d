@@ -8,9 +8,9 @@ import yaml
 # Root directory of thesis_3d
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Detect Cloud execution environments
-IN_KAGGLE = Path("/kaggle/working").exists() or Path("/kaggle/input").exists()
-IN_COLAB = "google.colab" in sys.modules or (Path("/content").exists() and not IN_KAGGLE)
+# Detect Cloud execution environments (Colab has /content, Kaggle has /kaggle without /content)
+IN_COLAB = "google.colab" in sys.modules or Path("/content").exists()
+IN_KAGGLE = not IN_COLAB and (Path("/kaggle/working").exists() or Path("/kaggle/input").exists())
 
 DEFAULT_NUM_WORKERS = int(
     os.environ.get(
