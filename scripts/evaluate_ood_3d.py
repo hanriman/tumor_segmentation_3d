@@ -467,6 +467,7 @@ def main():
                 f"{m_name} -> WT {scores['WT'] * 100:.2f}% / "
                 f"TC {scores['TC'] * 100:.2f}% / ET {scores['ET'] * 100:.2f}% "
                 f"(mean {scores['mean'] * 100:.2f}%)")
+            row[dname] = f"{scores['mean'] * 100:.2f}%"
             for r in ("WT", "TC", "ET", "mean"):
                 row[f"{dname} [{r}]"] = f"{scores[r] * 100:.2f}%"
         records.append(row)
