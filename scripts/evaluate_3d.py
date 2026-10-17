@@ -88,6 +88,12 @@ def parse_args():
         help="Flag indicating the model being evaluated was trained from scratch (no pre-training)",
     )
     parser.add_argument(
+        "--freeze_encoder",
+        action="store_true",
+        default=False,
+        help="Flag indicating the model was evaluated with a frozen encoder (probe)",
+    )
+    parser.add_argument(
         "--num_workers",
         type=int,
         default=2,
@@ -347,11 +353,24 @@ def main():
             or (args.checkpoint and "scratch" in Path(args.checkpoint).name.lower())
             or (args.model_type and args.model_type.lower() in ("vit_scratch", "scratch"))
         )
-        label = "3D ViT-FPN (From Scratch)" if (is_scratch and "JEPA" in orig_label) else orig_label
+        is_frozen = (
+            getattr(args, "freeze_encoder", False)
+            or (args.checkpoint and "frozen" in Path(args.checkpoint).name.lower())
+            or (args.model_type and args.model_type.lower() in ("vit_frozen", "frozen"))
+        )
+        if is_scratch and "JEPA" in orig_label:
+            label = "3D ViT-FPN (From Scratch)"
+        elif is_frozen and "JEPA" in orig_label:
+            label = f"{orig_label} [frozen]"
+        else:
+            label = orig_label
         # Decoder-aware labels: hybrid and multiscale rows must coexist in the
         # merged benchmark CSVs instead of overwriting each other by model name.
         if decoder_type and decoder_type != "multiscale" and "JEPA" in orig_label:
-            label = f"{label} [{decoder_type}]"
+            if "[frozen]" in label:
+                label = label.replace(" [frozen]", f" [{decoder_type}, frozen]")
+            else:
+                label = f"{label} [{decoder_type}]"
         logger.info(f"Evaluating: {label}")
 
         if args.checkpoint and len(models_to_evaluate) == 1:
@@ -381,13 +400,27 @@ def main():
                             break
                 if ckpt_file is None:
                     ckpt_file = checkpoints_dir / f"{model_type}_{decoder_type}_scratch_best.pt"
+            elif is_frozen:
+                ckpt_file = None
+                for d in search_dirs:
+                    if d.exists():
+                        frozen_ckpts = (
+                            sorted(d.glob(f"{model_type}_{decoder_type}_frozen_best.pt"))
+                            or sorted(d.glob(f"*{model_type}*{decoder_type}*frozen*best.pt"))
+                            or sorted(d.glob(f"*{model_type}*frozen*best.pt"))
+                        )
+                        if frozen_ckpts:
+                            ckpt_file = frozen_ckpts[-1]
+                            break
+                if ckpt_file is None:
+                    ckpt_file = checkpoints_dir / f"{model_type}_{decoder_type}_frozen_best.pt"
             else:
                 ckpt_file = None
                 for d in search_dirs:
                     if d.exists():
                         downstream_ckpts = (
-                            [p for p in sorted(d.glob(f"{model_type}_{decoder_type}_best.pt")) if "scratch" not in p.name.lower()]
-                            or [p for p in sorted(d.glob(f"*{model_type}*{decoder_type}*best.pt")) if "scratch" not in p.name.lower()]
+                            [p for p in sorted(d.glob(f"{model_type}_{decoder_type}_best.pt")) if not any(x in p.name.lower() for x in ("scratch", "frozen"))]
+                            or [p for p in sorted(d.glob(f"*{model_type}*{decoder_type}*best.pt")) if not any(x in p.name.lower() for x in ("scratch", "frozen"))]
                         )
                         if downstream_ckpts:
                             ckpt_file = downstream_ckpts[-1]

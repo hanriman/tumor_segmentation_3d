@@ -73,6 +73,12 @@ def parse_args():
         default=False,
         help="Evaluate 3D ViT-FPN trained from random initialization (no pre-trained checkpoint)",
     )
+    parser.add_argument(
+        "--freeze_encoder",
+        action="store_true",
+        default=False,
+        help="Evaluate 3D ViT model trained with a frozen encoder (probe)",
+    )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     parser.add_argument(
         "--decoder_type", type=str, default="multiscale",
@@ -195,6 +201,8 @@ def main():
         "nnunet_3d": "nnunet_3d",
         "scratch": "vit_scratch",
         "vit_scratch": "vit_scratch",
+        "frozen": "vit_frozen",
+        "vit_frozen": "vit_frozen",
         "all": "all",
     }
 
@@ -206,6 +214,13 @@ def main():
             else "3D ViT-FPN (From Scratch)"
         )
         selected_models = [(scratch_label, "vit_scratch")]
+    elif getattr(args, "freeze_encoder", False) or req_model == "vit_frozen":
+        frozen_label = (
+            "3D ViT-UNETR (Frozen)"
+            if args.decoder_type == "unetr_hybrid"
+            else "3D ViT-FPN (Frozen)"
+        )
+        selected_models = [(frozen_label, "vit_frozen")]
     elif req_model != "all":
         selected_models = [m for m in all_models if m[1] == req_model]
         if not selected_models:
@@ -274,6 +289,64 @@ def main():
             logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
             return m.to(device)
 
+        if "Frozen" in name or name in ("3D ViT-FPN (Frozen)", "3D ViT-UNETR (Frozen)"):
+            jepa_cfg_path = CONFIGS_DIR / "model" / "visreg_jepa_3d.yaml"
+            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
+
+            frozen_candidates = []
+            for sdir in search_dirs:
+                if sdir.exists():
+                    frozen_candidates.extend(
+                        sorted(sdir.glob(f"*{args.decoder_type}*frozen*best.pt"))
+                        or sorted(sdir.glob("*visreg*frozen*best.pt"))
+                        or sorted(sdir.glob("*frozen*best.pt"))
+                    )
+            ckpt = frozen_candidates[-1] if frozen_candidates else (checkpoints_dir / f"visreg_jepa_{args.decoder_type}_frozen_best.pt")
+
+            if not ckpt.exists():
+                logger.warning(f"Checkpoint for {name} not found at {ckpt}. Skipping OOD evaluation.")
+                return None
+
+            ds_flag = False
+            try:
+                sd_peek = torch.load(ckpt, map_location="cpu")
+                sd_peek = sd_peek.get("model_state_dict", sd_peek)
+                if any(k.startswith("decoder.ds") for k in sd_peek):
+                    ds_flag = True
+            except (KeyError, OSError, RuntimeError, AttributeError):
+                pass
+
+            raw_patch = getattr(args, "patch_size", None)
+            if raw_patch is not None:
+                if isinstance(raw_patch, int):
+                    patch_size = (raw_patch, raw_patch, raw_patch)
+                elif len(raw_patch) == 1:
+                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
+                else:
+                    patch_size = tuple(int(x) for x in raw_patch)
+            else:
+                patch_size = tuple(jepa_cfg.get("patch_size", (16, 16, 16)))
+
+            m = JEPASegmentationModel3D(
+                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
+                patch_size=patch_size,
+                in_channels=jepa_cfg.get("in_channels", 4),
+                embed_dim=jepa_cfg.get("embed_dim", 384),
+                encoder_depth=jepa_cfg.get("encoder_depth", 8),
+                num_heads=jepa_cfg.get("num_heads", 6),
+                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
+                decoder_type=args.decoder_type,
+                deep_supervision=ds_flag,
+                out_channels=jepa_cfg.get("out_channels", 5),
+                freeze_encoder=True,
+            )
+            sd = torch.load(ckpt, map_location=device)
+            sd = sd.get("model_state_dict", sd)
+            missing, _unexpected = load_downstream_state_dict(m, sd, name)
+            matched = [k for k in m.state_dict() if k not in missing]
+            logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
+            return m.to(device)
+
         jepa_prefixes = {
             "3D VisReg JEPA (FPN)": "visreg_jepa",
             "3D SigReg JEPA (FPN)": "sigreg_jepa",
@@ -287,8 +360,8 @@ def main():
             for sdir in search_dirs:
                 if sdir.exists():
                     cands = (
-                        [p for p in sorted(sdir.glob(f"{prefix}*{args.decoder_type}*best.pt")) if "scratch" not in p.name.lower()]
-                        or [p for p in sorted(sdir.glob(f"{prefix}*multiscale*best.pt")) if "scratch" not in p.name.lower()]
+                        [p for p in sorted(sdir.glob(f"{prefix}*{args.decoder_type}*best.pt")) if not any(x in p.name.lower() for x in ("scratch", "frozen"))]
+                        or [p for p in sorted(sdir.glob(f"{prefix}*multiscale*best.pt")) if not any(x in p.name.lower() for x in ("scratch", "frozen"))]
                     )
                     if cands:
                         ckpt = cands[-1]

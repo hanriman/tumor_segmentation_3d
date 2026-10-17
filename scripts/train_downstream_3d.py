@@ -492,7 +492,7 @@ def main():
             }
         )
 
-        suffix = "_scratch" if args.from_scratch else ""
+        suffix = "_scratch" if args.from_scratch else ("_frozen" if args.freeze_encoder else "")
         state_dict_to_save = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),

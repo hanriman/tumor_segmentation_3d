@@ -74,6 +74,12 @@ def parse_args():
         help="Evaluate 3D ViT-FPN trained from random initialization (no pre-trained checkpoint)",
     )
     parser.add_argument(
+        "--freeze_encoder",
+        action="store_true",
+        default=False,
+        help="Evaluate 3D ViT model trained with a frozen encoder (probe on low data)",
+    )
+    parser.add_argument(
         "--decoder_type", type=str, default="multiscale",
         choices=["multiscale", "bottleneck", "unetr_hybrid"],
     )
@@ -284,6 +290,8 @@ def main():
         "nnunet_3d": "nnunet_3d",
         "scratch": "vit_scratch",
         "vit_scratch": "vit_scratch",
+        "frozen": "vit_frozen",
+        "vit_frozen": "vit_frozen",
         "all": "all",
     }
 
@@ -295,6 +303,13 @@ def main():
             else "3D ViT-FPN (From Scratch)"
         )
         selected_models = [(scratch_label, "vit_scratch")]
+    elif getattr(args, "freeze_encoder", False) or req_model == "vit_frozen":
+        frozen_label = (
+            "3D ViT-UNETR (Frozen)"
+            if args.decoder_type == "unetr_hybrid"
+            else "3D ViT-FPN (Frozen)"
+        )
+        selected_models = [(frozen_label, "vit_frozen")]
     elif req_model != "all":
         selected_models = [m for m in all_models if m[1] == req_model]
         if not selected_models:
@@ -330,6 +345,73 @@ def main():
                 deep_supervision=args.deep_supervision,
                 out_channels=jepa_cfg.get("out_channels", 5),
             ).to(device), jepa_cfg.get("out_channels", 5)
+
+        if "Frozen" in name or name in ("3D ViT-FPN (Frozen)", "3D ViT-UNETR (Frozen)"):
+            prefix = "visreg_jepa"
+            jepa_cfg_path = CONFIGS_DIR / "model" / f"{prefix}_3d.yaml"
+            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
+
+            search_dirs = get_checkpoint_search_dirs(checkpoints_dir)
+            ssl_best_ckpts, ssl_epoch_ckpts, fallback_ckpts = [], [], []
+            for sdir in search_dirs:
+                if sdir.exists():
+                    ssl_best_ckpts.extend([p for p in sorted(sdir.glob(f"{prefix}*_3d_best.pt")) if not any(x in p.name.lower() for x in ("scratch", "frozen"))])
+                    ssl_epoch_ckpts.extend([p for p in sort_checkpoints_by_epoch(list(sdir.glob(f"{prefix}*_epoch_*.pt"))) if not any(x in p.name.lower() for x in ("scratch", "frozen"))])
+                    fallback_ckpts.extend([
+                        p
+                        for p in sorted(sdir.glob(f"{prefix}*.pt"))
+                        if not any(dec in p.name.lower() for dec in ("multiscale", "bottleneck", "unetr_hybrid", "hybrid", "downstream", "scratch", "frozen"))
+                    ])
+            if ssl_best_ckpts:
+                ckpt_path = ssl_best_ckpts[-1]
+            elif ssl_epoch_ckpts:
+                ckpt_path = ssl_epoch_ckpts[-1]
+            else:
+                ckpt_path = fallback_ckpts[-1] if fallback_ckpts else None
+
+            if not ckpt_path or not ckpt_path.exists():
+                logger.warning(
+                    f"No pre-trained SSL weights found for {name} ({prefix}_3d_best.pt / {prefix}*_epoch_*.pt). "
+                    f"Skipping evaluation."
+                )
+                return None
+
+            raw_patch = getattr(args, "patch_size", None)
+            if raw_patch is not None:
+                if isinstance(raw_patch, int):
+                    patch_size = (raw_patch, raw_patch, raw_patch)
+                elif len(raw_patch) == 1:
+                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
+                else:
+                    patch_size = tuple(int(x) for x in raw_patch)
+            else:
+                patch_size = tuple(jepa_cfg.get("patch_size", (16, 16, 16)))
+
+            m = JEPASegmentationModel3D(
+                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
+                patch_size=patch_size,
+                in_channels=jepa_cfg.get("in_channels", 4),
+                embed_dim=jepa_cfg.get("embed_dim", 384),
+                encoder_depth=jepa_cfg.get("encoder_depth", 8),
+                num_heads=jepa_cfg.get("num_heads", 6),
+                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
+                decoder_type=args.decoder_type,
+                deep_supervision=args.deep_supervision,
+                out_channels=jepa_cfg.get("out_channels", 5),
+                freeze_encoder=True,
+            )
+            n_classes = jepa_cfg.get("out_channels", 5)
+            ckpt = torch.load(ckpt_path, map_location=device)
+            check_pool_match(
+                ckpt.get("pool_fingerprint"),
+                dataset_fingerprint(resolved_data_dir or get_dataset_dir()),
+                f"low-data/{name}",
+            )
+            res = m.load_pretrained_encoder(ckpt)
+            logger.info(
+                f"Initialized {name} with frozen pre-trained encoder weights from: {ckpt_path.name} ({res['loaded_keys']} keys)"
+            )
+            return m.to(device), n_classes
 
         jepa_prefixes = {
             "3D VisReg JEPA (FPN)": "visreg_jepa",
