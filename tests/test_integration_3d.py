@@ -168,7 +168,12 @@ def test_evaluate_low_data_from_scratch():
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     assert "3D ViT-FPN (From Scratch)" in result.stderr or "3D ViT-FPN (From Scratch)" in result.stdout
-    assert "Initializing 3D ViT-FPN from SCRATCH" in result.stderr or "Initializing 3D ViT-FPN from SCRATCH" in result.stdout
+    assert (
+        "Initializing 3D ViT-FPN (From Scratch) from SCRATCH" in result.stderr
+        or "Initializing 3D ViT-FPN (From Scratch) from SCRATCH" in result.stdout
+        or "Initializing 3D ViT-FPN from SCRATCH" in result.stderr
+        or "Initializing 3D ViT-FPN from SCRATCH" in result.stdout
+    )
 
     summary_csv = Path("outputs/metrics/low_data_3d_summary.csv")
     assert summary_csv.exists()

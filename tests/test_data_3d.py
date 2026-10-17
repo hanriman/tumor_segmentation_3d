@@ -643,3 +643,48 @@ def test_16grid_masking_with_token_brain_frac():
     assert "context_tissue_mask" in out_mismatched
     assert len(out_mismatched["context_tissue_mask"]) == 1536
 
+
+def test_brats_3d_dataset_nested_stratified_subsampling(tmp_path):
+    """Verifies that fractional subsampling in BraTS3DDataset guarantees strict mathematical subset nesting:
+    S_{1%} ⊂ S_{5%} ⊂ S_{10%} ⊂ S_{25%} ⊂ S_{50%} ⊂ S_{100%}.
+    """
+    import pandas as pd
+
+    # Construct synthetic metadata with diverse strata
+    n_total = 200
+    np.random.seed(42)
+    df = pd.DataFrame({
+        "patient_id": [f"BraTS-GLI-{i:05d}-000" for i in range(n_total)],
+        "file_name": [f"case_{i:05d}.pt" for i in range(n_total)],
+        "split": ["train"] * n_total,
+        "tumor_quartile": np.random.choice([0, 1, 2, 3], size=n_total),
+        "has_et": np.random.choice([True, False], p=[0.8, 0.2], size=n_total),
+    })
+    meta_path = tmp_path / "metadata.csv"
+    df.to_csv(meta_path, index=False)
+
+    fractions = [0.01, 0.05, 0.10, 0.25, 0.50, 1.00]
+    subsets = {}
+    for frac in fractions:
+        ds = BraTS3DDataset(
+            data_dir=tmp_path,
+            split="train",
+            fraction=frac,
+            seed=42,
+        )
+        patient_ids = set(ds.df["patient_id"])
+        subsets[frac] = patient_ids
+        # Clean columns check
+        assert "_strata" not in ds.df.columns
+        assert "_pct" not in ds.df.columns
+
+    # Verify strict monotonic nesting: each smaller fraction is a proper subset of the next
+    for i in range(len(fractions) - 1):
+        f_small = fractions[i]
+        f_large = fractions[i + 1]
+        assert subsets[f_small].issubset(subsets[f_large]), (
+            f"Strict nesting violated: S_{f_small} is not a subset of S_{f_large}"
+        )
+        assert len(subsets[f_small]) <= len(subsets[f_large])
+
+

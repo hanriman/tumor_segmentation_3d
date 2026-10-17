@@ -44,7 +44,7 @@ def parse_args():
     parser.add_argument(
         "--fractions", nargs="+", type=float, default=[0.01, 0.05, 0.10, 0.25, 0.50, 1.00]
     )
-    parser.add_argument("--epochs", type=int, default=15)
+    parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
@@ -496,6 +496,7 @@ def main():
                 f"WT {scores['WT'] * 100:.2f}% / TC {scores['TC'] * 100:.2f}% / "
                 f"ET {scores['ET'] * 100:.2f}% (mean {scores['mean'] * 100:.2f}%)"
             )
+            row[dname] = f"{scores['mean'] * 100:.2f}%"
             for r in ("WT", "TC", "ET", "mean"):
                 row[f"{dname} [{r}]"] = f"{scores[r] * 100:.2f}%"
             del m

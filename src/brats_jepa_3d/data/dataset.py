@@ -67,9 +67,12 @@ class BraTS3DDataset(Dataset):
             df = df[df["split"] == split].reset_index(drop=True)
 
         # Fraction subsampling for Low-Data Label Efficiency Benchmark
-        # Technical Decision: In low-data regimes (1% to 50% labels), unstratified random sampling
-        # risks sampling bias (e.g. over-representing micro-lesions or empty volumes). Stratifying
-        # on tumor_quartile and ET presence guarantees that every labeled fraction preserves the cohort's lesion size distribution.
+        # Technical Decision: In low-data regimes (1% to 50% labels), unstratified or un-nested random sampling
+        # risks sampling bias and subset instability (e.g. 10% draw lacking key cases present in the 5% draw).
+        # We enforce strictly nested stratified subsampling:
+        # S_{1%} ⊂ S_{5%} ⊂ S_{10%} ⊂ S_{25%} ⊂ S_{50%} ⊂ S_{100%}.
+        # Each stratum is deterministically permuted, mapped to relative rank percentiles, and interleaved.
+        # This guarantees mathematical subset inclusion and balanced tumor quartile & ET distributions.
         if fraction < 1.0 and len(df) > 0:
             n_samples = max(1, int(np.ceil(len(df) * fraction)))
             strata_col = None
@@ -77,25 +80,25 @@ class BraTS3DDataset(Dataset):
                 strata_col = "tumor_quartile"
                 if "has_et" in df.columns and df["has_et"].nunique() > 1:
                     composite = df["tumor_quartile"].astype(str) + "_" + df["has_et"].astype(str)
-                    if composite.value_counts().min() >= 2 and n_samples >= composite.nunique():
-                        df["_strata"] = composite
-                        strata_col = "_strata"
+                    df["_strata"] = composite
+                    strata_col = "_strata"
 
-            if strata_col is not None and n_samples >= df[strata_col].nunique():
-                try:
-                    from sklearn.model_selection import train_test_split
+            if strata_col is not None and df[strata_col].nunique() > 1:
+                shuffled_parts = []
+                for _, group in df.groupby(strata_col, sort=True):
+                    g_shuffled = group.sample(frac=1.0, random_state=seed).copy()
+                    g_shuffled["_pct"] = (np.arange(len(g_shuffled)) + 0.5) / len(g_shuffled)
+                    shuffled_parts.append(g_shuffled)
 
-                    sampled_df, _ = train_test_split(
-                        df,
-                        train_size=n_samples,
-                        random_state=seed,
-                        stratify=df[strata_col],
-                    )
-                    df = sampled_df.reset_index(drop=True)
-                except (ValueError, KeyError, TypeError, ImportError):
-                    df = df.sample(n=min(len(df), n_samples), random_state=seed).reset_index(drop=True)
+                ranked = pd.concat(shuffled_parts).sort_values(
+                    by=["_pct", strata_col], kind="mergesort"
+                ).reset_index(drop=True)
+                df = ranked.iloc[:n_samples].reset_index(drop=True)
+                if "_pct" in df.columns:
+                    df = df.drop(columns=["_pct"])
             else:
-                df = df.sample(n=min(len(df), n_samples), random_state=seed).reset_index(drop=True)
+                shuffled = df.sample(frac=1.0, random_state=seed).reset_index(drop=True)
+                df = shuffled.iloc[:n_samples].reset_index(drop=True)
 
             if "_strata" in df.columns:
                 df = df.drop(columns=["_strata"])
