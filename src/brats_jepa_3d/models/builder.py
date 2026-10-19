@@ -144,54 +144,53 @@ def find_downstream_checkpoint(
         )
 
     if is_scratch:
-        for d in search_dirs:
-            if d.exists():
-                cands = (
-                    sorted(d.glob(f"{model_type}_{decoder_type}_scratch_best.pt"))
-                    or sorted(d.glob(f"*{model_type}*{decoder_type}*scratch*best.pt"))
-                    or sorted(d.glob(f"*{decoder_type}*scratch*best.pt"))
-                    or sorted(d.glob(f"*{model_type}*scratch*best.pt"))
-                    or sorted(d.glob("*scratch*best.pt"))
-                )
-                if cands:
-                    return cands[-1]
+        patterns = [
+            f"{model_type}_{decoder_type}_scratch_best.pt",
+            f"*{model_type}*{decoder_type}*scratch*best.pt",
+            f"*{decoder_type}*scratch*best.pt",
+            f"*{model_type}*scratch*best.pt",
+            "*scratch*best.pt",
+        ]
+        for pat in patterns:
+            for d in search_dirs:
+                if d.exists():
+                    cands = sorted(d.glob(pat))
+                    if cands:
+                        return cands[-1]
         return checkpoints_dir / f"{model_type}_{decoder_type}_scratch_best.pt"
 
     if is_frozen:
-        for d in search_dirs:
-            if d.exists():
-                cands = (
-                    sorted(d.glob(f"{model_type}_{decoder_type}_frozen_best.pt"))
-                    or sorted(d.glob(f"*{model_type}*{decoder_type}*frozen*best.pt"))
-                    or sorted(d.glob(f"*{decoder_type}*frozen*best.pt"))
-                    or sorted(d.glob(f"*{model_type}*frozen*best.pt"))
-                    or sorted(d.glob("*frozen*best.pt"))
-                )
-                if cands:
-                    return cands[-1]
+        patterns = [
+            f"{model_type}_{decoder_type}_frozen_best.pt",
+            f"*{model_type}*{decoder_type}*frozen*best.pt",
+            f"*{decoder_type}*frozen*best.pt",
+            f"*{model_type}*frozen*best.pt",
+            "*frozen*best.pt",
+        ]
+        for pat in patterns:
+            for d in search_dirs:
+                if d.exists():
+                    cands = sorted(d.glob(pat))
+                    if cands:
+                        return cands[-1]
         return checkpoints_dir / f"{model_type}_{decoder_type}_frozen_best.pt"
 
-    for d in search_dirs:
-        if d.exists():
-            cands = (
-                [
+    patterns = [
+        f"{model_type}_{decoder_type}_best.pt",
+        f"*{model_type}*{decoder_type}*best.pt",
+        f"*{decoder_type}*best.pt",
+        f"{model_type}*best.pt",
+    ]
+    for pat in patterns:
+        for d in search_dirs:
+            if d.exists():
+                cands = [
                     p
-                    for p in sorted(d.glob(f"{model_type}_{decoder_type}_best.pt"))
+                    for p in sorted(d.glob(pat))
                     if not any(x in p.name.lower() for x in ("scratch", "frozen"))
                 ]
-                or [
-                    p
-                    for p in sorted(d.glob(f"*{model_type}*{decoder_type}*best.pt"))
-                    if not any(x in p.name.lower() for x in ("scratch", "frozen"))
-                ]
-                or [
-                    p
-                    for p in sorted(d.glob(f"{model_type}*multiscale*best.pt"))
-                    if not any(x in p.name.lower() for x in ("scratch", "frozen"))
-                ]
-            )
-            if cands:
-                return cands[-1]
+                if cands:
+                    return cands[-1]
     return checkpoints_dir / f"{model_type}_{decoder_type}_best.pt"
 
 

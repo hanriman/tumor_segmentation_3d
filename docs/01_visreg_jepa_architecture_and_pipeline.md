@@ -80,13 +80,14 @@ Prior non-contrastive self-supervised methods like LeJEPA (Balestriero & LeCun, 
 
 ### 4.1 Backbone Parameters (`SingleEncoderJEPA3D`)
 
-Both `visreg_jepa` and `sigreg_jepa` use the unified [`SingleEncoderJEPA3D`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/models/single_encoder_jepa_3d.py) architecture. Following LeJEPA (Balestriero & LeCun, 2025) and VISReg (Wu, Balestriero, & Levine, 2026), anti-collapse regularization is applied **directly to the context encoder tokens** ($\mathbf{Z}_{\text{tissue}} \in \mathbb{R}^{N_{\text{tissue}} \times 384}$) without an intermediate projector MLP:
+Both `visreg_jepa` and `sigreg_jepa` use the unified [`SingleEncoderJEPA3D`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/models/single_encoder_jepa_3d.py) architecture. By default (`use_projector=True`), an auxiliary 2-layer Projector MLP ($384 \to 1024 \to 128$) maps tissue-filtered context latents before geometric optimal transport regularization, isolating the core ViT representations from excessive isotropic constraints:
 
 | Component | Depth / Layers | Hidden Dim ($D$) | Attention Heads | MLP Dim | Parameter Count |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **Context / Target Encoder (`ViTEncoder3D`)** | 8 | 384 | 6 | 1,536 | ~14.2M |
 | **JEPA Predictor (`JEPAPredictor3D`)** | 4 | 192 | 6 | 768 | ~2.1M |
-| **Total Pre-Training (`SingleEncoderJEPA3D`)** | — | — | — | — | **~16.3M** |
+| **Auxiliary Projector MLP (`projector`)** | 2 | 384 → 1024 → 128 | — | — | ~0.5M |
+| **Total Pre-Training (`SingleEncoderJEPA3D`)** | — | — | — | — | **~16.8M** |
 
 ### 4.2 Downstream Decoders & Probing Taxonomy
 
@@ -129,10 +130,12 @@ $$\mathcal{L}_{\text{VISReg}} = \lambda_{\text{c}} \frac{\|\mu\|_2^2}{D_{\text{e
 2. **Scale Loss ($\lambda_{\text{sc}} = 1.0$)**: Penalizes variance collapse along each encoder dimension ($1 - \sigma_d$).
 3. **Shape Loss (Sliced-Wasserstein Distance, $\lambda_{\text{sh}} = 4.0$, $M = 1024$ slices)**: Standardizes tokens with detached moments $\mathbf{z}_{\text{std}} = (\mathbf{z} - \text{sg}(\mu)) / \text{sg}(\sigma)$, projects onto $M=1024$ random unit directions on $\mathbb{S}^{D_{\text{enc}}-1}$, and computes closed-form 1D Wasserstein-2 distance against standard normal quantiles in $O(N \log N)$ via sorting.
 
-### 5.4 Regularizer Warmup Schedule ($\lambda_{\text{reg}}(t)$)
-$$\lambda_{\text{reg}}(t) = \begin{cases} \frac{t}{T_{\text{warmup}}} & t < T_{\text{warmup}} \\ 1.0 & t \ge T_{\text{warmup}} \end{cases}$$
+### 5.4 Regularizer Warmup & Annealing Schedule ($\lambda_{\text{reg}}(t)$)
+$$\lambda_{\text{reg}}(t) = \begin{cases} 1.0 & t \le T_{\text{warmup}} \\ \lambda_{\text{min}} + \frac{1}{2}(1.0 - \lambda_{\text{min}})\left(1 + \cos\left(\frac{t - T_{\text{warmup}}}{T_{\text{max}} - T_{\text{warmup}}} \pi\right)\right) & t > T_{\text{warmup}} \end{cases}$$
 
-In canonical 200-epoch pre-training ($T_{\text{max}} = 200$), $\lambda_{\text{reg}}(t)$ ramps linearly over `reg_warmup_epochs=30` and holds constant at $\lambda_{\text{reg}} = 1.0$ (`reg_min_scale=1.0`) throughout epochs 31–200, maintaining isotropic variance across all training epochs.
+In canonical pre-training ($T_{\text{max}} = 200, T_{\text{warmup}} = 30, \lambda_{\text{min}} = 0.10$):
+- **Warmup Phase ($t \le 30$)**: $\lambda_{\text{reg}} = 1.0$ enforces maximum geometric entropy and variance stabilization early, preventing informational collapse during initial ViT patch projection.
+- **Annealing Phase ($t > 30$)**: $\lambda_{\text{reg}}(t)$ decays smoothly from $1.0$ down to a floor of $\lambda_{\text{min}} = 0.10$. This relieves the model from being over-constrained into an artificial isotropic standard Gaussian sphere, allowing target prediction loss ($\mathcal{L}_{\text{pred}}$) to dominate and form dense semantic anatomical clusters while retaining sufficient anti-collapse pressure throughout later epochs.
 
 ### 5.5 Learning Rate Schedule ($\eta(t)$)
 $$\eta(t) = \begin{cases} \eta_{\text{base}} \times \frac{t}{T_{\text{lr\_warmup}}} & t \le T_{\text{lr\_warmup}} \\ \eta_{\text{min}} + \frac{1}{2}(\eta_{\text{base}} - \eta_{\text{min}})\left(1 + \cos\left(\frac{t - T_{\text{lr\_warmup}}}{T_{\text{max}} - T_{\text{lr\_warmup}}} \pi\right)\right) & t > T_{\text{lr\_warmup}} \end{cases}$$

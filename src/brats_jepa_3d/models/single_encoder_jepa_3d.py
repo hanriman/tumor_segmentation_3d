@@ -40,6 +40,9 @@ class SingleEncoderJEPA3D(nn.Module):
         predictor_embed_dim: int = 192,
         num_heads: int = 6,
         mlp_ratio: float = 4.0,
+        proj_dim: int = 128,
+        projector_hidden_dim: int = 1024,
+        use_projector: bool = True,
         **kwargs,
     ):
         super().__init__()
@@ -52,6 +55,17 @@ class SingleEncoderJEPA3D(nn.Module):
             num_heads=num_heads,
             mlp_ratio=mlp_ratio,
         )
+
+        self.use_projector = use_projector
+        if use_projector:
+            self.projector = nn.Sequential(
+                nn.Linear(embed_dim, projector_hidden_dim),
+                nn.LayerNorm(projector_hidden_dim),
+                nn.GELU(),
+                nn.Linear(projector_hidden_dim, proj_dim),
+            )
+        else:
+            self.projector = None
 
         self.predictor = JEPAPredictor3D(
             embed_dim=embed_dim,
@@ -79,8 +93,14 @@ class SingleEncoderJEPA3D(nn.Module):
             images, patch_indices=context_indices
         )  # [B, N_ctx, embed_dim]
 
-        # 3. Filter context tokens to foreground brain-tissue tokens in encoder space R^{embed_dim}
-        tissue_tokens = filter_tissue_tokens(context_tokens, context_tissue_mask)
+        # 3. Filter context tokens or project before filtering
+        if self.projector is not None:
+            full_projected = self.projector(context_tokens)  # [B, N_ctx, proj_dim]
+            projected_tokens = filter_tissue_tokens(full_projected, context_tissue_mask)
+            reg_tokens = projected_tokens
+        else:
+            projected_tokens = None
+            reg_tokens = filter_tissue_tokens(context_tokens, context_tissue_mask)
 
         # 4. Predict target representations efficiently
         predictions = self.predictor.forward_multi_targets(
@@ -100,7 +120,8 @@ class SingleEncoderJEPA3D(nn.Module):
             "predictions": predictions,
             "targets": targets,
             "context_tokens": context_tokens,
-            "tissue_tokens": tissue_tokens,
+            "tissue_tokens": reg_tokens,
+            "projected_tokens": projected_tokens if projected_tokens is not None else reg_tokens,
             "target_tokens": target_full_tokens,
         }
 

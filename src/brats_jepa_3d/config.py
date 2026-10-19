@@ -114,14 +114,44 @@ def ensure_directories(base_output_dir: Path | str | None = None):
 
 def get_checkpoint_search_dirs(primary_dir: Path | str | None = None) -> list[Path]:
     """Returns candidate checkpoint search directories in priority order across Colab & local layouts."""
-    primary = Path(primary_dir).resolve() if primary_dir else CHECKPOINTS_DIR
-    candidates = [
-        primary,
+    primary = Path(primary_dir).resolve() if primary_dir else None
+    candidates: list[Path] = []
+
+    # If an explicit custom primary directory was provided (not the default CHECKPOINTS_DIR), prioritize it
+    if primary is not None and primary != CHECKPOINTS_DIR.resolve():
+        candidates.append(primary)
+
+    # Search in experiment subdirectories first (where fully trained checkpoints reside)
+    search_roots = [
+        OUTPUTS_DIR,
+        PROJECT_ROOT / "outputs",
+        Path.cwd() / "outputs",
+        Path("outputs").resolve(),
+    ]
+    if IN_COLAB:
+        search_roots.extend([
+            Path("/content/drive/MyDrive/thesis_3d_outputs"),
+            Path("/content/outputs"),
+        ])
+
+    for root in search_roots:
+        if root.exists():
+            exp_dir = root / "experiments"
+            if exp_dir.exists():
+                for sub in sorted(exp_dir.glob("*/checkpoints")):
+                    if sub.is_dir():
+                        candidates.append(sub.resolve())
+
+    # Then search in standard checkpoints directories
+    candidates.extend([
         CHECKPOINTS_DIR,
         Path("outputs/checkpoints").resolve(),
         Path.cwd() / "outputs" / "checkpoints",
         PROJECT_ROOT / "outputs" / "checkpoints",
-    ]
+    ])
+    if primary is not None:
+        candidates.append(primary)
+
     seen: set[Path] = set()
     result: list[Path] = []
     for c in candidates:
@@ -130,7 +160,7 @@ def get_checkpoint_search_dirs(primary_dir: Path | str | None = None) -> list[Pa
             if c.exists():
                 result.append(c)
     if not result:
-        result.append(primary)
+        result.append(primary if primary else CHECKPOINTS_DIR)
     return result
 
 

@@ -39,8 +39,8 @@ def parse_args():
     parser.add_argument(
         "--min_steps",
         type=int,
-        default=250,
-        help="Minimum gradient update steps per low-data fraction (default: 250)",
+        default=0,
+        help="Minimum gradient update steps per low-data fraction (default: 0, strictly preserving --epochs budget; set >0 for step-floor training)",
     )
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
@@ -149,9 +149,9 @@ def train_and_eval(
     tta: bool = False,
     include_background: bool | None = None,
     val_loader: DataLoader | None = None,
-    min_steps: int = 250,
+    min_steps: int = 0,
 ) -> dict[str, float]:
-    """Trains on the fraction loader with a minimum gradient step floor (`min_steps`),
+    """Trains on the fraction loader (optionally enforcing a minimum gradient step floor via `min_steps`),
     selects the best checkpoint on `val_loader` (if provided), and scores `test_loader`
     across canonical BraTS regions.
     Returns per-region {"WT", "TC", "ET", "mean"} macro Dice.
@@ -169,7 +169,12 @@ def train_and_eval(
     optimizer = torch.optim.AdamW(trainable_params, lr=3e-4, weight_decay=1e-4)
 
     steps_per_epoch = max(1, len(train_loader))
-    effective_epochs = 1 if smoke_test else max(epochs, math.ceil(min_steps / steps_per_epoch))
+    if smoke_test:
+        effective_epochs = 1
+    elif min_steps > 0:
+        effective_epochs = max(epochs, math.ceil(min_steps / steps_per_epoch))
+    else:
+        effective_epochs = epochs
     scheduler = build_warmup_cosine_scheduler(optimizer, epochs=effective_epochs, eta_min=1e-6)
     scaler = torch.amp.GradScaler(
         device="cuda" if device.type == "cuda" else "cpu", enabled=amp and device.type == "cuda"
@@ -408,7 +413,7 @@ def main():
                 tta=args.tta,
                 include_background=getattr(args, "include_background", None),
                 val_loader=val_loader,
-                min_steps=getattr(args, "min_steps", 250),
+                min_steps=getattr(args, "min_steps", 0),
             )
             dname = _display_name(name)
             logger.info(

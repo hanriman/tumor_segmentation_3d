@@ -106,18 +106,18 @@ def parse_args(args=None):
         help="Voxel patch size (e.g. 8 8 8 for high-res A100 or 16 16 16 for standard, default: from config or 16 16 16)",
     )
     # Regularizer Scaling (Wu et al., 2026; Balestriero & LeCun, 2025):
-    # Constant unannealed regularizer weight by default (reg_min_scale=1.0).
+    # Cosine annealing from 1.0 down to 0.10 after warmup prevents collapse while allowing semantic clustering.
     parser.add_argument(
         "--reg_warmup_epochs",
         type=int,
-        default=15,
-        help="Warmup epochs with reg_scale=1.0 before optional cosine annealing (default: 15)",
+        default=30,
+        help="Warmup epochs with reg_scale=1.0 before cosine annealing (default: 30)",
     )
     parser.add_argument(
         "--reg_min_scale",
         type=float,
-        default=1.0,
-        help="Minimum regularizer scale (default: 1.0 = unannealed per Wu et al., 2026)",
+        default=0.10,
+        help="Minimum regularizer scale (default: 0.10 with cosine decay from 1.0 to prevent collapse)",
     )
     return parser.parse_args(args)
 
@@ -385,13 +385,13 @@ def main():
         num_batches = 0
 
         # Regularizer Scaling (Wu et al., 2026; Balestriero & LeCun, 2025):
-        # Default reg_min_scale=1.0 keeps constant unannealed regularizer weight throughout training.
-        reg_warmup = getattr(args, "reg_warmup_epochs", 15)
+        # Anneal regularizer scale from 1.0 down to min_scale (default 0.10) after warmup epochs (default 30).
+        reg_warmup = getattr(args, "reg_warmup_epochs", 30)
         if epoch <= reg_warmup:
             reg_scale = 1.0
         else:
             progress = (epoch - reg_warmup) / max(1, epochs - reg_warmup)
-            min_s = getattr(args, "reg_min_scale", 1.0)
+            min_s = getattr(args, "reg_min_scale", 0.10)
             reg_scale = min_s + 0.5 * (1.0 - min_s) * (1.0 + math.cos(math.pi * progress))
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs} (reg_scale={reg_scale:.2f})")
