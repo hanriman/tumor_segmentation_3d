@@ -76,7 +76,7 @@ python scripts/package_for_kaggle.py
 Each downstream notebook evaluates its checkpoints automatically across three evaluation regimes before generating output archives:
 1. **Holdout Test Evaluation**: Computes WT, TC, ET Dice and HD95 (in canonical voxels) over held-out volumes ($N=242$).
 2. **Low-Data Label Efficiency**: Evaluates performance under $1\%, 5\%, 10\%, 25\%$ label fractions.
-3. **OOD Scanner Shift Evaluation**: Assesses robustness against Rician noise, $B_1$ field bias, and missing MRI modalities.
+3. **OOD Scanner Shift Evaluation**: Assesses robustness against Rician noise, $B_1$ field bias, and missing MRI modalities (with optional `--rescale_missing_modalities` flag to test matched $4.0\times$ inverted dropout energy scaling).
 
 Outputs are exported as self-contained zip archives:
 - `visreg_pretrain_outputs.zip`

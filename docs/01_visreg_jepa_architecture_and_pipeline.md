@@ -10,7 +10,8 @@
 
 $$\hat{y}_{\text{tgt}} \approx y_{\text{tgt}}$$
 
-To prevent representation collapse without relying on momentum teacher networks (EMA) or negative pairs, this pipeline employs **VisReg** (Variance-Invariance-Shape Regularization) and **SigReg** (Statistical Independence via Epps-Pulley Gaussianity tests).
+### Methodological Synthesis (Thesis Innovation)
+Prior non-contrastive self-supervised methods like LeJEPA (Balestriero & LeCun, 2025) and VisReg (Wu et al., 2026) were designed strictly as **multi-view global invariance** architectures ($\|\mu - z\|^2$ alignment across global/local augmented views). This thesis synthesizes **3D spatial masked target prediction (I-JEPA)** with **decoupled VisReg geometric optimal transport regularization**, eliminating both EMA teacher networks and negative pairs in volumetric vision.
 
 ```
 [Raw 4-Modality MRI: 240³] 
@@ -18,21 +19,23 @@ To prevent representation collapse without relying on momentum teacher networks 
          ▼  (Crop to brain bbox & trilinear resample)
 [Canonical Volume: 4 × 128³] 
          │
-         ▼  (PatchEmbed3D: 16³ voxels per patch)
-[512 Latent Tokens: D=384] 
+         ▼  (PatchEmbed3D: Canonical 8³ voxels / Lightweight 16³ voxels)
+[Canonical: 4,096 Tokens (16³ grid)  |  Lightweight: 512 Tokens (8³ grid)] 
          │
-    ┌────┴──────────────────────────────┐
-    ▼                                   ▼
-[Context Tokens: N=192]        [Anisotropic Target Slots: N=97]
-    │                                   │
-    ▼ (8-Layer Context Encoder)         ▼ (Target Encoder Pass)
-[Context Representations: D=384]    [Ground-Truth Embeddings]
-    │                                   │
-    ▼ (4-Layer Predictor: D=192)        │
-[Predicted Embeddings: D=384] ──────────┼──► Smooth L1 Prediction Loss
-                                        │
-                                        └──► VisReg Regularization Loss
-                                             (Center + Scale + Sliced-Wasserstein)
+    ┌────┴──────────────────────────────────────────┐
+    ▼                                               ▼
+[Visible Context Tokens]                    [Anisotropic Target Slots]
+(Canonical: N=1,536 / 37.5%)                (Canonical: N=776 / 18.9% across 6 cuboids)
+(Lightweight: N=192 / 37.5%)                (Lightweight: N=97 / 18.9% across 6 cuboids)
+    │                                               │
+    ▼ (8-Layer Context Encoder: D=384)              ▼ (Target Encoder Pass: requires_grad=True)
+[Context Latents: D=384]                    [Ground-Truth Embeddings: D=384]
+    │                                               │
+    ▼ (4-Layer Predictor: D=192)                    │
+[Predicted Embeddings: D=384] ──────────────────────┼──► Smooth L1 Prediction Loss
+                                                    │
+                                                    └──► VisReg Regularization Loss
+                                                         (Center + Scale + Sliced-Wasserstein)
 ```
 
 ---
@@ -45,32 +48,31 @@ To prevent representation collapse without relying on momentum teacher networks 
 | **Resampling** | $4 \times D_z \times D_y \times D_x$ | $4 \times 128 \times 128 \times 128$ | Trilinear interpolation into canonical $128^3$ isotropic volume. Bounding box stretched to cube. |
 | **Parenchyma Norm** | $4 \times 128^3$ | $4 \times 128^3$ | Z-score normalization computed strictly over non-zero parenchyma voxels ($\mu_{\text{nz}}, \sigma_{\text{nz}}$). |
 | **Modality Dropout** | $4 \times 128^3$ | $4 \times 128^3$ | Inverted dropout ($p=0.25$, fallback $\ge 1$ active) rescaled by $C / \text{keep}$ to preserve train/test magnitude. |
-| **Patch Tokenization** | $4 \times 128^3$ | $512 \times 384$ | Non-overlapping $16 \times 16 \times 16$ 3D convolution (`kernel=16, stride=16`), projecting 4,096 voxels per patch into $D=384$. Grid is $8 \times 8 \times 8 = 512$ tokens. |
-| **3D Positional Bias** | $512 \times 384$ | $512 \times 384$ | Additive frozen sinusoidal 3D coordinates: $[\text{PE}(z) \,\|\, \text{PE}(y) \,\|\, \text{PE}(x)]$, imparting explicit spatial geometry from step 0. |
+| **Canonical Patch Tokenization** | $4 \times 128^3$ | $4,096 \times 384$ | Non-overlapping $8 \times 8 \times 8$ 3D convolution (`kernel=8, stride=8`), projecting 512 voxels per patch into $D=384$. Grid is $16 \times 16 \times 16 = 4,096$ tokens. Used for primary benchmark. |
+| **Lightweight Patch Tokenization** | $4 \times 128^3$ | $512 \times 384$ | Non-overlapping $16 \times 16 \times 16$ 3D convolution (`kernel=16, stride=16`), projecting 4,096 voxels per patch into $D=384$. Grid is $8 \times 8 \times 8 = 512$ tokens. Used for resource-constrained Kaggle T4 runs. |
+| **3D Positional Bias** | $N_{\text{tokens}} \times 384$ | $N_{\text{tokens}} \times 384$ | Additive frozen sinusoidal 3D coordinates: $[\text{PE}(z) \,\|\, \text{PE}(y) \,\|\, \text{PE}(x)]$, imparting explicit spatial geometry from step 0. |
 
 ---
 
 ## 3. Masking & Sampling Geometry
 
-1. **Context Masking ($N_{\text{ctx}} = 192$ tokens, $37.5\%$ visible)**:
+1. **Context Masking ($37.5\%$ visible)**:
    - Sampled via 3D Connected Breadth-First Search (BFS) starting from a random tissue-containing anchor patch.
-   - Visible tokens are gathered into a compact sequence: $Z_{\text{ctx}} \in \mathbb{R}^{B \times 192 \times 384}$.
-   - Evaluating only visible tokens reduces self-attention compute by **$85.9\%$** ($192^2 / 512^2$) compared to dense masking.
+   - Visible tokens are gathered into a compact sequence: $Z_{\text{ctx}} \in \mathbb{R}^{B \times 1536 \times 384}$ (canonical $8^3$ patch) or $\mathbb{R}^{B \times 192 \times 384}$ (lightweight $16^3$ patch).
+   - Evaluating only visible tokens reduces self-attention compute by **$85.9\%$** compared to dense masking.
 
 2. **Target Masking (Anisotropic Aspect-Ratio Jitter)**:
    - Implements 6 anisotropic cuboid target slots:
-     $$\mathcal{S} = \big[(3,3,3),\, (2,3,3),\, (3,2,3),\, (3,3,2),\, (2,2,2),\, (2,2,2)\big]$$
-   - Target token volumes on $8^3$ grid ($16^3$ patch size): $27 + 18 + 18 + 18 + 8 + 8 = \mathbf{97\text{ tokens total}}$ ($18.9\%$ of grid).
-   - **Proportional Tissue Filtering**: Candidates are accepted if $\text{tissue\_count} \ge \max(4, \lfloor 0.40 \times \text{vol} \rfloor)$. Prevents rejection deadlock on small slots while ensuring targets never sample empty background air.
-   - **Multi-Aspect Fallback Bounds**: Fallback cuboid sizes are dynamically constrained within $[2, 3]^3$, preserving 3D aspect diversity even under dense anatomical constraints.
-
-3. **Resolution & Patch Size Scaling ($16^3$ vs. $8^3$ Patches)**:
-   - **Standard Resolution ($16^3$ patch, $8^3 = 512$ grid):** $N_{\text{ctx}} = 192$ ($37.5\%$), $N_{\text{tgt}} = 97$ ($18.9\%$).
-   - **High Resolution ($8^3$ patch, $16^3 = 4,096$ grid):** Targets scale $2\times$ per axis to maintain identical physical millimeter volume:
+     $$\mathcal{S}_{8\text{-grid}} = \big[(3,3,3),\, (2,3,3),\, (3,2,3),\, (3,3,2),\, (2,2,2),\, (2,2,2)\big]$$
      $$\mathcal{S}_{16\text{-grid}} = \big[(6,6,6),\, (4,6,6),\, (6,4,6),\, (6,6,4),\, (4,4,4),\, (4,4,4)\big]$$
-     Yielding $N_{\text{tgt}} = 776$ tokens ($18.9\%$) and $N_{\text{ctx}} = 1,536$ tokens ($37.5\%$).
-   - **Physical Millimeter Invariance:** Both configurations cover identical anatomical volumes ($48\text{ mm}$ macro cube, $32 \times 48 \times 48\text{ mm}$ planar slabs, and $32\text{ mm}$ regional meso cubes).
+   - Target token volumes:
+     - On canonical $16^3$ grid ($8^3$ patch size): $216 + 144 + 144 + 144 + 64 + 64 = \mathbf{776\text{ tokens total}}$ ($18.9\%$ of grid).
+     - On lightweight $8^3$ grid ($16^3$ patch size): $27 + 18 + 18 + 18 + 8 + 8 = \mathbf{97\text{ tokens total}}$ ($18.9\%$ of grid).
+   - **Proportional Tissue Filtering**: Candidates are accepted if $\text{tissue\_count} \ge \max(4, \lfloor 0.40 \times \text{vol} \rfloor)$. Prevents rejection deadlock on small slots while ensuring targets never sample empty background air.
+   - **Multi-Aspect Fallback Bounds**: Fallback cuboid sizes are dynamically constrained within $[2, 3]^3$ (or $[4, 6]^3$ on $16^3$ grid), preserving 3D aspect diversity even under dense anatomical constraints.
 
+3. **Physical Millimeter Invariance Across Resolutions**:
+   - Both $8^3$ and $16^3$ patch tokenizations cover identical physical anatomical coverage: $48\text{ mm}$ macro cube, $32 \times 48 \times 48\text{ mm}$ planar slabs, and $32\text{ mm}$ regional meso cubes.
 
 ---
 
@@ -78,7 +80,7 @@ To prevent representation collapse without relying on momentum teacher networks 
 
 ### 4.1 Backbone Parameters (Matched to BraTS Dataset Scale)
 
-The architecture is calibrated for 1,144–1,621 volumetric scans to prevent overfitting while fitting comfortably within $\le 8.1$ GB VRAM:
+The architecture is calibrated for 1,144–1,621 volumetric scans to prevent overfitting while fitting comfortably within GPU memory:
 
 | Component | Depth / Layers | Hidden Dim ($D$) | Attention Heads | MLP Dim | Parameter Count |
 | :--- | :---: | :---: | :---: | :---: | :---: |
@@ -87,23 +89,25 @@ The architecture is calibrated for 1,144–1,621 volumetric scans to prevent ove
 | **Projector MLP** | 2 | $384 \to 1024 \to 128$ | — | — | ~0.5M |
 | **Total Pre-Training** | — | — | — | — | **~16.8M** |
 
-### 4.2 Downstream Decoders
+### 4.2 Downstream Decoders & Probing Taxonomy
 
 When pre-training completes, the JEPA predictor and projector are **discarded**. The pre-trained Context Encoder is transferred to downstream segmentation:
 
-1. **Multi-Scale 3D FPN (`vit_fpn`)**:
+1. **Multi-Scale 3D FPN (`vit_fpn`) — Pure Latent Probe**:
    - Lateral skip connections tapped from encoder layers $L_2, L_4, L_6, L_8$.
    - Scale-adaptive hierarchical decoding:
-     - On canonical $8^3$ grids (patch size $16^3$): 4 progressive $2\times$ transposed 3D convolution stages with `GroupNorm` ($8^3 \to 16^3 \to 32^3 \to 64^3 \to 128^3$).
-     - On high-resolution $16^3$ grids (patch size $8^3$): Stage 1 operates at native token resolution ($16^3 \to 16^3$), followed by 3 progressive $2\times$ upsampling stages ($16^3 \to 32^3 \to 64^3 \to 128^3$), preserving output dimensionality.
-    - Total model size: **~29.43M** parameters.
+     - On canonical $16^3$ token grids (patch size $8^3$): Stage 1 operates at native token resolution ($16^3 \to 16^3$), followed by 3 progressive $2\times$ upsampling stages ($16^3 \to 32^3 \to 64^3 \to 128^3$), preserving output dimensionality.
+     - On lightweight $8^3$ token grids (patch size $16^3$): 4 progressive $2\times$ transposed 3D convolution stages with `GroupNorm` ($8^3 \to 16^3 \to 32^3 \to 64^3 \to 128^3$).
+   - Total model size: **~29.43M** parameters.
+   - **Probing Role**: In frozen evaluation (`freeze_encoder=True`), FPN operates solely on extracted ViT latents without raw-image bypass, serving as the **pure latent probe** ($72.31\%$ Dice).
 
-2. **Hybrid 3D UNETR (`vit_unetr`)**:
-   - Replaces pure transposed convolutions with a dual-stream architecture: pre-trained ViT lateral representations fused with a lightweight native convolutional stem (`stem_128` at $128^3$, `stem_64` at $64^3$).
+2. **Hybrid 3D UNETR (`vit_unetr`) — Frozen Hybrid Probe**:
+   - Dual-stream architecture: pre-trained ViT lateral representations fused with a lightweight native convolutional stem (`stem_128` at $128^3$, `stem_64` at $64^3$) operating directly on the raw 4-channel input volume.
    - High-frequency edge maps from the stem are concatenated into decoder stages 3 and 4 ($64^3$ and $128^3$).
    - Dynamically supports both $8^3$ and $16^3$ token grids, maintaining channel and spatial compatibility.
    - Total model size: **~29.52M** parameters.
-   - Delivers superior performance at low data fractions (e.g. $+7.08\text{pp}$ over from-scratch UNETR at $5\%$ data) by resolving the coarse token boundary bottleneck.
+   - **Probing Role**: In frozen evaluation (`freeze_encoder=True`), UNETR combines frozen transformer latents with trainable high-resolution convolutional stems, serving as a **hybrid probe** ($75.13\%$ Dice) that demonstrates architectural complementarity.
+   - Delivers superior performance at low data fractions (e.g. $+7.08\text{pp}$ over from-scratch UNETR at $5\%$ data) by resolving the sub-patch boundary bottleneck.
 
 ---
 
