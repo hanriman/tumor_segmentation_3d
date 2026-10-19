@@ -33,7 +33,8 @@ To ensure mathematical rigor, benchmark reproducibility, and peer-review defensi
   │ III. Missing Modality Inverted Dropout Scale │
   │ IV.  Tissue-Filtered Effective Spectral Rank │
   │ V.   Low-Data Step Budget Formal Analysis    │
-  │ VI.  Test Output Isolation (Zero Data Risk)  │
+  │ VI.  Central Builder & Shared Trainer        │
+  │ VII. Output Sanitation & Compact Packaging   │
   └──────────────────────────────────────────────┘
 ```
 
@@ -167,6 +168,19 @@ Following an exhaustive forensic audit against scientific integrity standards ([
 
 ### 4.6 Remediation VI: Central Model Factory & Shared Supervised Trainer
 - **Architectural Unification**: Consolidated all model construction and checkpoint loading into [`src/brats_jepa_3d/models/builder.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/models/builder.py) and unified downstream/baseline training loops into [`src/brats_jepa_3d/training/supervised_trainer.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/training/supervised_trainer.py), guaranteeing identical training, validation, and evaluation semantics across ViT-JEPA, Scratch ViT, 3D Residual UNet, and 3D nnU-Net.
+
+### 4.7 Remediation VII: Output Sanitation, Checkpoint Redundancy Elimination & Compact Packaging
+- **Vulnerabilities Identified**:
+  1. Loose directories (`checkpoints/`, `logs/`, `metrics/`, `figures/`) polluted the root of `outputs/` because runner scripts defaulted to `outputs/` when `--output_dir` was omitted.
+  2. Training loops saved both `_latest.pt` and `_epoch_{last_epoch}.pt` at completion, generating byte-for-byte duplicate checkpoints (~100–300 MB) when `_latest.pt` was never utilized by downstream discovery routines.
+  3. Colab artifact packaging (`export_artifacts`) bundled all intermediate periodic checkpoints (`epoch_5.pt`, `epoch_10.pt`, ..., `epoch_55.pt`), inflating `.zip` archives to multiple gigabytes on Google Drive.
+- **Remediation**:
+  1. Centralized output directory routing via [`resolve_default_output_dir()`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/config.py):
+     - Smoke tests and unit tests automatically route to `tests/test_outputs/.smoke_tmp` without requiring CLI flags.
+     - Full experiment runs automatically default to `outputs/experiments/<experiment_name>`.
+     - `outputs/` is strictly constrained to contain only `experiments/` and `reports/`.
+  2. Removed `_latest.pt` from [`supervised_trainer.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/training/supervised_trainer.py) while guaranteeing the final epoch checkpoint (`_epoch_{last_epoch}.pt`) is preserved. Existing disk checkpoints were renamed to `_epoch_60.pt`.
+  3. Implemented [`filter_best_and_latest_checkpoints()`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/utils/export.py) in `export_artifacts()` (`only_best_and_latest_checkpoints=True` by default), packaging strictly the best model (`*_best.pt`) and latest model (`*_epoch_{max_epoch}.pt`) into Google Drive `.zip` archives and dropping all intermediate periodic checkpoints. Reduces export archive sizes by ~80–90%.
 
 ---
 

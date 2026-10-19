@@ -6,7 +6,12 @@ from .aggregation import (
     export_latex_tables,
 )
 from .device import get_autocast_context, get_device
-from .export import export_artifacts, import_artifacts, resolve_outputs_source_dir
+from .export import (
+    export_artifacts,
+    filter_best_and_latest_checkpoints,
+    import_artifacts,
+    resolve_outputs_source_dir,
+)
 from .fingerprint import check_pool_match, dataset_fingerprint
 from .logging import MetricTracker, setup_logger, sort_checkpoints_by_epoch
 from .seed import set_seed
@@ -29,6 +34,7 @@ __all__ = [
     "discover_experiment_directories",
     "export_artifacts",
     "export_latex_tables",
+    "filter_best_and_latest_checkpoints",
     "get_autocast_context",
     "get_device",
     "import_artifacts",

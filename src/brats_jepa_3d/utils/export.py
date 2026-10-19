@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import shutil
 import zipfile
 from collections.abc import Sequence
@@ -12,6 +13,48 @@ from brats_jepa_3d.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def filter_best_and_latest_checkpoints(checkpoint_files: Sequence[Path]) -> list[Path]:
+    """Filters checkpoint files to retain ONLY:
+    1. Any 'best' checkpoint (e.g. '*best*.pt')
+    2. The latest / highest epoch checkpoint per model variant (e.g. '*epoch_{max}*.pt' or '*latest*.pt')
+    Excludes all intermediate checkpoints (e.g. epoch 5, 10, ..., 55).
+    """
+    if not checkpoint_files:
+        return []
+
+    best_ckpts = [f for f in checkpoint_files if "best" in f.name.lower()]
+    explicit_latest = [f for f in checkpoint_files if "latest" in f.name.lower()]
+    epoch_ckpts = [f for f in checkpoint_files if re.search(r"epoch_(\d+)", f.name.lower())]
+
+    latest_epoch_ckpts: list[Path] = []
+    epoch_groups: dict[str, list[tuple[int, Path]]] = {}
+    for f in epoch_ckpts:
+        match = re.search(r"^(.*?)_?epoch_(\d+)", f.name.lower())
+        if match:
+            group_key = match.group(1)
+            ep_num = int(match.group(2))
+            epoch_groups.setdefault(group_key, []).append((ep_num, f))
+
+    for group_key, items in epoch_groups.items():
+        items.sort(key=lambda x: x[0])
+        max_epoch_ckpt = items[-1][1]
+        latest_epoch_ckpts.append(max_epoch_ckpt)
+
+    other_ckpts = [
+        f
+        for f in checkpoint_files
+        if f not in best_ckpts and f not in explicit_latest and f not in epoch_ckpts
+    ]
+
+    selected: list[Path] = []
+    for f in checkpoint_files:
+        if f in best_ckpts or f in explicit_latest or f in latest_epoch_ckpts or f in other_ckpts:
+            if f not in selected:
+                selected.append(f)
+
+    return selected
 
 
 def resolve_outputs_source_dir(preferred_dir: Path | str | None = None) -> Path:
@@ -47,6 +90,7 @@ def export_artifacts(
     model_prefix: str | None = None,
     source_dir: Path | str | None = None,
     include_subdirs: Sequence[str] = ("checkpoints", "metrics", "logs", "figures"),
+    only_best_and_latest_checkpoints: bool = True,
     verbose: bool = True,
 ) -> dict[str, Any]:
     """Collects trained checkpoints, metrics, and logs, stages them in export_dir,
@@ -88,6 +132,7 @@ def export_artifacts(
         dst_subdir = target_export_dir / sub
         seen_dest_names = {f.name for f in dst_subdir.iterdir()}
 
+        candidate_items: list[Path] = []
         for s_base in fallback_sources:
             src_subdir = s_base / sub
             if not src_subdir.exists():
@@ -111,10 +156,17 @@ def export_artifacts(
                     include_file = matches_prefix or is_summary
 
                 if include_file:
-                    dest_file = dst_subdir / item.name
-                    shutil.copy2(item, dest_file)
-                    copied_files.append(dest_file)
-                    seen_dest_names.add(item.name)
+                    candidate_items.append(item)
+
+        if sub == "checkpoints" and only_best_and_latest_checkpoints:
+            candidate_items = filter_best_and_latest_checkpoints(candidate_items)
+
+        for item in candidate_items:
+            if item.name not in seen_dest_names:
+                dest_file = dst_subdir / item.name
+                shutil.copy2(item, dest_file)
+                copied_files.append(dest_file)
+                seen_dest_names.add(item.name)
 
     if verbose:
         logger.info("Collected %d artifact file(s) into %s:", len(copied_files), target_export_dir)

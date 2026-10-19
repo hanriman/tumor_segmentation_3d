@@ -47,9 +47,11 @@ def test_train_nnunet_smoke_and_checkpoints(tmp_path):
     assert "Val HD95: nan mm" not in result.stdout
 
     best_ckpt = TEST_OUTPUTS_DIR / "checkpoints" / "nnunet_3d_best.pt"
+    epoch_ckpt = TEST_OUTPUTS_DIR / "checkpoints" / "nnunet_3d_epoch_1.pt"
     latest_ckpt = TEST_OUTPUTS_DIR / "checkpoints" / "nnunet_3d_latest.pt"
     assert best_ckpt.exists(), "nnunet_3d_best.pt was not saved"
-    assert latest_ckpt.exists(), "nnunet_3d_latest.pt was not saved"
+    assert epoch_ckpt.exists(), "nnunet_3d_epoch_1.pt was not saved"
+    assert not latest_ckpt.exists(), "nnunet_3d_latest.pt should not be saved"
 
     ckpt_data = torch.load(best_ckpt, map_location="cpu")
     assert "model_state_dict" in ckpt_data
@@ -75,9 +77,11 @@ def test_train_unet_smoke_and_checkpoints(tmp_path):
     assert "Val HD95: nan mm" not in result.stdout
 
     best_ckpt = TEST_OUTPUTS_DIR / "checkpoints" / "unet_3d_best.pt"
+    epoch_ckpt = TEST_OUTPUTS_DIR / "checkpoints" / "unet_3d_epoch_1.pt"
     latest_ckpt = TEST_OUTPUTS_DIR / "checkpoints" / "unet_3d_latest.pt"
     assert best_ckpt.exists(), "unet_3d_best.pt was not saved"
-    assert latest_ckpt.exists(), "unet_3d_latest.pt was not saved"
+    assert epoch_ckpt.exists(), "unet_3d_epoch_1.pt was not saved"
+    assert not latest_ckpt.exists(), "unet_3d_latest.pt should not be saved"
 
     ckpt_data = torch.load(best_ckpt, map_location="cpu")
     assert "model_state_dict" in ckpt_data
@@ -86,8 +90,8 @@ def test_train_unet_smoke_and_checkpoints(tmp_path):
 
 
 def test_train_unet_resume(tmp_path):
-    latest_ckpt = TEST_OUTPUTS_DIR / "checkpoints" / "unet_3d_latest.pt"
-    assert latest_ckpt.exists()
+    epoch_ckpt = TEST_OUTPUTS_DIR / "checkpoints" / "unet_3d_epoch_1.pt"
+    assert epoch_ckpt.exists()
 
     cmd = [
         sys.executable,
@@ -98,7 +102,7 @@ def test_train_unet_resume(tmp_path):
         "--epochs",
         "1",
         "--resume",
-        str(latest_ckpt),
+        str(epoch_ckpt),
         "--no_amp",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)

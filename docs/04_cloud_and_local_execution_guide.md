@@ -32,7 +32,7 @@ notebooks/colab/                                    # Google Colab GPU Suite (8�
 
 All downstream and baseline notebooks (`02`–`09`) share identical training hyperparameters (`SEED = 42`, `EPOCHS = 60`, `BATCH_SIZE = 4`, `PATCH_SIZE = 8`, `--deep_supervision`, `--amp`) and execute three evaluation stages automatically before packaging outputs to Google Drive:
 1. **Holdout Test Evaluation (`scripts/evaluate_3d.py`)**: Computes WT, TC, ET Dice and HD95 (in canonical voxels) over the held-out test split ($N=242$) with 4-fold TTA (`--tta`), plus Effective Spectral Rank ($S^2$) for ViT models.
-2. **Low-Data Label Efficiency (`scripts/evaluate_low_data_3d.py`)**: Evaluates $1\%, 5\%, 10\%, 25\%, 50\%, 100\%$ stratified training subsets (25 epochs with `--min_steps 250`, selecting the best checkpoint on the validation split before evaluating once on the test split).
+2. **Low-Data Label Efficiency (`scripts/evaluate_low_data_3d.py`)**: Evaluates $1\%, 5\%, 10\%, 25\%, 50\%, 100\%$ stratified training subsets (default 25 epochs / 75 gradient updates with `--min_steps 0`, selecting the best checkpoint on the validation split before evaluating once on the test split).
 3. **OOD Scanner Shift & Missing-Modality Evaluation (`scripts/evaluate_ood_3d.py`)**: Evaluates robustness under 3D Rician noise, $B_1$ RF bias fields, and zero-imputed single-modality inputs (`FLAIR Only`, `T1ce Only`).
 
 ---
@@ -79,7 +79,7 @@ My Drive/
    - Place `brats_gli_3d_v2.zip` into `My Drive/thesis/data/`.
 2. **Run Notebook 01 (`01_colab_visreg_pretrain_3d.ipynb`)**:
    - Mounts Google Drive, clones the repository, and extracts `brats_gli_3d_v2.zip` onto Colab's fast local NVMe SSD (`/content/data/brats_gli_3d_v2`).
-   - Runs 200-epoch self-supervised 3D VISReg JEPA pre-training (`--patch_size 8 8 8`, `--batch_size 32`, `--epochs 200`, `--reg_warmup_epochs 30`, `--reg_min_scale 1.0`, `--amp`).
+   - Runs 200-epoch self-supervised 3D VISReg JEPA pre-training (`--patch_size 8 8 8`, `--batch_size 32`, `--epochs 200`, `--reg_warmup_epochs 30`, `--reg_min_scale 0.10`, `--amp`).
    - Runs `scripts/diagnose_visreg_3d.py` and packages `visreg_pretrain_outputs.zip` to `My Drive/thesis/visreg_pretrain_outputs/`.
 3. **Run Downstream & Baseline Notebooks (`02` through `09`)**:
    - Notebooks `02`, `03`, `08`, and `09` automatically resolve `visreg_jepa_3d_best.pt` from `My Drive/thesis/visreg_pretrain_outputs/`.
@@ -99,4 +99,32 @@ python paper/latex/figures/gen_figures.py
 This workflow:
 1. Parses all test, low-data, and OOD CSV files across all model experiments in `outputs/experiments/`.
 2. Writes unified summary tables (`master_3d_benchmark.csv`, `low_data_3d_summary.csv`, `ood_3d_summary.csv`, `tables_latex.tex`) to `outputs/reports/`.
-3. Renders publication-grade vector PDF and PNG figures in `paper/latex/figures/`.
+3. Packages `paper_artifacts.zip` into `outputs/reports/`.
+4. Renders publication-grade vector PDF and PNG figures in `paper/latex/figures/`.
+
+---
+
+## 6. Output Architecture, Checkpoint Policy & Compact Packaging
+
+### 6.1 Output Directory Sanitation (`outputs/`)
+The top-level `outputs/` directory is strictly partitioned into two subdirectories:
+- **`outputs/experiments/`**: Contains dedicated subfolders for each training experiment (e.g. `outputs/experiments/visreg_multiscale_outputs/`, `outputs/experiments/nnunet_outputs/`).
+- **`outputs/reports/`**: Contains master benchmark CSVs, Markdown summaries, LaTeX tables, and `paper_artifacts.zip`.
+
+Loose folders (`checkpoints/`, `logs/`, `metrics/`, `figures/`) are prohibited from existing directly in the `outputs/` root.
+
+### 6.2 Zero-Flag Automatic Output Isolation
+All training and evaluation scripts resolve their destination directory using `resolve_default_output_dir()` from `brats_jepa_3d.config`:
+- **Under Tests & Smoke Tests** (`--smoke_test`, `pytest` active, `PYTEST_CURRENT_TEST` set, or `BRATS3D_TEST_MODE=1`): Artifacts automatically route to `tests/test_outputs/.smoke_tmp` (which is in `.gitignore`). **Zero CLI output flags are needed** to prevent repository pollution.
+- **Under Standard Runs**: Omitting `--output_dir` automatically defaults to `outputs/experiments/<experiment_name>`, completely safeguarding the root.
+
+### 6.3 Checkpoint Policy: Elimination of Duplicate `_latest.pt`
+- Training scripts save strictly:
+  1. `*_best.pt`: Anchored to best validation metric (`val_jepa_loss` for SSL pre-training; `val_dice` for downstream segmentation).
+  2. `*_epoch_{N}.pt`: Periodic snapshots (if `save_freq > 0`) and guaranteed final epoch model (e.g. `epoch_60.pt` or `epoch_200.pt`).
+- The redundant `_latest.pt` file was eliminated. Previously, `_latest.pt` was identical to `_epoch_{last_epoch}.pt`, wasting 100–300 MB of storage per experiment without being referenced by any evaluation or discovery routines.
+
+### 6.4 Compact Google Drive Archive Packaging
+At the conclusion of each Colab notebook, `export_artifacts()` archives artifacts for Google Drive:
+- **`only_best_and_latest_checkpoints: bool = True` (Default)**: Automatically filters candidate checkpoints to include **only** the best model (`*_best.pt`) and the latest model (`*_epoch_{max_epoch}.pt`). All intermediate periodic checkpoints (`epoch_5.pt`, `epoch_10.pt`, ..., `epoch_55.pt`) are omitted from the zip archive.
+- Reduces Google Drive archive sizes by **~80–90%** while preserving 100% of the diagnostic reports, metrics, and models needed for paper generation.

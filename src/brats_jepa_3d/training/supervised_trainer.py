@@ -405,16 +405,14 @@ def run_supervised_training(
             torch.save(state_dict_to_save, best_ckpt_path)
             logger.info(f"New best model saved: {best_ckpt_path} (Val Dice: {best_val_dice:.4f})")
 
-        # 2. Latest checkpoint saved every epoch for safe resumption
-        latest_ckpt_path = checkpoints_dir / f"{ckpt_prefix}_latest.pt"
-        torch.save(state_dict_to_save, latest_ckpt_path)
-
-        # 3. Optional periodic checkpoint if save_freq > 0
+        # 2. Periodic or final epoch checkpoint (guarantees final epoch is preserved without duplicate latest.pt)
         save_freq = getattr(args, "save_freq", 0)
-        if save_freq > 0 and epoch % save_freq == 0 and not args.smoke_test:
+        is_periodic = save_freq > 0 and epoch % save_freq == 0 and not args.smoke_test
+        is_final_epoch = epoch == epochs or args.smoke_test
+        if is_periodic or is_final_epoch:
             periodic_ckpt_path = checkpoints_dir / f"{ckpt_prefix}_epoch_{epoch}.pt"
             torch.save(state_dict_to_save, periodic_ckpt_path)
-            logger.info(f"Periodic checkpoint saved: {periodic_ckpt_path}")
+            logger.info(f"Checkpoint saved: {periodic_ckpt_path}")
 
         # Explicit CPU RAM and CUDA memory cleanup between epochs
         if "images" in locals():
