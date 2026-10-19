@@ -92,7 +92,7 @@ def main():
     smoke_dir = (
         Path(args.output_dir).resolve()
         if args.output_dir
-        else PROJECT_ROOT / "outputs" / ".smoke_tmp"
+        else PROJECT_ROOT / "tests" / "test_outputs" / ".smoke_tmp"
     )
     smoke_dir.mkdir(parents=True, exist_ok=True)
     smoke_ckpts = smoke_dir / "checkpoints"

@@ -118,7 +118,7 @@ def main():
 
     def build():
         return VisRegJEPA3D(
-            img_size=(128, 128, 128), patch_size=(16, 16, 16),
+            img_size=(128, 128, 128), patch_size=(8, 8, 8),
             in_channels=4, embed_dim=384, encoder_depth=8,
             predictor_depth=4, predictor_embed_dim=192,
         )

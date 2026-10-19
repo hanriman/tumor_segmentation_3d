@@ -332,7 +332,7 @@ def main():
                 else:
                     patch_size = tuple(int(x) for x in raw_patch)
             else:
-                patch_size = tuple(jepa_cfg.get("patch_size", (16, 16, 16)))
+                patch_size = tuple(jepa_cfg.get("patch_size", (8, 8, 8)))
             return JEPASegmentationModel3D(
                 img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
                 patch_size=patch_size,
@@ -385,7 +385,7 @@ def main():
                 else:
                     patch_size = tuple(int(x) for x in raw_patch)
             else:
-                patch_size = tuple(jepa_cfg.get("patch_size", (16, 16, 16)))
+                patch_size = tuple(jepa_cfg.get("patch_size", (8, 8, 8)))
 
             m = JEPASegmentationModel3D(
                 img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
@@ -457,7 +457,7 @@ def main():
                 else:
                     patch_size = tuple(int(x) for x in raw_patch)
             else:
-                patch_size = tuple(jepa_cfg.get("patch_size", (16, 16, 16)))
+                patch_size = tuple(jepa_cfg.get("patch_size", (8, 8, 8)))
 
             m = JEPASegmentationModel3D(
                 img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),

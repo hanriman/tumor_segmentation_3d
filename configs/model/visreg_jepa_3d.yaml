@@ -1,7 +1,7 @@
 # 3D VisReg JEPA Model Configuration (Wu, Balestriero, & Levine, 2026)
 name: "visreg_jepa"
 spatial_shape: [128, 128, 128]
-patch_size: [16, 16, 16]
+patch_size: [8, 8, 8]
 in_channels: 4
 embed_dim: 384
 proj_dim: 128

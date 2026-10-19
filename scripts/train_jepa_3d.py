@@ -207,7 +207,7 @@ def main():
     )
 
     spatial_shape = tuple(getattr(args, "spatial_shape", (128, 128, 128)))
-    raw_patch = getattr(args, "patch_size", None) or (16, 16, 16)
+    raw_patch = getattr(args, "patch_size", None) or (8, 8, 8)
     if isinstance(raw_patch, int):
         patch_size = (raw_patch, raw_patch, raw_patch)
     elif len(raw_patch) == 1:

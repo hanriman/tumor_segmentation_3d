@@ -12,6 +12,8 @@ data/raw/
 data/interim/
 data/processed/
 outputs/
+tests/test_outputs/
+tests/outputs/
 runs/
 wandb/
 .hydra/

@@ -1,7 +1,7 @@
 # 3D BraTS 2024 GLI Dataset Configuration
 dataset_name: "brats_gli_3d"
 spatial_shape: [128, 128, 128]
-patch_size: [16, 16, 16]
+patch_size: [8, 8, 8]
 in_channels: 4
 modalities: ["t1n", "t1c", "t2w", "t2f"]
 num_classes: 5  # BraTS 2024 GLI (0=background, 1=NCR, 2=ED, 3=NET, 4=ET; evaluated WT, TC, ET)

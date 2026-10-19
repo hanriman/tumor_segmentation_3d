@@ -1,7 +1,7 @@
 # 3D SigReg JEPA Model Configuration (Balestriero & LeCun, 2025)
 name: "sigreg_jepa"
 spatial_shape: [128, 128, 128]
-patch_size: [16, 16, 16]
+patch_size: [8, 8, 8]
 in_channels: 4
 embed_dim: 384
 proj_dim: 128
