@@ -22,7 +22,11 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from brats_jepa_3d.config import OUTPUTS_DIR, ensure_directories
+from brats_jepa_3d.config import (
+    OUTPUTS_DIR,
+    ensure_directories,
+    resolve_default_output_dir,
+)
 from brats_jepa_3d.data import (
     BraTS3DDataset,
     apply_b1_bias_field_3d,
@@ -145,7 +149,20 @@ def evaluate_perturbation(
 
 def main():
     args = parse_args()
-    out_dir = Path(args.output_dir).resolve() if getattr(args, "output_dir", None) else OUTPUTS_DIR
+    if getattr(args, "from_scratch", False):
+        exp_name = f"scratch_{args.decoder_type}_outputs"
+    elif getattr(args, "freeze_encoder", False):
+        exp_name = f"frozen_{args.model_type}_{args.decoder_type}_outputs"
+    elif args.model_type in ["unet_3d", "nnunet_3d"]:
+        exp_name = f"{args.model_type}_outputs"
+    else:
+        exp_name = f"{args.model_type}_{args.decoder_type}_outputs"
+
+    out_dir = resolve_default_output_dir(
+        args.output_dir,
+        experiment_name=exp_name,
+        is_smoke_test=getattr(args, "smoke_test", False),
+    )
     checkpoints_dir = (out_dir / "checkpoints") if (out_dir / "checkpoints").exists() else out_dir
     metrics_dir = out_dir / "metrics"
     ensure_directories(out_dir)

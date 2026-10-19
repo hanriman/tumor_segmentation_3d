@@ -7,7 +7,11 @@ Couples pre-trained 3D JEPA encoders with Multi-Scale FPN or UNETR Hybrid Decode
 import argparse
 from pathlib import Path
 
-from brats_jepa_3d.config import OUTPUTS_DIR, ensure_directories
+from brats_jepa_3d.config import (
+    OUTPUTS_DIR,
+    ensure_directories,
+    resolve_default_output_dir,
+)
 from brats_jepa_3d.models import build_segmentation_model_for_training
 from brats_jepa_3d.training import (
     add_common_supervised_args,
@@ -62,7 +66,18 @@ def main():
     args = parse_args()
     args = load_supervised_configs(args, default_model_yaml=f"{args.model_type}_3d.yaml")
 
-    out_dir = Path(args.output_dir).resolve() if getattr(args, "output_dir", None) else OUTPUTS_DIR
+    if args.from_scratch:
+        exp_name = f"scratch_{args.decoder_type}_outputs"
+    elif args.freeze_encoder:
+        exp_name = f"frozen_{args.model_type}_{args.decoder_type}_outputs"
+    else:
+        exp_name = f"{args.model_type}_{args.decoder_type}_outputs"
+
+    out_dir = resolve_default_output_dir(
+        args.output_dir,
+        experiment_name=exp_name,
+        is_smoke_test=getattr(args, "smoke_test", False),
+    )
     checkpoints_dir = out_dir / "checkpoints"
     logs_dir = out_dir / "logs"
     ensure_directories(out_dir)

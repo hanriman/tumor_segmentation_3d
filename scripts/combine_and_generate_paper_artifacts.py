@@ -191,8 +191,8 @@ def main():
     if not args.no_zip:
         print("\n" + "-" * 50)
         print("6️⃣ Packaging All Paper Artifacts into paper_artifacts.zip ...")
-        staging_dir = outputs_root / "paper_artifacts"
-        zip_path = outputs_root / "paper_artifacts.zip"
+        staging_dir = reports_dir / "paper_artifacts_staging"
+        zip_path = reports_dir / "paper_artifacts.zip"
         staging_dir.mkdir(parents=True, exist_ok=True)
         for sub in ["figures", "metrics", "tables", "logs"]:
             (staging_dir / sub).mkdir(parents=True, exist_ok=True)
@@ -243,7 +243,7 @@ def main():
     print(f"⏱️ Master Aggregation Completed in {elapsed:.2f} seconds!")
     print(f"📄 Summary Markdown: {reports_dir / 'master_3d_benchmark.md'}")
     print(f"📈 Low-Data Markdown: {reports_dir / 'low_data_3d_summary.md'}")
-    print(f"📦 Archive Download: {outputs_root / 'paper_artifacts.zip'}")
+    print(f"📦 Archive Download: {reports_dir / 'paper_artifacts.zip'}")
     print("=" * 70)
 
 

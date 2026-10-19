@@ -7,7 +7,11 @@ Trains MONAI 3D Residual UNet on multi-modal BraTS 2024 GLI volumes.
 import argparse
 from pathlib import Path
 
-from brats_jepa_3d.config import OUTPUTS_DIR, ensure_directories
+from brats_jepa_3d.config import (
+    OUTPUTS_DIR,
+    ensure_directories,
+    resolve_default_output_dir,
+)
 from brats_jepa_3d.models import build_segmentation_model_for_training
 from brats_jepa_3d.training import (
     add_common_supervised_args,
@@ -31,7 +35,11 @@ def main():
     args = parse_args()
     args = load_supervised_configs(args, default_model_yaml="unet_3d.yaml")
 
-    out_dir = Path(args.output_dir).resolve() if getattr(args, "output_dir", None) else OUTPUTS_DIR
+    out_dir = resolve_default_output_dir(
+        args.output_dir,
+        experiment_name="unet_outputs",
+        is_smoke_test=getattr(args, "smoke_test", False),
+    )
     checkpoints_dir = out_dir / "checkpoints"
     logs_dir = out_dir / "logs"
     ensure_directories(out_dir)

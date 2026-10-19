@@ -98,18 +98,50 @@ def load_yaml_config(config_path: str | Path) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def resolve_default_output_dir(
+    explicit_output_dir: str | Path | None = None,
+    experiment_name: str | None = None,
+    is_smoke_test: bool = False,
+) -> Path:
+    """
+    Intelligently resolves the output directory:
+    1. If explicit_output_dir is provided -> use it directly.
+    2. If running under test/smoke-test (pytest active, BRATS3D_TEST_MODE set, or is_smoke_test)
+       -> automatically isolates to `tests/test_outputs/.smoke_tmp` (ZERO output flags needed).
+    3. If standard experiment -> defaults to `outputs/experiments/<experiment_name>`
+       (never pollutes the `outputs/` root).
+    """
+    if explicit_output_dir:
+        return Path(explicit_output_dir).resolve()
+
+    # Detect test / smoke test execution
+    is_test_env = (
+        is_smoke_test
+        or ("pytest" in sys.modules)
+        or ("PYTEST_CURRENT_TEST" in os.environ)
+        or os.environ.get("BRATS3D_TEST_MODE") == "1"
+    )
+    if is_test_env:
+        return (PROJECT_ROOT / "tests" / "test_outputs" / ".smoke_tmp").resolve()
+
+    # Real run: default to dedicated experiment subfolder
+    subfolder = experiment_name or "default_experiment"
+    return (OUTPUTS_DIR / "experiments" / subfolder).resolve()
+
+
 def ensure_directories(base_output_dir: Path | str | None = None):
     """Creates required project output directories if they do not exist."""
     out_dir = Path(base_output_dir).resolve() if base_output_dir else OUTPUTS_DIR
-    for directory in [
-        RAW_DATA_DIR,
-        PROCESSED_DATA_DIR,
-        out_dir / "checkpoints",
-        out_dir / "figures",
-        out_dir / "metrics",
-        out_dir / "logs",
-    ]:
+    for directory in [RAW_DATA_DIR, PROCESSED_DATA_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
+
+    if out_dir == OUTPUTS_DIR.resolve():
+        # Top-level outputs directory should only ever contain experiments and reports
+        (OUTPUTS_DIR / "experiments").mkdir(parents=True, exist_ok=True)
+        (OUTPUTS_DIR / "reports").mkdir(parents=True, exist_ok=True)
+    else:
+        for sub in ["checkpoints", "figures", "metrics", "logs"]:
+            (out_dir / sub).mkdir(parents=True, exist_ok=True)
 
 
 def get_checkpoint_search_dirs(primary_dir: Path | str | None = None) -> list[Path]:

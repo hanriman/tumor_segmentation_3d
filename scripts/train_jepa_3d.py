@@ -21,6 +21,7 @@ from brats_jepa_3d.config import (
     get_dataset_dir,
     load_yaml_config,
     merge_config_with_args,
+    resolve_default_output_dir,
 )
 from brats_jepa_3d.data import (
     BraTS3DDataset,
@@ -156,7 +157,11 @@ def main():
     if Path(exp_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(exp_cfg_path), args)
 
-    out_dir = Path(args.output_dir).resolve() if getattr(args, "output_dir", None) else OUTPUTS_DIR
+    out_dir = resolve_default_output_dir(
+        args.output_dir,
+        experiment_name=f"{args.model_type}_pretrain_outputs",
+        is_smoke_test=getattr(args, "smoke_test", False),
+    )
     checkpoints_dir = out_dir / "checkpoints"
     logs_dir = out_dir / "logs"
     ensure_directories(out_dir)
