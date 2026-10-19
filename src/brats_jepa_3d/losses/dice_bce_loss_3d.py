@@ -72,19 +72,13 @@ class CombinedDiceBCELoss3D(nn.Module):
 
     Technical Rationale & Mathematical Alignment (Isensee et al., 2021; MONAI):
     --------------------------------------------------------------------------
-    In multi-class brain tumor segmentation (e.g. background=0, NCR=1, ED=2, ET=3),
-    setting `include_background=False` directs the Dice metric to exclude class 0
-    (`dice[:, 1:]`), focusing overlap supervision exclusively on pathological tumor subregions
-    without background domination.
+    In multi-class brain tumor segmentation (0=Background, 1=NETC, 2=SNFH, 3=ET, 4=RC),
+    `include_background=False` (default) directs the Dice metric to exclude class 0
+    (`dice[:, 1:]`), focusing overlap supervision exclusively on pathological foreground
+    classes without background domination.
     Cross-Entropy (`F.cross_entropy`), however, supervises all voxels including background
     (`ignore_index=-100`), ensuring dense voxel-level negative supervision so that
     exploratory foreground predictions on intracranial background are actively penalized.
-
-    Contract decision (audit 2026-09-21): the default `include_background=True`
-    follows MONAI convention. It is a **no-op for our binary whole-tumor task**
-    (`C=1`, guard `C > 1` in `VolumetricDiceLoss`); multi-class users must pass
-    `include_background=False` explicitly to exclude class 0 from Dice. The CE
-    background asymmetry above is intentional and independent of this flag.
     """
 
     def __init__(

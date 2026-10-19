@@ -19,11 +19,11 @@ class SingleEncoderJEPA3D(nn.Module):
        A single online encoder evaluates visible context patches with gradients, while
        evaluating the target representations on the full volume with stopped gradients and
        temporarily disabled dropout (`dropout_disabled`).
-    2. Projector MLP as Information Decoupler:
-       Directly regularizing encoder features D=384 to standard normal or uniform hypersphere
-       risks erasing structured anatomical clusters. A 2-layer Projector MLP (384 -> 1024 -> 128)
-       maps tokens to an auxiliary space where non-collapse regularization is applied, leaving
-       the backbone free to organize rich pathological features.
+    2. Direct Encoder-Space Statistical Regularization (Balestriero & LeCun, 2025, Eq. 9; Wu et al., 2026, Alg. 1):
+       Anti-collapse statistical regularization (VISReg or SigReg) is applied directly to the
+       tissue-filtered context encoder representations in R^{embed_dim} without an intermediate
+       nonlinear projector MLP, preventing shortcut solutions where the projector satisfies
+       Gaussianity while the encoder backbone collapses onto a low-rank subspace.
     3. Multi-Target Optimized Predictor:
        Context projection and positional gather are executed once per forward pass via
        `predictor.forward_multi_targets`, avoiding redundant matrix multiplications across target cuboids.
@@ -35,7 +35,6 @@ class SingleEncoderJEPA3D(nn.Module):
         patch_size: tuple[int, int, int] = (16, 16, 16),
         in_channels: int = 4,
         embed_dim: int = 384,
-        proj_dim: int = 128,
         encoder_depth: int = 8,
         predictor_depth: int = 4,
         predictor_embed_dim: int = 192,
@@ -54,13 +53,6 @@ class SingleEncoderJEPA3D(nn.Module):
             mlp_ratio=mlp_ratio,
         )
 
-        self.projector = nn.Sequential(
-            nn.Linear(embed_dim, 1024),
-            nn.LayerNorm(1024),
-            nn.GELU(),
-            nn.Linear(1024, proj_dim),
-        )
-
         self.predictor = JEPAPredictor3D(
             embed_dim=embed_dim,
             pred_embed_dim=predictor_embed_dim,
@@ -71,9 +63,6 @@ class SingleEncoderJEPA3D(nn.Module):
             mlp_ratio=mlp_ratio,
         )
 
-    def update_target_encoder(self, momentum: float | None = None):
-        """No-op: Single-encoder architecture is heuristic-free and does not use an EMA teacher network."""
-
     def forward(
         self,
         images: torch.Tensor,
@@ -83,16 +72,15 @@ class SingleEncoderJEPA3D(nn.Module):
     ) -> dict[str, Any]:
         # 1. Target representations: full image pass without gradients and dropout disabled
         with torch.no_grad(), dropout_disabled(self.context_encoder):
-            target_full_tokens = self.context_encoder(images)  # [B, 512, embed_dim]
+            target_full_tokens = self.context_encoder(images)  # [B, N, embed_dim]
 
         # 2. Context representations: visible context patches with gradients
         context_tokens = self.context_encoder(
             images, patch_indices=context_indices
         )  # [B, N_ctx, embed_dim]
 
-        # 3. Project context tokens and filter tissue tokens
-        full_projected = self.projector(context_tokens)  # [B, N_ctx, proj_dim]
-        projected_tokens = filter_tissue_tokens(full_projected, context_tissue_mask)
+        # 3. Filter context tokens to foreground brain-tissue tokens in encoder space R^{embed_dim}
+        tissue_tokens = filter_tissue_tokens(context_tokens, context_tissue_mask)
 
         # 4. Predict target representations efficiently
         predictions = self.predictor.forward_multi_targets(
@@ -112,6 +100,10 @@ class SingleEncoderJEPA3D(nn.Module):
             "predictions": predictions,
             "targets": targets,
             "context_tokens": context_tokens,
-            "projected_tokens": projected_tokens,
+            "tissue_tokens": tissue_tokens,
             "target_tokens": target_full_tokens,
         }
+
+
+VisRegJEPA3D = SingleEncoderJEPA3D
+SigRegJEPA3D = SingleEncoderJEPA3D

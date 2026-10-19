@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 1-Click Master Aggregator & Paper Artifacts Generator for BraTS 3D Volumetric Benchmark.
-Discovers multi-experiment outputs (e.g., outputs/kaggle_visreg_5_epoch, outputs/kaggle_nnunet_5_epoch, outputs/kaggle_unet_5_epoch),
-combines their test benchmark metrics and low-data curves, renders all 4 publication figures, formats LaTeX tables,
+Discovers multi-experiment outputs (e.g., outputs/experiments/visreg_multiscale_outputs, outputs/experiments/nnunet_outputs),
+combines their test benchmark metrics and low-data curves, renders all publication figures, formats LaTeX tables,
 and packages paper_artifacts.zip locally in seconds with zero cloud re-uploading.
 
 Usage:
@@ -27,6 +27,7 @@ from brats_jepa_3d.utils.aggregation import (
     aggregate_low_data_summaries,
     aggregate_master_benchmarks,
     aggregate_ood_summaries,
+    compute_paired_significance_table,
     discover_experiment_directories,
     export_latex_tables,
 )
@@ -157,6 +158,13 @@ def main():
     else:
         print("ℹ️ No OOD summary files found (or single-experiment evaluation).")
 
+    # 4b. Compute Paired Statistical Significance Table (when per-case CSVs exist)
+    sig_df = compute_paired_significance_table(exp_dirs, output_dir=outputs_root)
+    if not sig_df.empty:
+        print("\n" + "-" * 50)
+        print("3️⃣b Paired Statistical Significance (Wilcoxon & Bootstrap 95% CI):")
+        print(sig_df.to_markdown(index=False))
+
     # 5. Export LaTeX Tables
     print("\n" + "-" * 50)
     print("4️⃣ Compiling Publication LaTeX Tables...")
@@ -178,11 +186,6 @@ def main():
         if gen_figures_py.exists():
             print("  🎨 Running paper/latex/figures/gen_figures.py ...")
             subprocess.run([sys.executable, str(gen_figures_py)], check=False)
-
-        gen_figures_3d_py = PROJECT_ROOT / "scripts" / "generate_figures_3d.py"
-        if gen_figures_3d_py.exists():
-            print("  🎨 Running scripts/generate_figures_3d.py ...")
-            subprocess.run([sys.executable, str(gen_figures_3d_py), "--output_dir", str(reports_dir / "figures"), "--metrics_dir", str(reports_dir)], check=False)
 
     # 7. Package Paper Artifacts
     if not args.no_zip:

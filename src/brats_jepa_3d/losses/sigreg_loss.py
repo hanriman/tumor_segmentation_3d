@@ -104,7 +104,7 @@ class SigRegLoss(nn.Module):
         self,
         loss_type: str = "smooth_l1",
         sigreg_weight: float = 1.0,
-        num_projections: int = 256,
+        num_projections: int = 1024,
         t_max: float = 3.0,
         n_knots: int = 17,
         normalize_measure: bool = True,
@@ -125,24 +125,14 @@ class SigRegLoss(nn.Module):
         targets: list[torch.Tensor],
         context_tokens: torch.Tensor | None = None,
         tokens: torch.Tensor | None = None,
-        projected_tokens: torch.Tensor | None = None,
         generator: torch.Generator | None = None,
         reg_scale: float = 1.0,
     ) -> dict[str, torch.Tensor]:
         j_loss = self.jepa_loss(predictions, targets)
 
-        if tokens is not None and projected_tokens is not None:
-            logger.warning(
-                "SigRegLoss: both `tokens` and `projected_tokens` given — "
-                "using `tokens` (encoder space). Prefer `projected_tokens` only."
-            )
-        reg_tokens = (
-            tokens
-            if tokens is not None
-            else (projected_tokens if projected_tokens is not None else context_tokens)
-        )
+        reg_tokens = tokens if tokens is not None else context_tokens
         if reg_tokens is None:
-            raise ValueError("SigRegLoss requires regularized token representations.")
+            raise ValueError("SigRegLoss requires regularized token representations (`tokens`).")
 
         # Flatten tokens across batch and patch dimensions: [N, D]
         z_batch = reg_tokens.reshape(-1, reg_tokens.shape[-1])

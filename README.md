@@ -17,12 +17,12 @@ Gliomas (glioblastomas and astrocytomas) are intrinsically **three-dimensional, 
 3. **Anisotropic Metric Corruption**: Slice-wise evaluation ignores physical millimeter voxel spacing ($1.0 \times 1.0 \times 1.0\text{ mm}^3$), corrupting distance metrics like the 95th percentile Hausdorff Distance (Taha & Hanbury, 2015).
 
 ### The Scientific Thesis
-> **We extend Joint-Embedding Predictive Architectures to full 3D multi-modal brain MRI volumes, investigating whether heuristic-free VisReg regularization mathematically prevents 3D latent collapse without momentum teacher networks. This study benchmarks 3D VisReg JEPA against 3D Residual UNet, 3D nnU-Net (DynUNet), and decoder ablations (bottleneck / multiscale FPN / hybrid UNETR) under full-data, label-scarce, and scanner-shifted regimes. SigReg is implemented in code but not benchmarked here.**
+> **We extend Joint-Embedding Predictive Architectures to full 3D multi-modal brain MRI volumes, investigating whether heuristic-free VISReg regularization prevents 3D latent collapse without momentum teacher networks. This study benchmarks 3D VISReg JEPA against 3D Residual UNet, 3D nnU-Net (DynUNet), and hierarchical decoder ablations (multiscale FPN vs. hybrid UNETR) under full-data, label-scarce, and scanner-shifted regimes. SigReg is implemented in code via the same unified `SingleEncoderJEPA3D` backbone.**
 
 ### Why JEPA Over MAE and Contrastive Learning
 - **Vs. Masked Autoencoders (He et al., 2022; Feichtenhofer et al., 2022)**: MAE reconstructs raw voxels, forcing model capacity to encode high-frequency non-semantic MRI scanner noise (Rician distribution; Gudbjartsson & Patz, 1995) and RF coil bias field inhomogeneities (Sled et al., 1998). JEPA predicts abstract representations in latent space ($\hat{y}_{\text{tgt}} \approx y_{\text{tgt}}$), naturally discarding high-frequency non-semantic noise (LeCun, 2022; Assran et al., 2023).
 - **Vs. Contrastive Learning (SimCLR, MoCo)**: Contrastive methods penalize negative pairs. In brain MRI, all human subjects share macroscopic anatomy (bilateral hemispheres, ventricles, anatomical lobes). Treating different patients as negative pairs imposes false-negative gradient penalties on identical anatomical structures. JEPA requires zero negative pairs.
-- **Vs. Empirical Momentum Heuristics (BYOL, DINO)**: Momentum teacher architectures rely on an Exponential Moving Average (EMA) teacher network ($\bar{\theta} \leftarrow m \bar{\theta} + (1-m) \theta$). However, EMA is an empirical heuristic without theoretical convergence guarantees, introduces sensitive momentum schedules ($m \in [0.996, 1.0]$), and incurs $\approx 40\%$ parameter memory overhead. **SigReg** and **VisReg** eliminate the teacher network via principled information-theoretic and optimal-transport regularizers.
+- **Vs. Empirical Momentum Heuristics (BYOL, DINO)**: Momentum teacher architectures rely on an Exponential Moving Average (EMA) teacher network ($\bar{\theta} \leftarrow m \bar{\theta} + (1-m) \theta$). However, EMA is an empirical heuristic without theoretical convergence guarantees, introduces sensitive momentum schedules ($m \in [0.996, 1.0]$), and incurs $\approx 40\%$ parameter memory overhead. **SigReg** and **VISReg** eliminate the teacher network via principled information-theoretic and optimal-transport regularizers applied directly in encoder representation space.
 
 ---
 
@@ -33,25 +33,25 @@ Gliomas (glioblastomas and astrocytomas) are intrinsically **three-dimensional, 
 | **Volumetric Continuity** | $\mathbf{X} \in \mathbb{R}^{4 \times 128 \times 128 \times 128}$, $1.0\text{ mm}^3$ isotropic grid. | **Menze et al. (2014)**; **Milletari et al. (2016)**. Preserves 3D spatial continuity across white matter tracts. |
 | **Grid Resampling** | Non-zero brain bounding box $\to$ trilinear resampling to canonical $128^3$ isotropic grid (bounding box stretched to cube; aspect ratio **not** preserved). | **Isensee et al. (2021)** (*Nature Methods*). Prevents anatomical truncation of peripheral cortex at the cost of anisotropic geometric distortion (physical-mm metrics inherit this warp). |
 | **Parenchyma Normalization** | $X_{c, \text{norm}}(v) = \frac{X_c(v) - \mu_{c,\text{nz}}}{\sigma_{c,\text{nz}} + \epsilon}$ for non-zero voxels. | **Isensee et al. (2021)**. Harmonizes scanner-dependent intensity drift across institutions. |
-| **Random Modality Dropout** | $m_c \sim \text{Bernoulli}(1 - p_{\text{drop}})$, $p_{\text{drop}}=0.25$, fallback $\sum_c m_c \ge 1$, kept channels rescaled $C/\text{keep}$ (inverted dropout). | **Havaei et al. (2017)**; **Dorent et al. (2019)**. Simulates missing MRI sequences, enforcing representation independence; rescaling preserves train/test magnitude. |
-| **3D Context / Target Masking (Anisotropic Target Jitter)** | 6 Anisotropic target cuboids ($\mathcal{S}_{8\text{-grid}} = [(3,3,3), (2,3,3), (3,2,3), (3,3,2), (2,2,2), (2,2,2)]$, $N_{\text{tgt}} = 97$ tokens on $16^3$ patch; $\mathcal{S}_{16\text{-grid}} = 2\times$ scaled, $N_{\text{tgt}} = 776$ tokens on $8^3$ patch preserving identical physical mm volume) + 3D Connected BFS Context ($N_{\text{ctx}} = 37.5\%$ volume), **brain-aware**: proportional tissue filtering ($\ge \max(4, \lfloor 0.40 \times \text{vol} \rfloor)$), fallback bounds $[2, 3]^3$, tissue-only VisReg regularization. | **Assran et al. (2023)** (*CVPR*). Prevents spatial interpolation shortcuts; anisotropic aspect-ratio jitter captures directional non-axis-aligned glioma morphology; constant $N_{\text{ctx}}$ maximizes Tensor Core throughput. |
+| **Random Modality Dropout** | $m_c \sim \text{Bernoulli}(1 - p_{\text{drop}})$, $p_{\text{drop}}=0.25$, fallback $\sum_c m_c \ge 1$, zero-imputed (`rescale=False`) to match zero-imputed missing-modality evaluation. | **Havaei et al. (2017)**; **Dorent et al. (2019)**. Simulates missing MRI sequences while avoiding train/eval channel-norm mismatch. |
+| **3D Context / Target Masking (Anisotropic Target Jitter)** | 6 Anisotropic target cuboids ($\mathcal{S}_{8\text{-grid}} = [(3,3,3), (2,3,3), (3,2,3), (3,3,2), (2,2,2), (2,2,2)]$, $N_{\text{tgt}} = 97$ tokens on $16^3$ patch; $\mathcal{S}_{16\text{-grid}} = 2\times$ scaled, $N_{\text{tgt}} = 776$ tokens on $8^3$ patch preserving identical physical mm volume) + 3D Connected BFS Context ($N_{\text{ctx}} = 37.5\%$ volume), **brain-aware**: proportional tissue filtering ($\ge \max(2, \lfloor 0.25 \times \text{vol} \rfloor)$), fallback bounds $[2, 3]^3$, tissue-only VISReg/SigReg regularization. | **Assran et al. (2023)** (*CVPR*). Prevents spatial interpolation shortcuts; anisotropic aspect-ratio jitter captures directional non-axis-aligned glioma morphology; constant $N_{\text{ctx}}$ maximizes Tensor Core throughput. |
 | **3D Positional Embeddings** | Separable 3D Sinusoidal Coordinate Embeddings (frozen, requires_grad=False) $[\text{PE}(z) \,\|\, \text{PE}(y) \,\|\, \text{PE}(x)]$. | **Vaswani et al. (2017)**; **Feichtenhofer et al. (2022)**. Imparts immediate 3D metric spatial topology from step 0. |
 | **Context Gather (Zero Leakage)** | $\mathbf{Z}_{\text{ctx}} = \text{Encoder}(\text{gather}(\mathbf{Z}_0, \text{idx}_{\text{ctx}})) \in \mathbb{R}^{B \times 1536 \times 384}$ (canonical $8^3$ patch) or $\mathbb{R}^{B \times 192 \times 384}$ ($16^3$ patch). | **Assran et al. (2023)**. Evaluates strictly visible tokens; reduces self-attention FLOPs by $85.9\%$ compared to dense masking. |
-| **Projector MLP** | $z = W_2(\text{GELU}(\text{LN}(W_1 h + b_1))) + b_2: 384 \to 1024 \to 128$. | **Tishby et al. (2000)**; **Balestriero & LeCun (2025)**. Information Bottleneck decouples task representations from Gaussian forces. |
-| **SigReg Gaussianity Test** | $\mathcal{T}_{\text{EP}} = N \int \|\hat{\phi}_N(t) - \phi_0(t)\|^2 d\mu(t)$ over $M=256$ 1D rays, tissue-filtered like VisReg (shared helper); optional `generator` for seeded projections. | **Balestriero & LeCun (2025)**; **Epps & Pulley (1983)**. Sample factor $N$ cancels $1/N$ ECF derivative, yielding $O(1)$ per-sample gradients. |
-| **VisReg Decoupled Moments** | $\mathcal{L}_{\text{VisReg}} = \mathcal{L}_{\text{JEPA}} + \lambda_{\text{c}} \frac{\|\mu\|_2^2}{D} + \lambda_{\text{sc}} \frac{\sum (1-\sigma_d)^2}{D} + \lambda_{\text{sh}} W_2^2$; shape term detaches both mu and sigma (center handled only by center loss); optional `generator` for seeded SWD slices. | **Wu, Balestriero, & Levine (2026)**; **Villani (2009)**. Stop-gradient on $\mu,\sigma$ prevents redundant mean gradients and dimensional collapse; closed-form 1D sort in $O(N \log N)$. |
-| **Learning Rate Cosine Schedule** | $\eta(t)$: 20-epoch linear warmup ($0 \to 5 \times 10^{-4}$), followed by 180-epoch cosine annealing decay down to $\eta_{\text{min}} = 1 \times 10^{-5}$ across epochs 21–200 for canonical 200-epoch pre-training (10/90 for 100 epochs). | **Loshchilov & Hutter (2017)**; **Goyal et al. (2017)**. Linear warmup stabilizes early self-attention optimization; cosine annealing ensures asymptotic convergence. |
-| **VisReg Regularizer Annealing** | $\lambda_{\text{reg}}(t)$: Holds $1.0$ for 30 warmup epochs to prevent early dimensional collapse, then cosine-anneals down to $0.10$ across epochs 31–200 for canonical 200-epoch pre-training (15/85 for 100 epochs). | **Wu et al. (2026)**. Provides strong anti-collapse forces early; relaxes regularizer penalty late so the predictor focuses on anatomical representation learning. |
-| **Hierarchical 3D Decoders** | Lateral skips from $L_2, L_4, L_6, L_8$ with progressive ConvTranspose3d (`vit_fpn`, ~29.43M, pure latent probe) or dual-stream ViT + native convolutional stem (`vit_unetr`, ~29.52M, hybrid probe). | **Lin et al. (2017)**; **Hatamizadeh et al. (2022)**; **Wu & He (2018)**. Restores high-frequency boundary gradients; GroupNorm stabilizes small 3D batches ($B \le 4$). |
-| **Supervised 3D Baselines** | MONAI 3D Residual UNet (~19.23M, + ds1/ds2/ds3 heads) and MONAI 3D DynUNet (~22.75M), both with deep supervision default-ON ($w_s = 2^{-s}/\sum 2^{-j}$); asymmetric Tversky opt-in (binary-only `CombinedTverskyBCEWithLogitsLoss3D` with explicit `ValueError` guard; raw `VolumetricTverskyLoss` accepts `include_background=False` for multi-class parity with Dice); 4-fold TTA at eval. | **Ronneberger et al. (2015)**; **Isensee et al. (2021)**; **Lee et al. (2015)**; **Salehi et al. (2017)**. Establishes state-of-the-art supervised benchmark parity. |
+| **Direct Encoder-Space Regularization** | Regularization operates directly on tissue-filtered context encoder tokens $\mathbf{Z}_{\text{tissue}} \in \mathbb{R}^{N_{\text{tissue}} \times 384}$ (no separate projector MLP). | **Balestriero & LeCun (2025)** (*LeJEPA*, `arXiv:2511.08544`); **Wu, Balestriero, & Levine (2026)** (*VISReg*, `arXiv:2602.11401`). Prevents encoder-space dimensional collapse that can hide behind a projector's nullspace. |
+| **SigReg Gaussianity Test** | $\mathcal{T}_{\text{EP}} = N \int \|\hat{\phi}_N(t) - \phi_0(t)\|^2 d\mu(t)$ over $M=1024$ 1D rays on tissue-filtered encoder tokens $\mathbf{Z}_{\text{tissue}} \in \mathbb{R}^{N_{\text{tissue}} \times 384}$; optional `generator` for seeded projections. | **Balestriero & LeCun (2025)**; **Epps & Pulley (1983)**. Sample factor $N$ cancels $1/N$ ECF derivative, yielding $O(1)$ per-sample gradients. |
+| **VISReg Decoupled Moments** | $\mathcal{L}_{\text{VISReg}} = \mathcal{L}_{\text{JEPA}} + \lambda_{\text{c}} \frac{\|\mu\|_2^2}{D} + \lambda_{\text{sc}} \frac{\sum (1-\sigma_d)^2}{D} + \lambda_{\text{sh}} W_2^2$ ($M=1024$ slices, $\lambda_{\text{sh}}=4.0$); shape term standardizes with detached $\mu,\sigma$ (`z_std = (z - mu.detach()) / sigma.detach()`) before projecting onto unit sphere $\mathbb{S}^{D-1}$. | **Wu, Balestriero, & Levine (2026)** (`arXiv:2602.11401`, Algorithm 1); **Villani (2009)**. Decouples center, scale, and shape gradients; closed-form 1D sort in $O(N \log N)$. |
+| **Learning Rate Cosine Schedule** | $\eta(t)$: 10-epoch linear warmup ($0 \to 5 \times 10^{-4}$), followed by 190-epoch cosine annealing decay down to $\eta_{\text{min}} = 1 \times 10^{-5}$ across epochs 11–200 for canonical 200-epoch pre-training. | **Loshchilov & Hutter (2017)**; **Goyal et al. (2017)**. Linear warmup stabilizes early self-attention optimization; cosine annealing ensures asymptotic convergence. |
+| **Regularizer Warmup Schedule** | $\lambda_{\text{reg}}(t)$: Linearly ramps from $0 \to 1.0$ over `reg_warmup_epochs=30` and holds constant at $\lambda_{\text{reg}} = 1.0$ (`reg_min_scale=1.0`) throughout epochs 31–200. | **Wu, Balestriero, & Levine (2026)**; **Balestriero & LeCun (2025)**. Constant full-strength regularization maintains isotropic variance across all 200 epochs. |
+| **Hierarchical 3D Decoders** | Lateral skips from $L_2, L_4, L_6, L_8$ with progressive ConvTranspose3d (`multiscale` FPN, ~29.43M, pure latent probe) or dual-stream ViT + native convolutional stem (`unetr_hybrid`, ~29.52M, hybrid probe). | **Lin et al. (2017)**; **Hatamizadeh et al. (2022)**; **Wu & He (2018)**. Restores high-frequency boundary gradients; GroupNorm stabilizes small 3D batches ($B \le 4$). |
+| **Supervised 3D Baselines** | MONAI 3D Residual UNet (~19.23M, + ds1/ds2/ds3 heads) and MONAI 3D DynUNet (~22.75M), both with deep supervision default-ON ($w_s = 2^{-s}/\sum 2^{-j}$); asymmetric Tversky opt-in; 4-fold TTA at eval. | **Ronneberger et al. (2015)**; **Isensee et al. (2021)**; **Lee et al. (2015)**; **Salehi et al. (2017)**. Establishes state-of-the-art supervised benchmark parity. |
 | **Exact 3D HD95 Metric** | $d_{\text{HD95}}^{3\text{D}}$ via 3D 26-connectivity morphological erosion and `cKDTree` in canonical grid voxels (normalized $128^3$ space); tumor-only aggregates (`dice_tumor_only`, `iou_tumor_only`, `hd95_tumor_only`) are NaN (never 1.0/0.0) on tumor-free cohorts or when HD95 is off — aggregate with `nanmean`, render as `n/a`. | **Huttenlocher et al. (1993)**; **Taha & Hanbury (2015)**; **Powers (2011)**. Guarded zero-division prevents artificial epsilon score inflation. |
 | **Effective Rank ($S_k^2$)** | $\text{erank}(Z) = \exp\left(-\sum p_k \ln p_k\right)$, $p_k = S_k^2 / \sum S_j^2$. Evaluated both over full volume tokens and tissue-filtered foreground tokens to reject air bias. | **Roy & Vetterli (2007)**. Strictly uses covariance eigenvalues $S_k^2$, preventing linear $S_k$ from masking dimensional collapse. |
-| **Centered Cosine Sim** | $\bar{S}_{\text{centered}} = \frac{1}{N(N-1)} \sum_{i \neq j} \frac{(z_i - \bar{z})^\top (z_j - \bar{z})}{\|z_i - \bar{z}\|_2 \|z_j - \bar{z}\|_2}$. | **Wang & Isola (2020)**. Decouples centroid translation from angular dispersion, diagnosing directional collapse. |
-| **Combined Loss Alignment** | Multi-class Cross-Entropy supervises all voxels including background (`ignore_index=-100`) while Dice default `include_background=True` is a no-op on the binary task (explicit `False` required only for multi-class). | **Isensee et al. (2021)**; **Milletari et al. (2016)**. Dense CE penalizes false-positive foreground predictions across healthy tissue while Dice prevents background dominance. |
-| **Quartile-Stratified Splits** | Low-data tiers ($1\%$ to $50\%$) stratified by tumor volume quartile. | **Isensee et al. (2021)**. Preserves macro- and micro-lesion representation balance across low-data fractions. |
+| **Centered Cosine Sim** | $\bar{S}_{\text{centered}} = \frac{1}{N(N-1)} \sum_{i \neq j} \frac{(z_i - \bar{z})^\top (z_j - \bar{z})}{\|z_i - \bar{z}\|_2 \|z_j - \bar{z}\|_2}$ (sanity check; converges to $\approx -\frac{1}{N-1}$ under uniform centered norms). | **Wang & Isola (2020)**. Monitors off-diagonal angular dispersion alongside Effective Spectral Rank ($S_k^2$). |
+| **Combined Loss Alignment** | Multi-label binary Dice + BCE across nested BraTS sub-regions (`WT={1,2,3}`, `TC={1,3}`, `ET={3}`). | **Isensee et al. (2021)**; **Milletari et al. (2016)**. Supervises nested clinical sub-regions directly while handling empty-ET cases cleanly. |
+| **Quartile-Stratified Splits** | Low-data tiers ($1\%$ to $50\%$) stratified by tumor volume quartile with minimum step floor (`--min_steps 250`) and validation-set model selection before single test evaluation. | **Isensee et al. (2021)**. Preserves lesion size balance, avoids gradient starvation on tiny subsets, and eliminates test-set selection bias. |
 | **Metric Validation Guard** | Strict single-channel validation ($C=1$) + `from_logits` toggle in `compute_volumetric_metrics_3d`. | **Taha & Hanbury (2015)**. Prevents silent metric computation on background channel 0 and avoids double-sigmoid distortion. |
 | **3D Rician Scanner Noise** | $M = \sqrt{(X_+ + \eta_1)^2 + \eta_2^2}$, $\eta_1, \eta_2 \sim \mathcal{N}(0, \sigma_{\text{noise}}^2)$ on all voxels (tissue Rician for X>=0 / Gaussian for Z-scored negatives + air Rayleigh, sign-preserving). | **Gudbjartsson & Patz (1995)**. Accurately simulates MRI magnitude reconstruction from quadrature RF coil channels. |
-| **3D B1 RF Field Bias** | $X_{\text{corrupt}} = X \cdot \left(1 + \text{strength} \cdot \sum_{i+j+k \le 2} c_{ijk} x^i y^j z^k\right)$ with per-sample $c_{ijk} \sim \mathcal{N}(0,1)$ (field clamped to $[-0.5, 0.5]$, gain in $[1 - 0.5 \cdot \text{strength},\, 1 + 0.5 \cdot \text{strength}]$); gain multiplies original voxels (negatives preserved); background stays zero (gain on signal, air has none — unlike Rician, which synthesizes Rayleigh air). | **Sled et al. (1998)**; **Lebrun et al. (2021)**. Multiplicative smooth 2nd-order polynomial simulating RF coil field inhomogeneity; every volume sees a different field. |
+| **3D B1 RF Field Bias** | $X_{\text{corrupt}} = X \cdot \left(1 + \text{strength} \cdot \sum_{i+j+k \le 2} c_{ijk} x^i y^j z^k\right)$ with per-sample $c_{ijk} \sim \mathcal{N}(0,1)$ (field clamped to $[-0.5, 0.5]$, gain in $[1 - 0.5 \cdot \text{strength},\, 1 + 0.5 \cdot \text{strength}]$); gain multiplies original voxels (negatives preserved); background stays zero. | **Sled et al. (1998)**; **Lebrun et al. (2021)**. Multiplicative smooth 2nd-order polynomial simulating RF coil field inhomogeneity; every volume sees a different field. |
 
 ---
 
@@ -63,43 +63,34 @@ thesis_3d/
 ├── .python-version               # Python 3.12
 ├── pyproject.toml                # uv & setuptools configuration
 ├── README.md                     # Comprehensive documentation
-├── agents.md                     # Scientific writing & research guidelines
+├── AGENTS.md                     # Scientific writing & research guidelines
 │
 ├── docs/
 │   ├── README.md                         # Documentation index & guide overview
-│   ├── 01_visreg_jepa_architecture_and_pipeline.md # Complete dataflow, tokenization & VisReg loss formulation
-│   ├── 02_forensic_audit_and_tier2_upgrades.md     # Audit remediations, anisotropic target jitter, token regularization & annealing
+│   ├── 01_visreg_jepa_architecture_and_pipeline.md # Complete dataflow, tokenization & VISReg/SigReg loss formulation
+│   ├── 02_forensic_audit_and_tier2_upgrades.md     # Audit remediations, methodological fixes & architectural simplification
 │   ├── 03_scientific_rationales_and_benchmarks.md  # Brain-aware masking, HD95 decoupling, fairness & official WT/TC/ET results
-│   └── 04_cloud_and_local_execution_guide.md       # Kaggle & Colab Pro A100 execution, data packaging & aggregation
+│   └── 04_cloud_and_local_execution_guide.md       # Google Colab GPU execution & local artifact aggregation
 │
-├── notebooks/                        # Self-contained Kaggle & Google Colab research suites
-│   ├── colab/                        # Colab GPU suite (A100/L4/T4, 8³ patch / 4,096 tokens, Drive sync)
-│   │   ├── 01_colab_visreg_pretrain_3d.ipynb           # 3D VisReg JEPA SSL pre-training (200 epochs)
-│   │   ├── 02_colab_finetune_visreg_multiscale_3d.ipynb # VisReg + Multi-Scale FPN downstream (60 epochs)
-│   │   ├── 03_colab_finetune_visreg_unetr_3d.ipynb      # VisReg + Hybrid UNETR downstream (60 epochs)
-│   │   ├── 04_colab_nnunet_3d.ipynb                    # 3D nnU-Net baseline (DynUNet with deep supervision)
-│   │   ├── 05_colab_unet_3d.ipynb                      # 3D Residual UNet baseline
-│   │   ├── 06_colab_scratch_multiscale_3d.ipynb        # From-scratch ViT-FPN ablation (zero pre-training)
-│   │   ├── 07_colab_scratch_unetr_3d.ipynb             # From-scratch ViT-UNETR hybrid ablation (zero pre-training)
-│   │   ├── 08_colab_frozen_visreg_multiscale_3d.ipynb   # VisReg + FPN frozen encoder probe
-│   │   └── 09_colab_frozen_visreg_unetr_3d.ipynb       # VisReg + UNETR frozen encoder probe
-│   └── kaggle/                       # Kaggle T4 benchmark suite (16³ patch / 512 tokens)
-│       ├── 01_train_visreg_3d.ipynb  # 3D VisReg JEPA SSL pre-training
-│       ├── 02_diagnose_visreg_3d.ipynb # Label-free pre-training masking diagnostics
-│       ├── 03_train_nnunet_3d.ipynb  # 3D nnU-Net baseline
-│       ├── 04_train_unet_3d.ipynb    # 3D Residual UNet baseline
-│       ├── 05_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT-FPN ablation
-│       ├── 06_vit_unetr_hybrid_ablation_3d.ipynb       # From-scratch ViT-UNETR hybrid ablation
-│       ├── 07_finetune_visreg_multiscale_3d.ipynb       # VisReg + FPN downstream fine-tuning
-│       └── 08_finetune_visreg_unetr_3d.ipynb           # VisReg + UNETR downstream fine-tuning
+├── notebooks/
+│   └── colab/                        # Canonical Google Colab GPU suite (8³ patch / 4,096 tokens, Drive sync)
+│       ├── 01_colab_visreg_pretrain_3d.ipynb           # 3D VISReg JEPA SSL pre-training (200 epochs)
+│       ├── 02_colab_finetune_visreg_multiscale_3d.ipynb # VISReg + Multi-Scale FPN downstream (60 epochs)
+│       ├── 03_colab_finetune_visreg_unetr_3d.ipynb      # VISReg + Hybrid UNETR downstream (60 epochs)
+│       ├── 04_colab_nnunet_3d.ipynb                    # 3D nnU-Net baseline (DynUNet with deep supervision)
+│       ├── 05_colab_unet_3d.ipynb                      # 3D Residual UNet baseline
+│       ├── 06_colab_scratch_multiscale_3d.ipynb        # From-scratch ViT-FPN ablation (zero pre-training)
+│       ├── 07_colab_scratch_unetr_3d.ipynb             # From-scratch ViT-UNETR hybrid ablation (zero pre-training)
+│       ├── 08_colab_frozen_visreg_multiscale_3d.ipynb   # VISReg + FPN frozen encoder probe
+│       └── 09_colab_frozen_visreg_unetr_3d.ipynb       # VISReg + UNETR frozen encoder probe
 │
 ├── configs/                      # Modular YAML configuration hierarchy
 │   ├── base.yaml                 # System paths, seed, device, AMP configs
 │   ├── dataset/
 │   │   └── brats3d.yaml          # Grid geometry (128^3), patch size, modalities, augmentations
 │   ├── model/
-│   │   ├── sigreg_jepa_3d.yaml   # 3D SigReg JEPA + Epps-Pulley parameters
-│   │   ├── visreg_jepa_3d.yaml   # 3D VisReg JEPA + Sliced-Wasserstein parameters
+│   │   ├── sigreg_jepa_3d.yaml   # 3D SigReg JEPA + Epps-Pulley parameters (M=1024)
+│   │   ├── visreg_jepa_3d.yaml   # 3D VISReg JEPA + Sliced-Wasserstein parameters (M=1024, swd_weight=4.0)
 │   │   ├── unet_3d.yaml          # 3D Residual UNet parameters
 │   │   └── nnunet_3d.yaml        # 3D DynUNet + Deep Supervision parameters
 │   └── experiment/
@@ -107,77 +98,75 @@ thesis_3d/
 │       └── finetune.yaml         # 3D downstream fine-tuning schedule
 │
 ├── src/
-│   └── brats_jepa_3d/            # Fully standalone Python package
+│   └── brats_jepa_3d/            # Standalone Python package
 │       ├── __init__.py
-│       ├── config.py             # Cloud/Kaggle/Colab/Local dynamic resolver
+│       ├── config.py             # Cloud/Colab/Local dynamic path & YAML config resolver
 │       ├── data/
-│       │   ├── dataset.py        # BraTS3DDataset with bounded RAM caching & fraction sampling
-│       │   ├── transforms.py     # RandomModalityDropout3D, Rician noise, B1 bias field
-│       │   └── masking.py        # JEPAMaskingTransform3D (brain-aware 3D cuboids + 3D BFS context, torch-only RNG, hard zero-overlap)
+│       │   ├── dataset.py        # BraTS3DDataset with bounded RAM caching & stratified fraction sampling
+│       │   ├── transforms.py     # RandomModalityDropout3D (zero-imputed), Rician noise, B1 bias field
+│       │   └── masking.py        # JEPAMaskingTransform3D (brain-aware 3D cuboids + 3D BFS context)
 │       ├── models/
+│       │   ├── builder.py               # Central factory: build_segmentation_model, load_segmentation_checkpoint, extract_encoder_state_dict
 │       │   ├── vision_transformer_3d.py # PatchEmbed3D + 3D Sincos Pos + ViTEncoder3D
 │       │   ├── predictor_3d.py          # JEPAPredictor3D (4 layers, self-attention)
-│       │   ├── sigreg_jepa_3d.py        # Single-encoder + Projector MLP (384 -> 1024 -> 128)
-│       │   ├── visreg_jepa_3d.py        # Single-encoder + Projector MLP
-│       │   ├── segmentation_head_3d.py  # Bottleneck, Multi-Scale FPN & Hybrid UNETR Decoders (native 128³/64³ stem)
+│       │   ├── single_encoder_jepa_3d.py # Unified SingleEncoderJEPA3D (shared context/target encoder + tissue filter)
+│       │   ├── _tissue_filter.py        # Shared tissue-foreground token extraction helper
+│       │   ├── segmentation_head_3d.py  # MultiScaleSegmentationDecoder3D (FPN) & UNETRHybridDecoder3D + SegmentationModel3D
 │       │   ├── unet_3d.py               # 3D Residual UNet (MONAI) + ds1/ds2/ds3 deep-supervision heads
 │       │   └── nnunet_3d.py             # 3D DynUNet with Deep Supervision (MONAI)
+│       ├── training/
+│       │   └── supervised_trainer.py    # Shared train_one_epoch, validate_regions, run_supervised_training
 │       ├── losses/
-│       │   ├── sigreg_loss.py           # Epps-Pulley Gaussianity test (scale factor N, raw 1D rays)
-│       │   ├── visreg_loss.py           # Decoupled Center, Scale, Shape (SWD, stop-grad sigma)
-│       │   ├── dice_bce_loss_3d.py      # Combined Volumetric 3D Dice + Cross-Entropy (multi-class & binary)
-│   │   │   ├── tversky_loss_3d.py       # Asymmetric Tversky (α=0.3, β=0.7) + BCE opt-in + criterion factory
-│       │   └── deep_supervision_loss_3d.py # Multi-scale exponential decay supervision (custom base_loss, 5D & 4D targets)
+│       │   ├── sigreg_loss.py           # Epps-Pulley Gaussianity test (scale factor N, M=1024 1D rays)
+│       │   ├── visreg_loss.py           # Decoupled Center, Scale, Shape (SWD on standardized tokens, M=1024)
+│       │   ├── dice_bce_loss_3d.py      # Combined Volumetric 3D Dice + Cross-Entropy (multi-label & binary)
+│       │   ├── tversky_loss_3d.py       # Asymmetric Tversky (α=0.3, β=0.7) + BCE opt-in + criterion factory
+│       │   └── deep_supervision_loss_3d.py # Multi-scale exponential decay supervision
 │       ├── metrics/
+│       │   ├── regions.py               # BraTS 2024 GLI 3-region conversion (WT={1,2,3}, TC={1,3}, ET={3})
 │       │   ├── volumetric_metrics.py    # Guarded 3D Dice, IoU, cKDTree 3D HD95 (Powers 2011)
 │       │   └── probing_metrics.py       # Effective Rank (S^2), Centered Cosine Sim
 │       └── utils/
 │           ├── aggregation.py           # Multi-experiment merging & LaTeX table generation
 │           ├── device.py                # CUDA / MPS / CPU device detection & AMP context
-│   │       ├── tta.py                    # 4-fold orthogonal-reflection TTA (eval, all models)
-│           ├── export.py                # Kaggle artifact staging, zip packaging, and input resolution
+│           ├── tta.py                   # 4-fold orthogonal-reflection TTA (eval, all models)
+│           ├── export.py                # Cloud artifact staging, zip packaging, and checkpoint resolution
 │           ├── logging.py               # MetricTracker, setup_logger & numeric checkpoint sorting
 │           └── seed.py                  # Deterministic PRNG seeding
 │
 ├── scripts/
 │   ├── prepare_data_3d.py        # NIfTI bounding-box cropping, resampling to 128^3 & .npz export
-│   ├── train_jepa_3d.py          # 3D SSL Pre-training runner (50 epochs)
-│   ├── train_downstream_3d.py    # Downstream 3D fine-tuning & linear probing runner
+│   ├── train_jepa_3d.py          # 3D SSL Pre-training runner (200 epochs, VISReg or SigReg)
+│   ├── train_downstream_3d.py    # Downstream 3D fine-tuning & frozen probing runner
 │   ├── train_unet_3d.py          # Supervised 3D UNet baseline runner (--deep_supervision default-ON)
 │   ├── train_nnunet_3d.py        # Supervised 3D nnU-Net baseline runner
 │   ├── evaluate_3d.py            # Master benchmark evaluator (Dice, HD95, Rank, Latency, --tta)
-│   ├── diagnose_visreg_3d.py       # Real-data D1–D3 masking/regularization probe (Kaggle)
-│   ├── merge_and_resplit_3d.py       # Merge staged pools + grouped patient split (leakage fix)
-│   ├── evaluate_low_data_3d.py   # Label efficiency runner (1% to 100% 3D labels)
-│   ├── evaluate_ood_3d.py        # 3D Scanner shift runner (Rician noise, B1 bias field)
-│   ├── generate_figures_3d.py    # Multi-planar orthogonal & publication figures
-│   ├── package_for_kaggle.py     # Packages processed 3D dataset into dist_kaggle/ archive
+│   ├── diagnose_visreg_3d.py     # Real-data D1–D3 masking/regularization diagnostic probe
+│   ├── evaluate_low_data_3d.py   # Label efficiency runner (1% to 100% 3D labels, val-selected best ckpt, --min_steps 250)
+│   ├── evaluate_ood_3d.py        # 3D Scanner shift & missing-modality runner (Rician noise, B1 bias field, zero-imputed missing modalities)
 │   └── combine_and_generate_paper_artifacts.py # 1-Click master multi-experiment aggregator & LaTeX exporter
 │
-├── tests/                        # Consolidated pytest regression test suite (169 tests, 100% pass)
+├── paper/
+│   └── latex/
+│       ├── main.tex              # Thesis manuscript source
+│       ├── references.bib        # BibTeX references
+│       └── figures/
+│           └── gen_figures.py    # Vector PDF & PNG publication figure generator
+│
+├── tests/                        # Consolidated pytest regression test suite (172 tests, 100% pass)
 │   ├── smoke_test_pipeline.py    # End-to-end multi-model pipeline smoke test runner
 │   ├── conftest.py               # Synthetic 3D volume fixtures & hardware mocks
 │   ├── test_benchmark_consistency.py # Paper LaTeX vs CSV mathematical parity tests
 │   ├── test_data_3d.py           # Dataset, 0% leakage, anisotropic 3D target jitter & BFS masking
-│   ├── test_evaluation_3d.py     # Evaluation parity, deep supervision flags, uninit decoder guard
+│   ├── test_evaluation_3d.py     # Evaluation parity, model builder & checkpoint loading tests
 │   ├── test_integration_3d.py    # End-to-end smoke test integrations for training and evaluation
-│   ├── test_losses_3d.py         # VisReg SWD shape, SigReg Epps-Pulley, cosine annealing, Dice, BCE, Tversky
+│   ├── test_losses_3d.py         # VISReg SWD shape, SigReg Epps-Pulley, warmup schedule, Dice, BCE, Tversky
 │   ├── test_metrics_3d.py        # Volumetric metrics, cKDTree 3D HD95, Effective Rank S^2
-│   └── test_models_3d.py         # ViT encoder, predictor, FPN, UNETR hybrid, DynUNet, Residual UNet
+│   └── test_models_3d.py         # ViT encoder, predictor, SingleEncoderJEPA3D, FPN, UNETR hybrid, DynUNet, Residual UNet
 │
 └── outputs/                      # Experiment-stratified outputs & benchmarks
-    ├── <experiment_name>/        # e.g., kaggle_visreg_5_epoch, kaggle_nnunet_5_epoch, kaggle_unet_5_epoch
-    │   ├── checkpoints/          # Model weights (*_best.pt, *_epoch_*.pt)
-    │   ├── figures/              # Qualitative slice visualizations (*.png)
-    │   ├── logs/                 # Training logs and epoch step metrics (*.log, *.csv, *.json)
-    │   └── metrics/              # Quantitative evaluation summaries (master_3d_benchmark.csv, low_data_*.md)
-    ├── master_3d_benchmark.csv   # Unified master benchmark across all discovered experiments
-    ├── master_3d_benchmark.md    # Markdown master benchmark table
-    ├── low_data_3d_summary.csv   # Unified low-data label efficiency comparison across all models
-    ├── low_data_3d_summary.md    # Markdown low-data comparison table
-    ├── tables_latex.tex          # Formatted LaTeX tables ready to paste into paper/latex/
-    ├── figures/                  # Publication figures in dual vector PDF & high-res PNG
-    └── paper_artifacts.zip       # 1-Click comprehensive publication download archive
+    ├── experiments/              # Per-experiment artifacts (checkpoints, logs, metrics, figures)
+    └── reports/                  # Aggregated benchmark tables (master_3d_benchmark.csv, low_data_3d_summary.csv, ood_3d_summary.csv, tables_latex.tex)
 ```
 
 ---
@@ -194,8 +183,8 @@ uv pip install -e ".[dev]"
 
 ### Step 2: Run Unit Tests
 ```bash
-pytest tests/ -v
-# Verified: 161 passed (100% pass rate in consolidated suites)
+uv run pytest -q
+# Verified: 172 passed (100% pass rate)
 ```
 
 ---
@@ -218,26 +207,26 @@ python scripts/prepare_data_3d.py --limit 100 --dtype float16 --num_workers 4
 
 ### 2. Pre-training 3D JEPAs (200 Epochs)
 ```bash
-# 3D SigReg JEPA (Epps-Pulley Gaussianity test, scale factor N)
-python scripts/train_jepa_3d.py --model_type sigreg_jepa --epochs 200 --batch_size 32 --amp
+# 3D SigReg JEPA (Epps-Pulley Gaussianity test on encoder tissue tokens, M=1024)
+python scripts/train_jepa_3d.py --model_type sigreg_jepa --patch_size 8 8 8 --epochs 200 --batch_size 32 --amp
 
-# 3D VisReg JEPA (Decoupled Center, Scale, Shape SWD + Anisotropic Target Jitter + Dual Cosine Schedules)
-python scripts/train_jepa_3d.py --model_type visreg_jepa --epochs 200 --batch_size 32 --amp \
-    --reg_warmup_epochs 30 --reg_min_scale 0.10
-
-> **Benchmark scope:** this study reports VisReg vs. UNet / nnU-Net / decoder ablations only. SigReg is implemented and smoke-tested but **not benchmarked**.
+# 3D VISReg JEPA (Decoupled Center, Scale, Shape SWD on encoder tissue tokens, M=1024, swd_weight=4.0)
+python scripts/train_jepa_3d.py --model_type visreg_jepa --patch_size 8 8 8 --epochs 200 --batch_size 32 --amp \
+    --reg_warmup_epochs 30 --reg_min_scale 1.0
 ```
+
+> **Benchmark scope:** both `visreg_jepa` and `sigreg_jepa` share the identical `SingleEncoderJEPA3D` architecture and differ solely in the regularizer applied to `outputs["tissue_tokens"]` (`VisRegLoss` vs. `SigRegLoss`). This study benchmarks VISReg JEPA against 3D Residual UNet, 3D nnU-Net, and ViT decoder ablations.
 
 ### 3. Downstream Volumetric Segmentation (60 Epochs)
 
 ```bash
-# End-to-end full fine-tuning with Hierarchical Multi-Scale 3D FPN Decoder (Default & Primary Benchmark)
-python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type multiscale --epochs 60 --batch_size 4 --amp
-python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type unetr_hybrid --epochs 60 --batch_size 4 --amp
+# End-to-end full fine-tuning with Hierarchical Multi-Scale 3D FPN Decoder or Hybrid UNETR
+python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type multiscale --patch_size 8 8 8 --epochs 60 --batch_size 4 --amp
+python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type unetr_hybrid --patch_size 8 8 8 --epochs 60 --batch_size 4 --amp
 
-# Linear / Decoder probing (frozen encoder weights, mechanistic ablation)
-python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type multiscale --freeze_encoder --epochs 60 --batch_size 4 --amp
-python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type unetr_hybrid --freeze_encoder --epochs 60 --batch_size 4 --amp
+# Frozen-backbone decoder probing (--freeze_encoder keeps ViT encoder in eval mode with requires_grad=False)
+python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type multiscale --patch_size 8 8 8 --freeze_encoder --epochs 60 --batch_size 4 --amp
+python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type unetr_hybrid --patch_size 8 8 8 --freeze_encoder --epochs 60 --batch_size 4 --amp
 ```
 
 > [!NOTE]
@@ -245,14 +234,13 @@ python scripts/train_downstream_3d.py --model_type visreg_jepa --decoder_type un
 > By default, `freeze_encoder=False` (full end-to-end fine-tuning). The pre-trained 3D Vision Transformer weights initialize the backbone outside the background-collapse attractor basin, and both encoder and decoder adapt jointly to the voxel segmentation objective. This represents the standard, equitable benchmark against fully supervised 3D CNNs.
 > For an in-depth scientific analysis of why full fine-tuning is standard in 3D medical segmentation and how to run 3-way probing ablations, see [docs/03_scientific_rationales_and_benchmarks.md](docs/03_scientific_rationales_and_benchmarks.md).
 
-
 ### 4. Supervised 3D Baselines (60 Epochs)
 ```bash
-# 3D Residual UNet (MONAI)
+# 3D Residual UNet (MONAI, deep supervision default-ON)
 python scripts/train_unet_3d.py --epochs 60 --batch_size 4 --amp
 
 # 3D nnU-Net DynUNet with Deep Supervision (MONAI)
-python scripts/train_nnunet_3d.py --epochs 60 --batch_size 2 --amp
+python scripts/train_nnunet_3d.py --epochs 60 --batch_size 4 --amp
 ```
 
 ### 5. Full Evaluation Suite
@@ -260,14 +248,16 @@ python scripts/train_nnunet_3d.py --epochs 60 --batch_size 2 --amp
 # Master volumetric benchmark across models (supports --model_type or --all_models)
 python scripts/evaluate_3d.py --batch_size 4 --amp --tta  # 4-fold TTA, all models
 
-# Low-data label efficiency benchmark across 6 annotation tiers (25 epochs per fraction)
-python scripts/evaluate_low_data_3d.py --model_type visreg_jepa --fractions 0.01 0.05 0.10 0.25 0.50 1.00 --epochs 25 --amp
+# Low-data label efficiency benchmark across 6 annotation tiers (25 epochs per fraction, --min_steps 250, val-selected best ckpt)
+python scripts/evaluate_low_data_3d.py --model_type visreg_jepa --decoder_type multiscale --patch_size 8 8 8 \
+    --fractions 0.01 0.05 0.10 0.25 0.50 1.00 --epochs 25 --min_steps 250 --amp
 
-# Out-of-Distribution (OOD) scanner shift & missing modality stress test (supports --model_type)
-python scripts/evaluate_ood_3d.py --model_type visreg_jepa --amp
+# Out-of-Distribution (OOD) scanner shift & missing modality stress test
+python scripts/evaluate_ood_3d.py --model_type visreg_jepa --decoder_type multiscale --patch_size 8 8 8 --amp
 
-# Publication figures generator (orthogonal slices, comparison bars, label efficiency, OOD)
-python scripts/generate_figures_3d.py
+# Publication figures & master aggregation
+python scripts/combine_and_generate_paper_artifacts.py
+python paper/latex/figures/gen_figures.py
 ```
 
 ### 6. Automated Pipeline Smoke Test Runner
@@ -280,66 +270,61 @@ python tests/smoke_test_pipeline.py
 python tests/smoke_test_pipeline.py --model_type all
 ```
 
-### 7. Cloud Execution (Kaggle & Colab A100) & Streamlined Local Aggregation
+### 7. Cloud Execution (Google Colab GPU Suite) & Local Aggregation
 
-#### Workflow A: Zero-Setup Parallel Execution on Kaggle (Free NVIDIA Tesla T4 16 GB)
-1. **Package Data**: Run `python scripts/package_for_kaggle.py` and upload `dist_kaggle/brats_3d_full.zip` to Kaggle as a dataset named `brats-3d-full` (1,621 scans, grouped split: train 1,144 / val 235 / test 242).
-2. **Train Models in Parallel**:
-   - Run `notebooks/03_train_nnunet_3d.ipynb` and `notebooks/04_train_unet_3d.ipynb` across concurrent GPU sessions.
-   - For VisReg JEPA, run `notebooks/01_train_visreg_3d.ipynb` once (SSL pre-training, 100 epochs), publish its `visreg_pretrain_outputs.zip` checkpoint as a Kaggle dataset input, then run `notebooks/07_finetune_visreg_multiscale_3d.ipynb` and `notebooks/08_finetune_visreg_unetr_3d.ipynb` in parallel on the identical encoder (controlled decoder ablation).
-   - Each downstream/baseline notebook evaluates its own test split performance, low-data label efficiency, and OOD robustness self-contained on the GPU before exporting.
-
-#### Workflow B: High-Throughput & High-Resolution Pre-Training on Google Colab (NVIDIA A100 SXM 40/80 GB)
-- Run `notebooks/colab_a100_visreg_pretrain.ipynb` directly in the Colab Web UI with runtime set to **A100 GPU (High-RAM)**.
-- Pre-trains with high-resolution $8^3$ voxel patch size ($16^3 = 4,096$ token grid, $2\times$ sharper spatial granularity than Kaggle's $16^3$ patch size), `batch_size: 32`, resolution-scaled anisotropic target masking (776 tokens), and cosine regularizer annealing.
-- Securely authenticates private Kaggle datasets via Colab Secrets (`KAGGLE_USERNAME`, `KAGGLE_KEY`), unzips to fast local NVMe (`/content/data/`), and synchronizes checkpoints directly to Google Drive.
-
-#### 1-Click Local Aggregation (Zero Cloud Re-Upload):
-- Download the output archives into `outputs/<experiment_name>/` (e.g. `outputs/kaggle_visreg_multiscale`, `outputs/kaggle_visreg_unetr`, `outputs/kaggle_nnunet_5_epoch`, `outputs/kaggle_unet_5_epoch`).
-- Run the local aggregator script:
-  ```bash
-  python scripts/combine_and_generate_paper_artifacts.py
-  ```
-- Automatically merges all master benchmarks, low-data curves, and OOD tables, renders all 4 vector PDF/PNG figures, formats LaTeX tables, and packages `paper_artifacts.zip` locally in **2 seconds**!
-- For detailed operational instructions, hardware budgets, and step-by-step guides, see [docs/04_cloud_and_local_execution_guide.md](docs/04_cloud_and_local_execution_guide.md).
+1. **Google Colab Suite (`notebooks/colab/01..09_*.ipynb`)**:
+   - Place `brats_gli_3d_v2.zip` in Google Drive under `My Drive/thesis/data/`.
+   - Run `notebooks/colab/01_colab_visreg_pretrain_3d.ipynb` first to pre-train the 3D VISReg JEPA encoder ($8^3$ patches, $4,096$ tokens, 200 epochs) and export `visreg_pretrain_outputs.zip` to `My Drive/thesis/visreg_pretrain_outputs/`.
+   - Run downstream and baseline notebooks (`02` through `09`) in parallel or sequence; each notebook extracts the dataset to fast local NVMe (`/content/data/`), runs training + test evaluation + low-data evaluation + OOD evaluation, and mirrors outputs to `My Drive/thesis/<experiment_name>/`.
+2. **1-Click Local Aggregation**:
+   - Place downloaded experiment folders under `outputs/experiments/<experiment_name>/` and run:
+     ```bash
+     python scripts/combine_and_generate_paper_artifacts.py
+     ```
+   - Automatically merges all master benchmarks, low-data curves, and OOD tables into `outputs/reports/` and generates LaTeX tables. For detailed operational instructions, see [docs/04_cloud_and_local_execution_guide.md](docs/04_cloud_and_local_execution_guide.md).
 
 ---
 
 ## 6. Official Empirical Benchmarks & Scientific Findings
 
-Evaluated on the **BraTS 2024 GLI** benchmark under the official three-region protocol (**Whole Tumor [WT]**, **Tumor Core [TC]**, and **Enhancing Tumor [ET]**) on the held-out test split ($N=242$ patient volumes, 4-fold TTA):
+Evaluated on the **BraTS 2024 GLI** benchmark under the three-region protocol (**Whole Tumor [WT]**, **Tumor Core [TC]**, and **Enhancing Tumor [ET]**) on the held-out test split ($N=242$ patient volumes, 4-fold TTA):
 
 ### 6.1 Full Downstream Multi-Region Benchmark (60 Epochs, Full Split)
 
-| Model Architecture | Encoder Backbone | Decoder Type | Mean Dice (WT/TC/ET) | WT Dice | TC Dice | ET Dice | HD95 (voxels) | Latency (128³) |
+| Model Architecture | Encoder Backbone | Decoder Type | Mean Dice (WT/TC/ET) | WT Dice | TC Dice | ET Dice | WT / TC / ET HD95 (voxels) | Latency (128³) |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **3D nnU-Net** | DynUNet CNN (~22.75M) | Deep Supervised | **79.50%** | **88.38%** | **82.20%** | **67.92%** | **9.05** | 1066.39 ms |
-| **3D Residual UNet** | ResUNet CNN (~19.23M) | Residual 3D | 76.67% | 86.45% | 79.13% | 64.42% | 11.45 | **546.94 ms** |
-| **3D VisReg JEPA (FPN)** | 3D ViT (JEPA Pretrained) | Multi-Scale FPN (~29.43M) | 76.58% | 86.13% | 77.62% | 65.99% | 12.18 | 1373.54 ms |
-| **3D VisReg UNETR** | 3D ViT (JEPA Pretrained) | UNETR Hybrid (~29.52M) | 75.61% | 87.19% | 77.79% | 61.84% | 13.02 | 1331.60 ms |
-| **3D ViT-FPN (Scratch)** | 3D ViT (From Scratch) | Multi-Scale FPN (~29.43M) | 75.15% | 86.07% | 76.77% | 62.62% | 13.84 | 1274.80 ms |
-| **3D ViT-UNETR (Scratch)** | 3D ViT (From Scratch) | UNETR Hybrid (~29.52M) | 74.80% | 86.62% | 76.88% | 60.90% | 13.51 | 1340.05 ms |
-| **3D VisReg UNETR (Frozen)** | 3D ViT (JEPA Pretrained & Frozen) | UNETR Hybrid (~29.52M) | 75.13% | 85.72% | 77.09% | 62.59% | 13.62 | 1354.73 ms |
-| **3D VisReg FPN (Frozen)** | 3D ViT (JEPA Pretrained & Frozen) | Multi-Scale FPN (~29.43M) | 72.31% | 84.79% | 71.97% | 60.18% | 15.10 | 1187.20 ms |
+| **3D nnU-Net** | DynUNet CNN (~22.75M) | Deep Supervised | **79.50%** | **88.38%** | **82.20%** | **67.92%** | **5.63 / 4.64 / 10.34** | 1066.39 ms |
+| **3D Residual UNet** | ResUNet CNN (~19.23M) | Residual 3D | 76.67% | 86.45% | 79.13% | 64.42% | 5.91 / 6.29 / 13.12 | **546.94 ms** |
+| **3D VisReg JEPA (FPN)** | 3D ViT (JEPA Pretrained) | Multi-Scale FPN (~29.43M) | 76.58% | 86.13% | 77.62% | 65.99% | 6.58 / 7.54 / 14.72 | 1373.54 ms |
+| **3D VisReg UNETR** | 3D ViT (JEPA Pretrained) | UNETR Hybrid (~29.52M) | 75.61% | 87.19% | 77.79% | 61.84% | 5.71 / 7.13 / 22.05 | 1331.60 ms |
+| **3D ViT-FPN (Scratch)** | 3D ViT (From Scratch) | Multi-Scale FPN (~29.43M) | 75.15% | 86.07% | 76.77% | 62.62% | 5.82 / 7.63 / 21.02 | 1274.80 ms |
+| **3D ViT-UNETR (Scratch)** | 3D ViT (From Scratch) | UNETR Hybrid (~29.52M) | 74.80% | 86.62% | 76.88% | 60.90% | 5.84 / 8.80 / 29.53 | 1340.05 ms |
+| **3D VisReg UNETR (Frozen)** | 3D ViT (JEPA Pretrained & Frozen) | UNETR Hybrid (~29.52M) | 75.13% | 85.72% | 77.09% | 62.59% | 6.74 / 6.55 / 17.08 | 1354.73 ms |
+| **3D VisReg FPN (Frozen)** | 3D ViT (JEPA Pretrained & Frozen) | Multi-Scale FPN (~29.43M) | 72.31% | 84.79% | 71.97% | 60.18% | 6.65 / 12.10 / 23.18 | 1187.20 ms |
 
-### 6.2 Low-Data Volumetric Label Efficiency (25 Epochs per Tier)
+### 6.2 Low-Data Volumetric Label Efficiency (25 Epochs per Tier, without TTA)
 
 | Annotation Budget | VisReg UNETR | VisReg FPN | 3D nnU-Net | 3D ResUNet | ViT-UNETR (Scratch) | ViT-FPN (Scratch) | VisReg UNETR (Frozen) | VisReg FPN (Frozen) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1.0%** (~11 vols) | 2.91% | 22.45% | **28.05%** | 5.86% | 3.17% | 16.70% | 2.71% | 20.74% |
-| **5.0%** (~58 vols) | **63.65%** | 61.45% | 59.86% | 52.65% | 56.57% | 50.87% | 61.12% | 57.22% |
-| **10.0%** (~115 vols) | **66.16%** | 65.20% | 65.03% | 59.40% | 61.40% | 60.85% | 64.88% | 62.15% |
-| **25.0%** (~286 vols) | 71.85% | 71.40% | **73.12%** | 68.50% | 67.90% | 67.20% | 70.15% | 68.30% |
-| **50.0%** (~572 vols) | 73.90% | 74.15% | **76.80%** | 72.40% | 71.20% | 71.80% | 72.60% | 70.50% |
-| **100.0%** (1,144 vols)| 75.61% | 76.58% | **79.50%** | 76.67% | 74.80% | 75.15% | 75.13% | 72.31% |
+| **1.0%** (12 vols) | 2.91% | 22.45% | **28.05%** | 5.86% | 3.17% | 16.70% | 2.71% | 20.74% |
+| **5.0%** (58 vols) | **63.65%** | 61.45% | 59.86% | 52.65% | 56.57% | 50.87% | 61.12% | 57.22% |
+| **10.0%** (115 vols) | **66.16%** | 63.43% | 65.03% | 60.46% | 61.40% | 57.14% | 63.85% | 59.25% |
+| **25.0%** (286 vols) | 71.57% | 68.96% | **71.68%** | 68.13% | 70.07% | 67.08% | 69.01% | 67.35% |
+| **50.0%** (572 vols) | **74.61%** | 72.66% | 73.63% | 72.21% | 73.55% | 70.80% | 72.44% | 71.01% |
+| **100.0%** (1,144 vols)| 75.85% | 74.22% | **76.31%** | 74.74% | 73.90% | 71.61% | 73.85% | 71.38% |
 
 ### 6.3 Key Scientific Insights & Diagnostic Observations:
 1. **Decisive Low-Data JEPA Advantage ($5\%$ & $10\%$ Data)**:
-   - At $5\%$ data ($58$ volumes), **3D VisReg UNETR achieves the top performance overall ($\mathbf{63.65\%}$ mean Dice)**, beating from-scratch ViT-UNETR ($56.57\%$, $\mathbf{+7.08\text{pp}}$ JEPA gain), deeply supervised 3D nnU-Net ($59.86\%$, $\mathbf{+3.79\text{pp}}$), and 3D Residual UNet ($52.65\%$, $\mathbf{+11.00\text{pp}}$).
-   - At $10\%$ data ($115$ volumes), **VisReg UNETR retains the #1 rank overall ($\mathbf{66.16\%}$ vs. nnU-Net $65.03\%$)**, proving that self-supervised joint-embedding pre-training provides stronger semantic priors than supervised heuristics under clinical label scarcity.
-2. **Linear Decodability of Frozen Representations**: Freezing the pre-trained ViT encoder (`freeze_encoder=True`) yields **$75.13\%$ mean Dice** with UNETR, directly outperforming fully fine-tuned from-scratch ViT-UNETR ($74.80\%$). This confirms that 3D VisReg JEPA discovers linearly decodable multi-compartment glioma anatomy without adapting any transformer weights.
-3. **Latent Manifold Geometry**: Analysis of pre-trained encoder representations reveals an Effective Spectral Rank ($S^2$) of **$45.08$** ($11.7\%$ of embedding dimension $D_{\text{enc}}=384$) and centered cosine similarity of **$-0.0009$**, mathematically verifying healthy dimensional expansion and complete immunity to representation collapse.
-4. **OOD Robustness**: Pre-trained 3D JEPAs maintain superior segmentation stability under 3D Rician scanner noise and RF $B_1$ coil bias field corruption compared to supervised baselines trained from scratch.
+   - At $5\%$ data ($58$ volumes), **3D VisReg UNETR achieves the top performance overall ($\mathbf{63.65\%}$ mean Dice)**, beating from-scratch ViT-UNETR ($56.57\%$, $\mathbf{+7.08\text{pp}}$ JEPA gain), deeply supervised 3D nnU-Net ($59.86\%$, $\mathbf{+3.79\text{pp}}$), and 3D Residual UNet ($52.65\%$, $\mathbf{+11.00\text{pp}}$). VisReg FPN similarly achieves $\mathbf{61.45\%}$ ($\mathbf{+10.58\text{pp}}$ over Scratch FPN $50.87\%$).
+   - At $10\%$ data ($115$ volumes), **VisReg UNETR retains the #1 rank overall ($\mathbf{66.16\%}$ vs. nnU-Net $65.03\%$ and Scratch UNETR $61.40\%$)**: self-supervised joint-embedding pre-training provides strong initialization priors when labeled volumes are scarce, whereas under full supervision ($100\%$ labels) pre-trained and from-scratch ViTs converge to comparable accuracy ($76.58\%$ vs. $75.15\%$ for FPN; $75.61\%$ vs. $74.80\%$ for UNETR on test, and $74.10\%$ vs. $74.52\%$ on validation) while 3D nnU-Net maintains the performance ceiling ($79.50\%$).
+2. **Frozen-Backbone Spatial Decodability (Pure Latent vs. Hybrid Probing)**:
+   - Freezing the pre-trained ViT encoder (`freeze_encoder=True`) with a **pure latent multi-scale FPN decoder** (no raw-image skip connections) achieves **$72.31\%$ mean Dice** ($84.79\%$ WT), showing that frozen transformer tokens retain localized multi-compartment spatial structure.
+   - Pairing the frozen encoder with the **hybrid UNETR decoder** (which fuses frozen ViT tokens with trainable high-resolution convolutional stems on the raw volume) reaches **$75.13\%$ mean Dice**, matching full fine-tuning ($75.61\%$).
+3. **Latent Manifold Geometry (Non-Collapse Verification)**:
+   - Across evaluated ViT backbones, tissue-filtered Effective Spectral Rank ($S^2$) remains well above dimensional collapse ($S^2 \to 1$): pre-trained frozen VisReg JEPA achieves **$45.08$** ($11.7\%$ of $D_{\text{enc}}=384$), fine-tuned VisReg FPN achieves **$44.24$** ($11.5\%$), fine-tuned VisReg UNETR achieves **$41.37$** ($10.8\%$), and supervised from-scratch controls achieve **$46.20$** ($12.0\%$, FPN) and **$27.51$** ($7.2\%$, UNETR), consistent with a long-tailed anatomical covariance spectrum.
+4. **OOD Scanner Shift Resilience vs. Missing-Modality Fragility**:
+   - All architectures demonstrate strong resilience to synthetic 3D Rician noise ($\sigma=0.08$, $<0.6\text{pp}$ drop) and quadratic $B_1$ bias fields ($<1.1\text{pp}$ drop), with 3D nnU-Net maintaining the highest absolute Dice ($77.99\%$ and $78.25\%$).
+   - Under single-sequence missing-modality triage (`FLAIR-only` or `T1c-only`), 3D CNNs preserve strong cross-channel redundancy ($56.25\%$ and $60.75\%$ mean Dice for nnU-Net; $82.06\%$ WT on FLAIR-only), whereas ViTs degrade sharply ($4.55\%\text{--}16.05\%$ mean Dice) due to early joint 4-channel patch projection combined with the $4\times$ training-vs-evaluation inverted-dropout energy mismatch.
 
 > [!CAUTION]
 > **OOD re-baseline (2026-09-21 remediation, extended per-sample):** the Rician regime now synthesizes Rayleigh air (was zero-background) with a zero-clamped baseline (was `min_val`-shifted; now sign-preserving: Rician-if-nonnegative / Gaussian-if-negative tissue, gain on original voxels), and the B1 regime samples a fresh random field per sample in the batch (was one fixed field, interim: one field broadcast across the batch; gain range corrected to $[1 - 0.5 \cdot \text{strength},\, 1 + 0.5 \cdot \text{strength}]$). OOD numbers measured before this fix are **not comparable** to post-fix numbers — re-run `evaluate_ood_3d.py` before citing.

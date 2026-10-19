@@ -133,40 +133,12 @@ class CombinedTverskyBCEWithLogitsLoss3D(nn.Module):
 
 
 def resolve_seg_loss_type(args: object, cli_args: list[str] | None = None) -> str:
-    """Resolves the segmentation loss_type against config-merge collisions.
-
-    JEPA model YAMLs reuse the `loss_type` key for the latent prediction loss
-    ("smooth_l1"/"l1"/"mse"), and merge_config_with_args copies it into the
-    shared argparse namespace. Precedence: (1) explicitly passed CLI flags —
-    read from `args._explicit_cli_flags` when present (set by
-    merge_config_with_args), else the `cli_args` parameter; (2) accepted
-    segmentation values; (3) "dice_bce" fallback.
-
-    No `sys.argv` sniffing: legacy direct calls without either record log a
-    deprecation warning and fall back to the accepted-value check.
-    """
-    import logging
-
-    explicit: set[str] = set()
-    tracked = getattr(args, "_explicit_cli_flags", None)
-    if tracked is not None:
-        explicit = set(tracked)
-    elif cli_args is not None:
-        cli = cli_args
-        explicit = {
-            a.lstrip("-").split("=")[0].replace("-", "_")
-            for a in cli
-            if a.startswith("-")
-        }
-    else:
-        logging.getLogger(__name__).warning(
-            "resolve_seg_loss_type: no explicit-flag record and no cli_args; "
-            "falling back to accepted-value check "
-            "(deprecated — route trainers through merge_config_with_args)."
-        )
+    """Resolves the segmentation overlap loss_type ('dice_bce' or 'tversky')."""
+    if cli_args:
+        for a in cli_args:
+            if a.startswith("--loss_type=") or a.startswith("--loss-type="):
+                return a.split("=", 1)[1]
     val = getattr(args, "loss_type", "dice_bce")
-    if "loss_type" in explicit:
-        return val
     return val if val in ("dice_bce", "tversky") else "dice_bce"
 
 

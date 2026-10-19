@@ -49,7 +49,7 @@ def test_sigreg_loss():
     targets = [torch.randn(2, 27, 384)]
     proj_tokens = torch.randn(2, 192, 128, requires_grad=True)
 
-    res = criterion(preds, targets, projected_tokens=proj_tokens)
+    res = criterion(preds, targets, tokens=proj_tokens)
     assert "loss" in res
     assert "sigreg_loss" in res
     assert res["loss"].item() > 0.0
@@ -90,7 +90,7 @@ def test_sigreg_loss_gaussian_input():
     targets = [torch.randn(2, 27, 384)]
     proj_tokens = torch.randn(2, 192, 128)
 
-    res = criterion(preds, targets, projected_tokens=proj_tokens)
+    res = criterion(preds, targets, tokens=proj_tokens)
     assert res["sigreg_loss"].item() < res["jepa_loss"].item() * 5.0
 
 
@@ -102,21 +102,29 @@ def test_sigreg_anti_collapse_penalty():
     targets = [torch.randn(2, 27, 384)]
 
     proj_normal = torch.randn(2, 192, 128)
-    res_normal = criterion(preds, targets, projected_tokens=proj_normal)
+    res_normal = criterion(preds, targets, tokens=proj_normal)
 
     proj_collapsed = torch.randn(2, 192, 128) * 0.01
-    res_collapsed = criterion(preds, targets, projected_tokens=proj_collapsed)
+    res_collapsed = criterion(preds, targets, tokens=proj_collapsed)
 
     assert res_collapsed["sigreg_loss"].item() > 10.0 * res_normal["sigreg_loss"].item()
 
 
 def test_visreg_loss():
+    default_visreg = VisRegLoss()
+    assert default_visreg.center_weight == 1.0
+    assert default_visreg.scale_weight == 1.0
+    assert default_visreg.swd_weight == 4.0
+    assert default_visreg.num_projections == 1024
+    default_sigreg = SigRegLoss()
+    assert default_sigreg.num_projections == 1024
+
     criterion = VisRegLoss(center_weight=1.0, scale_weight=1.0, swd_weight=1.0, num_projections=64)
     preds = [torch.randn(2, 27, 384, requires_grad=True)]
     targets = [torch.randn(2, 27, 384)]
-    proj_tokens = torch.randn(2, 192, 128, requires_grad=True)
+    proj_tokens = torch.randn(2, 192, 384, requires_grad=True)
 
-    res = criterion(preds, targets, projected_tokens=proj_tokens)
+    res = criterion(preds, targets, tokens=proj_tokens)
     assert "loss" in res
     assert "center_loss" in res
     assert "scale_loss" in res
@@ -173,7 +181,7 @@ def test_visreg_loss_reg_scale_annealing():
     proj1 = torch.randn(2, 192, 32, requires_grad=True)
 
     # Step 1: Full regularizer scale (reg_scale=1.0)
-    out1 = criterion(preds, targets, projected_tokens=proj1, reg_scale=1.0)
+    out1 = criterion(preds, targets, tokens=proj1, reg_scale=1.0)
     assert "reg_scale" in out1
     assert out1["reg_scale"].item() == 1.0
     out1["loss"].backward()
@@ -182,7 +190,7 @@ def test_visreg_loss_reg_scale_annealing():
     # Step 2: Annealed regularizer scale (reg_scale=0.10)
     preds2 = [torch.randn(2, 27, 64, requires_grad=True)]
     proj2 = torch.randn(2, 192, 32, requires_grad=True)
-    out2 = criterion(preds2, targets, projected_tokens=proj2, reg_scale=0.10)
+    out2 = criterion(preds2, targets, tokens=proj2, reg_scale=0.10)
     assert out2["reg_scale"].item() == pytest.approx(0.10, abs=1e-5)
     expected_loss = out2["jepa_loss"] + 0.10 * (
         criterion.center_weight * out2["center_loss"]
@@ -201,7 +209,7 @@ def test_sigreg_loss_reg_scale_annealing():
     targets = [torch.randn(2, 27, 64)]
     proj1 = torch.randn(2, 192, 32, requires_grad=True)
 
-    out1 = criterion(preds, targets, projected_tokens=proj1, reg_scale=1.0)
+    out1 = criterion(preds, targets, tokens=proj1, reg_scale=1.0)
     assert "reg_scale" in out1
     assert out1["reg_scale"].item() == 1.0
     out1["loss"].backward()
@@ -210,7 +218,7 @@ def test_sigreg_loss_reg_scale_annealing():
     # Annealed scale
     preds2 = [torch.randn(2, 27, 64, requires_grad=True)]
     proj2 = torch.randn(2, 192, 32, requires_grad=True)
-    out2 = criterion(preds2, targets, projected_tokens=proj2, reg_scale=0.10)
+    out2 = criterion(preds2, targets, tokens=proj2, reg_scale=0.10)
     assert out2["reg_scale"].item() == pytest.approx(0.10, abs=1e-5)
     expected_loss = out2["jepa_loss"] + 0.10 * criterion.sigreg_weight * out2["sigreg_loss"]
     assert torch.allclose(out2["loss"], expected_loss, atol=1e-5)
@@ -427,9 +435,9 @@ def _ns(**kw):
 
 
 def test_resolve_seg_loss_type_collision():
-    assert resolve_seg_loss_type(_ns(loss_type="smooth_l1"), cli_args=[]) == "dice_bce"
-    assert resolve_seg_loss_type(_ns(loss_type="tversky"), cli_args=["--loss_type=tversky"]) == "tversky"
-    assert resolve_seg_loss_type(_ns(), cli_args=[]) == "dice_bce"
+    assert resolve_seg_loss_type(_ns(loss_type="dice_bce")) == "dice_bce"
+    assert resolve_seg_loss_type(_ns(loss_type="tversky")) == "tversky"
+    assert resolve_seg_loss_type(_ns()) == "dice_bce"
 
 
 def test_tversky_ds_multiscale_backward():

@@ -6,36 +6,27 @@ Evaluates model performance under extreme label scarcity (1% to 100% volumetric 
 
 import argparse
 import gc
+import math
 from pathlib import Path
-import sys
+import re
 
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from brats_jepa_3d.config import (
-    CHECKPOINTS_DIR,
-    CONFIGS_DIR,
-    OUTPUTS_DIR,
-    ensure_directories,
-    get_checkpoint_search_dirs,
-    get_dataset_dir,
-    load_yaml_config,
-)
+from brats_jepa_3d.config import OUTPUTS_DIR, ensure_directories
 from brats_jepa_3d.data import BraTS3DDataset, VolumetricAugmentations3D
 from brats_jepa_3d.losses import build_segmentation_criterion, resolve_seg_loss_type
 from brats_jepa_3d.metrics import compute_brats_regions_3d
-from brats_jepa_3d.models import BraTS3DnnUNet, BraTS3DUNet, JEPASegmentationModel3D
+from brats_jepa_3d.models import build_segmentation_model_for_training, resolve_model_alias
+from brats_jepa_3d.training import build_warmup_cosine_scheduler, evaluate_validation_split
 from brats_jepa_3d.utils import (
-    check_pool_match,
-    dataset_fingerprint,
     get_autocast_context,
     get_device,
-    tta_predict_logits,
     set_seed,
     setup_logger,
-    sort_checkpoints_by_epoch,
+    tta_predict_logits,
 )
 
 
@@ -45,6 +36,12 @@ def parse_args():
         "--fractions", nargs="+", type=float, default=[0.01, 0.05, 0.10, 0.25, 0.50, 1.00]
     )
     parser.add_argument("--epochs", type=int, default=25)
+    parser.add_argument(
+        "--min_steps",
+        type=int,
+        default=250,
+        help="Minimum gradient update steps per low-data fraction (default: 250)",
+    )
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", default=True)
@@ -71,7 +68,7 @@ def parse_args():
         "--from_scratch",
         action="store_true",
         default=False,
-        help="Evaluate 3D ViT-FPN trained from random initialization (no pre-trained checkpoint)",
+        help="Evaluate 3D ViT trained from random initialization (no pre-trained checkpoint)",
     )
     parser.add_argument(
         "--freeze_encoder",
@@ -80,17 +77,24 @@ def parse_args():
         help="Evaluate 3D ViT model trained with a frozen encoder (probe on low data)",
     )
     parser.add_argument(
-        "--decoder_type", type=str, default="multiscale",
-        choices=["multiscale", "bottleneck", "unetr_hybrid"],
+        "--decoder_type",
+        type=str,
+        default="multiscale",
+        choices=["multiscale", "unetr_hybrid"],
     )
     parser.add_argument(
-        "--loss_type", type=str, default="dice_bce", choices=["dice_bce", "tversky"],
+        "--loss_type",
+        type=str,
+        default="dice_bce",
+        choices=["dice_bce", "tversky"],
         help="Overlap loss: symmetric Dice+BCE (default) or asymmetric Tversky(beta=0.7)+BCE",
     )
     parser.add_argument("--tversky_alpha", type=float, default=0.3)
     parser.add_argument("--tversky_beta", type=float, default=0.7)
     parser.add_argument(
-        "--tta", action="store_true", default=False,
+        "--tta",
+        action="store_true",
+        default=False,
         help="4-fold orthogonal-reflection test-time augmentation on test eval",
     )
     parser.add_argument("--include_background", action="store_true", default=None)
@@ -125,7 +129,7 @@ def parse_args():
         type=int,
         nargs="+",
         default=None,
-        help="Voxel patch size (e.g. 8 8 8 or 16 16 16, default: from model config or 16 16 16)",
+        help="Voxel patch size (e.g. 8 8 8 or 16 16 16, default: from model config)",
     )
     return parser.parse_args()
 
@@ -144,39 +148,38 @@ def train_and_eval(
     num_classes: int | None = None,
     tta: bool = False,
     include_background: bool | None = None,
+    val_loader: DataLoader | None = None,
+    min_steps: int = 250,
 ) -> dict[str, float]:
-    """Trains on the fraction loader, then scores the test set across canonical BraTS regions.
-    Returns per-region {"WT", "TC", "ET", "mean"} macro Dice (nan-aware over samples;
-    ET-free volumes score 1.0 when correctly empty, matching evaluate_3d).
-    "mean" is the average of the three regions for tier comparability.
+    """Trains on the fraction loader with a minimum gradient step floor (`min_steps`),
+    selects the best checkpoint on `val_loader` (if provided), and scores `test_loader`
+    across canonical BraTS regions.
+    Returns per-region {"WT", "TC", "ET", "mean"} macro Dice.
     """
     use_deep_supervision = getattr(model, "deep_supervision", False)
     criterion = build_segmentation_criterion(
-        loss_type, use_deep_supervision, tversky_alpha, tversky_beta,
-        num_classes=num_classes, include_background=include_background,
+        loss_type,
+        use_deep_supervision,
+        tversky_alpha,
+        tversky_beta,
+        num_classes=num_classes,
+        include_background=include_background,
     )
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=3e-4, weight_decay=1e-4)
 
-    warmup_epochs = max(1, min(3, epochs // 5)) if epochs > 1 else 0
-    if epochs > 1 and warmup_epochs > 0:
-        warmup_sched = torch.optim.lr_scheduler.LinearLR(
-            optimizer, start_factor=0.1, total_iters=warmup_epochs
-        )
-        cosine_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=epochs - warmup_epochs, eta_min=1e-6
-        )
-        scheduler = torch.optim.lr_scheduler.SequentialLR(
-            optimizer, schedulers=[warmup_sched, cosine_sched], milestones=[warmup_epochs]
-        )
-    else:
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
-
+    steps_per_epoch = max(1, len(train_loader))
+    effective_epochs = 1 if smoke_test else max(epochs, math.ceil(min_steps / steps_per_epoch))
+    scheduler = build_warmup_cosine_scheduler(optimizer, epochs=effective_epochs, eta_min=1e-6)
     scaler = torch.amp.GradScaler(
         device="cuda" if device.type == "cuda" else "cpu", enabled=amp and device.type == "cuda"
     )
 
-    for epoch in range(1, epochs + 1):
+    best_val_dice = -1.0
+    best_state: dict[str, torch.Tensor] | None = None
+    val_interval = max(1, effective_epochs // 5)
+
+    for epoch in range(1, effective_epochs + 1):
         model.train()
         for batch_idx, batch in enumerate(train_loader):
             images = batch["image"].to(device)
@@ -202,8 +205,20 @@ def train_and_eval(
                 break
 
         scheduler.step()
+        if val_loader is not None and (
+            epoch % val_interval == 0 or epoch == effective_epochs or smoke_test
+        ):
+            val_dice = evaluate_validation_split(
+                model, val_loader, device, amp=amp, smoke_test=smoke_test
+            )["val_dice"]
+            if val_dice > best_val_dice:
+                best_val_dice = val_dice
+                best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
         if smoke_test:
             break
+
+    if best_state is not None:
+        model.load_state_dict({k: v.to(device) for k, v in best_state.items()})
 
     # Evaluate on test set across canonical BraTS regions (WT, TC, ET)
     model.eval()
@@ -247,11 +262,19 @@ def main():
 
     resolved_data_dir = Path(args.data_dir).resolve() if getattr(args, "data_dir", None) else None
     try:
+        val_dataset = BraTS3DDataset(split="val", data_dir=resolved_data_dir)
         test_dataset = BraTS3DDataset(split="test", data_dir=resolved_data_dir)
     except FileNotFoundError:
         if not args.smoke_test:
             raise
-        logger.warning("BraTS3D test split not found. Using synthetic dataset for smoke test.")
+        logger.warning("BraTS3D val/test split not found. Using synthetic dataset for smoke test.")
+        val_dataset = [
+            {
+                "image": torch.randn(4, 128, 128, 128),
+                "mask": torch.randint(0, 5, (1, 128, 128, 128), dtype=torch.float32),
+            }
+            for _ in range(2)
+        ]
         test_dataset = [
             {
                 "image": torch.randn(4, 128, 128, 128),
@@ -262,6 +285,15 @@ def main():
     num_workers = getattr(args, "num_workers", 2)
     use_pin_memory = getattr(args, "pin_memory", True) and (device.type == "cuda")
 
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=use_pin_memory,
+        persistent_workers=False,
+        prefetch_factor=2 if num_workers > 0 else None,
+    )
     test_loader = DataLoader(
         test_dataset,
         batch_size=1,
@@ -279,23 +311,7 @@ def main():
         ("3D UNet", "unet_3d"),
     ]
 
-    alias_map = {
-        "visreg": "visreg_jepa",
-        "visreg_jepa": "visreg_jepa",
-        "sigreg": "sigreg_jepa",
-        "sigreg_jepa": "sigreg_jepa",
-        "unet": "unet_3d",
-        "unet_3d": "unet_3d",
-        "nnunet": "nnunet_3d",
-        "nnunet_3d": "nnunet_3d",
-        "scratch": "vit_scratch",
-        "vit_scratch": "vit_scratch",
-        "frozen": "vit_frozen",
-        "vit_frozen": "vit_frozen",
-        "all": "all",
-    }
-
-    req_model = alias_map.get(args.model_type.lower(), args.model_type.lower())
+    req_model = resolve_model_alias(args.model_type)
     if args.from_scratch or req_model == "vit_scratch":
         scratch_label = (
             "3D ViT-UNETR (From Scratch)"
@@ -318,204 +334,9 @@ def main():
     else:
         selected_models = all_models
 
-    def build_model(name: str):
-        if "From Scratch" in name or name == "3D ViT-FPN (From Scratch)":
-            jepa_cfg_path = CONFIGS_DIR / "model" / "visreg_jepa_3d.yaml"
-            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
-            logger.info(f"Initializing {name} from SCRATCH (random initialization, no pre-trained weights)")
-            raw_patch = getattr(args, "patch_size", None)
-            if raw_patch is not None:
-                if isinstance(raw_patch, int):
-                    patch_size = (raw_patch, raw_patch, raw_patch)
-                elif len(raw_patch) == 1:
-                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
-                else:
-                    patch_size = tuple(int(x) for x in raw_patch)
-            else:
-                patch_size = tuple(jepa_cfg.get("patch_size", (8, 8, 8)))
-            return JEPASegmentationModel3D(
-                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
-                patch_size=patch_size,
-                in_channels=jepa_cfg.get("in_channels", 4),
-                embed_dim=jepa_cfg.get("embed_dim", 384),
-                encoder_depth=jepa_cfg.get("encoder_depth", 8),
-                num_heads=jepa_cfg.get("num_heads", 6),
-                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                decoder_type=args.decoder_type,
-                deep_supervision=args.deep_supervision,
-                out_channels=jepa_cfg.get("out_channels", 5),
-            ).to(device), jepa_cfg.get("out_channels", 5)
-
-        if "Frozen" in name or name in ("3D ViT-FPN (Frozen)", "3D ViT-UNETR (Frozen)"):
-            prefix = "visreg_jepa"
-            jepa_cfg_path = CONFIGS_DIR / "model" / f"{prefix}_3d.yaml"
-            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
-
-            search_dirs = get_checkpoint_search_dirs(checkpoints_dir)
-            ssl_best_ckpts, ssl_epoch_ckpts, fallback_ckpts = [], [], []
-            for sdir in search_dirs:
-                if sdir.exists():
-                    ssl_best_ckpts.extend([p for p in sorted(sdir.glob(f"{prefix}*_3d_best.pt")) if not any(x in p.name.lower() for x in ("scratch", "frozen"))])
-                    ssl_epoch_ckpts.extend([p for p in sort_checkpoints_by_epoch(list(sdir.glob(f"{prefix}*_epoch_*.pt"))) if not any(x in p.name.lower() for x in ("scratch", "frozen"))])
-                    fallback_ckpts.extend([
-                        p
-                        for p in sorted(sdir.glob(f"{prefix}*.pt"))
-                        if not any(dec in p.name.lower() for dec in ("multiscale", "bottleneck", "unetr_hybrid", "hybrid", "downstream", "scratch", "frozen"))
-                    ])
-            if ssl_best_ckpts:
-                ckpt_path = ssl_best_ckpts[-1]
-            elif ssl_epoch_ckpts:
-                ckpt_path = ssl_epoch_ckpts[-1]
-            else:
-                ckpt_path = fallback_ckpts[-1] if fallback_ckpts else None
-
-            if not ckpt_path or not ckpt_path.exists():
-                logger.warning(
-                    f"No pre-trained SSL weights found for {name} ({prefix}_3d_best.pt / {prefix}*_epoch_*.pt). "
-                    f"Skipping evaluation."
-                )
-                return None
-
-            raw_patch = getattr(args, "patch_size", None)
-            if raw_patch is not None:
-                if isinstance(raw_patch, int):
-                    patch_size = (raw_patch, raw_patch, raw_patch)
-                elif len(raw_patch) == 1:
-                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
-                else:
-                    patch_size = tuple(int(x) for x in raw_patch)
-            else:
-                patch_size = tuple(jepa_cfg.get("patch_size", (8, 8, 8)))
-
-            m = JEPASegmentationModel3D(
-                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
-                patch_size=patch_size,
-                in_channels=jepa_cfg.get("in_channels", 4),
-                embed_dim=jepa_cfg.get("embed_dim", 384),
-                encoder_depth=jepa_cfg.get("encoder_depth", 8),
-                num_heads=jepa_cfg.get("num_heads", 6),
-                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                decoder_type=args.decoder_type,
-                deep_supervision=args.deep_supervision,
-                out_channels=jepa_cfg.get("out_channels", 5),
-                freeze_encoder=True,
-            )
-            n_classes = jepa_cfg.get("out_channels", 5)
-            ckpt = torch.load(ckpt_path, map_location=device)
-            check_pool_match(
-                ckpt.get("pool_fingerprint"),
-                dataset_fingerprint(resolved_data_dir or get_dataset_dir()),
-                f"low-data/{name}",
-            )
-            res = m.load_pretrained_encoder(ckpt)
-            logger.info(
-                f"Initialized {name} with frozen pre-trained encoder weights from: {ckpt_path.name} ({res['loaded_keys']} keys)"
-            )
-            return m.to(device), n_classes
-
-        jepa_prefixes = {
-            "3D VisReg JEPA (FPN)": "visreg_jepa",
-            "3D SigReg JEPA (FPN)": "sigreg_jepa",
-        }
-        if name in jepa_prefixes:
-            prefix = jepa_prefixes[name]
-            jepa_cfg_path = CONFIGS_DIR / "model" / f"{prefix}_3d.yaml"
-            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
-
-            # Prioritize pre-trained SSL checkpoints (*_3d_best.pt or *_3d_epoch_*.pt), excluding downstream fine-tuned checkpoints
-            search_dirs = get_checkpoint_search_dirs(checkpoints_dir)
-            ssl_best_ckpts, ssl_epoch_ckpts, fallback_ckpts = [], [], []
-            for sdir in search_dirs:
-                if sdir.exists():
-                    ssl_best_ckpts.extend([p for p in sorted(sdir.glob(f"{prefix}*_3d_best.pt")) if "scratch" not in p.name.lower()])
-                    ssl_epoch_ckpts.extend([p for p in sort_checkpoints_by_epoch(list(sdir.glob(f"{prefix}*_epoch_*.pt"))) if "scratch" not in p.name.lower()])
-                    fallback_ckpts.extend([
-                        p
-                        for p in sorted(sdir.glob(f"{prefix}*.pt"))
-                        if not any(dec in p.name.lower() for dec in ("multiscale", "bottleneck", "unetr_hybrid", "hybrid", "downstream", "scratch"))
-                    ])
-            if ssl_best_ckpts:
-                ckpt_path = ssl_best_ckpts[-1]
-            elif ssl_epoch_ckpts:
-                ckpt_path = ssl_epoch_ckpts[-1]
-            else:
-                ckpt_path = fallback_ckpts[-1] if fallback_ckpts else None
-
-            if not ckpt_path or not ckpt_path.exists():
-                logger.warning(
-                    f"No pre-trained SSL weights found for {name} ({prefix}_3d_best.pt / {prefix}*_epoch_*.pt). "
-                    f"Skipping evaluation (will not train random uninitialized encoder on low data)."
-                )
-                return None
-
-            raw_patch = getattr(args, "patch_size", None)
-            if raw_patch is not None:
-                if isinstance(raw_patch, int):
-                    patch_size = (raw_patch, raw_patch, raw_patch)
-                elif len(raw_patch) == 1:
-                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
-                else:
-                    patch_size = tuple(int(x) for x in raw_patch)
-            else:
-                patch_size = tuple(jepa_cfg.get("patch_size", (8, 8, 8)))
-
-            m = JEPASegmentationModel3D(
-                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
-                patch_size=patch_size,
-                in_channels=jepa_cfg.get("in_channels", 4),
-                embed_dim=jepa_cfg.get("embed_dim", 384),
-                encoder_depth=jepa_cfg.get("encoder_depth", 8),
-                num_heads=jepa_cfg.get("num_heads", 6),
-                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                decoder_type=args.decoder_type,
-                deep_supervision=args.deep_supervision,
-                out_channels=jepa_cfg.get("out_channels", 5),
-            )
-            n_classes = jepa_cfg.get("out_channels", 5)
-            ckpt = torch.load(ckpt_path, map_location=device)
-            check_pool_match(
-                ckpt.get("pool_fingerprint"),
-                dataset_fingerprint(resolved_data_dir or get_dataset_dir()),
-                f"low-data/{name}",
-            )
-            res = m.load_pretrained_encoder(ckpt)
-            logger.info(
-                f"Initialized {name} with pre-trained encoder weights from: {ckpt_path.name} ({res['loaded_keys']} keys)"
-            )
-            return m.to(device), n_classes
-
-        elif name == "3D nnU-Net":
-            nnunet_cfg_path = CONFIGS_DIR / "model" / "nnunet_3d.yaml"
-            nnunet_cfg = load_yaml_config(nnunet_cfg_path) if nnunet_cfg_path.exists() else {}
-            return BraTS3DnnUNet(
-                in_channels=nnunet_cfg.get("in_channels", 4),
-                out_channels=nnunet_cfg.get("out_channels", 5),
-                deep_supervision=args.deep_supervision,
-                deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
-                res_block=nnunet_cfg.get("res_block", True),
-            ).to(device), nnunet_cfg.get("out_channels", 5)
-
-        elif name == "3D UNet":
-            unet_cfg_path = CONFIGS_DIR / "model" / "unet_3d.yaml"
-            unet_cfg = load_yaml_config(unet_cfg_path) if unet_cfg_path.exists() else {}
-            return BraTS3DUNet(
-                in_channels=unet_cfg.get("in_channels", 4),
-                out_channels=unet_cfg.get("out_channels", 5),
-                channels=tuple(unet_cfg.get("channels", (32, 64, 128, 256, 512))),
-                strides=tuple(unet_cfg.get("strides", (2, 2, 2, 2))),
-                num_res_units=unet_cfg.get("num_res_units", 2),
-                dropout=unet_cfg.get("dropout", 0.1),
-                deep_supervision=args.deep_supervision,
-            ).to(device), unet_cfg.get("out_channels", 5)
-
-        else:
-            raise ValueError(f"Unknown model name: {name}")
-
     records = []
 
     def _display_name(name: str) -> str:
-        # Decoder-aware column names so hybrid runs add columns instead of
-        # overwriting multiscale columns in the merged summary CSV.
         dec = getattr(args, "decoder_type", "multiscale")
         if dec != "multiscale" and ("JEPA" in name or "ViT-FPN" in name):
             return f"{name} [{dec}]"
@@ -551,8 +372,23 @@ def main():
         )
 
         row = {"Fraction": f"{frac * 100:.1f}%"}
-        for name, _ in selected_models:
-            built = build_model(name)
+        for name, m_type in selected_models:
+            is_scratch = m_type == "vit_scratch" or args.from_scratch
+            is_frozen = m_type == "vit_frozen" or getattr(args, "freeze_encoder", False)
+            built = build_segmentation_model_for_training(
+                model_type=m_type,
+                device=device,
+                decoder_type=args.decoder_type,
+                from_scratch=is_scratch,
+                freeze_encoder=is_frozen,
+                deep_supervision=args.deep_supervision,
+                patch_size=getattr(args, "patch_size", None),
+                checkpoints_dir=checkpoints_dir,
+                resolved_data_dir=resolved_data_dir,
+                logger=logger,
+                require_ssl_for_pretrain=not is_scratch,
+                label=name,
+            )
             if built is None:
                 row[_display_name(name)] = "N/A"
                 continue
@@ -565,12 +401,14 @@ def main():
                 epochs=epochs,
                 amp=args.amp,
                 smoke_test=args.smoke_test,
-                loss_type=resolve_seg_loss_type(args, sys.argv[1:]),
+                loss_type=resolve_seg_loss_type(args),
                 tversky_alpha=getattr(args, "tversky_alpha", 0.3),
                 tversky_beta=getattr(args, "tversky_beta", 0.7),
                 num_classes=n_classes,
                 tta=args.tta,
                 include_background=getattr(args, "include_background", None),
+                val_loader=val_loader,
+                min_steps=getattr(args, "min_steps", 250),
             )
             dname = _display_name(name)
             logger.info(
@@ -615,8 +453,6 @@ def main():
                     for frac, val in new_indexed[col].items():
                         if pd.notna(val) and str(val) != "N/A":
                             merged.loc[merged["Fraction"] == frac, col] = val
-
-            import re
 
             def frac_key(v: str) -> float:
                 m = re.search(r"(\d+(?:\.\d+)?)", str(v))

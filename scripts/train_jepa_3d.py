@@ -105,56 +105,21 @@ def parse_args(args=None):
         default=None,
         help="Voxel patch size (e.g. 8 8 8 for high-res A100 or 16 16 16 for standard, default: from config or 16 16 16)",
     )
-    # Cosine Regularizer Annealing (Wu et al., 2026)
+    # Regularizer Scaling (Wu et al., 2026; Balestriero & LeCun, 2025):
+    # Constant unannealed regularizer weight by default (reg_min_scale=1.0).
     parser.add_argument(
         "--reg_warmup_epochs",
         type=int,
         default=15,
-        help="Warmup epochs with reg_scale=1.0 before cosine annealing (default: 15)",
+        help="Warmup epochs with reg_scale=1.0 before optional cosine annealing (default: 15)",
     )
     parser.add_argument(
         "--reg_min_scale",
         type=float,
-        default=0.10,
-        help="Minimum regularizer scale after cosine annealing (default: 0.10)",
+        default=1.0,
+        help="Minimum regularizer scale (default: 1.0 = unannealed per Wu et al., 2026)",
     )
-    return parser.parse_args(sanitize_colab_args(args))
-
-
-def sanitize_colab_args(argv: list[str] | None = None) -> list[str]:
-    """Sanitizes unexpanded IPython/Colab template placeholders (e.g. '{PATCH_SIZE}') in CLI arguments."""
-    import sys
-
-    raw_args = list(sys.argv[1:] if argv is None else argv)
-    substitutions = {
-        "{PATCH_SIZE}": "8",
-        "{PRETRAIN_BATCH_SIZE}": "32",
-        "{BATCH_SIZE}": "4",
-        "{EPOCHS}": "200",
-        "{SEED}": "42",
-        "{NUM_WORKERS}": "4",
-        "{LEARNING_RATE}": "5e-4",
-        "{WEIGHT_DECAY}": "0.05",
-        "{REG_WARMUP_EPOCHS}": "30",
-        "{REG_MIN_SCALE}": "0.10",
-        "{LR}": "5e-4",
-        "{WARMUP_EPOCHS}": "5",
-        "{COSINE_DECAY_EPOCHS}": "45",
-    }
-    sanitized = []
-    for a in raw_args:
-        if a in substitutions:
-            sanitized.append(substitutions[a])
-        elif a.startswith("{") and a.endswith("}"):
-            inner = a[1:-1]
-            try:
-                float(inner)
-                sanitized.append(inner)
-            except ValueError:
-                continue
-        else:
-            sanitized.append(a)
-    return sanitized
+    return parser.parse_args(args)
 
 
 def get_lr_scheduler(
@@ -188,10 +153,6 @@ def main():
         args = merge_config_with_args(load_yaml_config(model_cfg_path), args)
 
     exp_cfg_path = args.exp_config or (CONFIGS_DIR / "experiment" / "pretrain.yaml")
-    if not Path(exp_cfg_path).exists():
-        legacy_exp = CONFIGS_DIR / "experiment" / "pretrain_50ep.yaml"
-        if legacy_exp.exists():
-            exp_cfg_path = legacy_exp
     if Path(exp_cfg_path).exists():
         args = merge_config_with_args(load_yaml_config(exp_cfg_path), args)
 
@@ -338,6 +299,8 @@ def main():
     predictor_depth = getattr(args, "predictor_depth", 4)
     predictor_embed_dim = getattr(args, "predictor_embed_dim", 192)
 
+    pred_loss_type = getattr(args, "pred_loss_type", getattr(args, "loss_type", "smooth_l1"))
+
     # Initialize Model & Loss
     if args.model_type == "sigreg_jepa":
         model = SigRegJEPA3D(
@@ -345,15 +308,14 @@ def main():
             patch_size=patch_size,
             in_channels=in_channels,
             embed_dim=embed_dim,
-            proj_dim=getattr(args, "proj_dim", 128),
             encoder_depth=encoder_depth,
             predictor_depth=predictor_depth,
             predictor_embed_dim=predictor_embed_dim,
         ).to(device)
         criterion = SigRegLoss(
-            loss_type=getattr(args, "loss_type", "smooth_l1"),
+            loss_type=pred_loss_type,
             sigreg_weight=getattr(args, "sigreg_weight", 1.0),
-            num_projections=getattr(args, "num_projections", 256),
+            num_projections=getattr(args, "num_projections", 1024),
             t_max=getattr(args, "t_max", 3.0),
             n_knots=getattr(args, "n_knots", 17),
             normalize_measure=getattr(args, "normalize_measure", True),
@@ -365,17 +327,16 @@ def main():
             patch_size=patch_size,
             in_channels=in_channels,
             embed_dim=embed_dim,
-            proj_dim=getattr(args, "proj_dim", 128),
             encoder_depth=encoder_depth,
             predictor_depth=predictor_depth,
             predictor_embed_dim=predictor_embed_dim,
         ).to(device)
         criterion = VisRegLoss(
-            loss_type=getattr(args, "loss_type", "smooth_l1"),
+            loss_type=pred_loss_type,
             center_weight=getattr(args, "center_weight", 1.0),
             scale_weight=getattr(args, "scale_weight", 1.0),
-            swd_weight=getattr(args, "swd_weight", 1.0),
-            num_projections=getattr(args, "num_projections", 256),
+            swd_weight=getattr(args, "swd_weight", 4.0),
+            num_projections=getattr(args, "num_projections", 1024),
             target_std=getattr(args, "target_std", 1.0),
             swd_metric=getattr(args, "swd_metric", "mse"),
             scale_loss_type=getattr(args, "scale_loss_type", "squared"),
@@ -423,15 +384,14 @@ def main():
         train_sublosses: dict[str, float] = {}
         num_batches = 0
 
-        # Cosine Regularizer Annealing (Wu et al., 2026; Tier 2 Upgrades):
-        # Holds reg_scale=1.0 for reg_warmup_epochs to prevent representation collapse,
-        # then cosine-anneals down to reg_min_scale (default 0.10).
+        # Regularizer Scaling (Wu et al., 2026; Balestriero & LeCun, 2025):
+        # Default reg_min_scale=1.0 keeps constant unannealed regularizer weight throughout training.
         reg_warmup = getattr(args, "reg_warmup_epochs", 15)
         if epoch <= reg_warmup:
             reg_scale = 1.0
         else:
             progress = (epoch - reg_warmup) / max(1, epochs - reg_warmup)
-            min_s = getattr(args, "reg_min_scale", 0.10)
+            min_s = getattr(args, "reg_min_scale", 1.0)
             reg_scale = min_s + 0.5 * (1.0 - min_s) * (1.0 + math.cos(math.pi * progress))
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs} (reg_scale={reg_scale:.2f})")
@@ -454,7 +414,7 @@ def main():
                 loss_dict = criterion(
                     out["predictions"],
                     out["targets"],
-                    projected_tokens=out["projected_tokens"],
+                    tokens=out["tissue_tokens"],
                     generator=reg_generator,
                     reg_scale=reg_scale,
                 )
@@ -521,7 +481,7 @@ def main():
                     v_loss_dict = criterion(
                         val_out["predictions"],
                         val_out["targets"],
-                        projected_tokens=val_out["projected_tokens"],
+                        tokens=val_out["tissue_tokens"],
                         generator=reg_generator,
                         reg_scale=1.0,
                     )
@@ -564,23 +524,33 @@ def main():
             f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {avg_train_loss:.5f}{loss_detail} | Val Loss: {avg_val_loss:.5f} | Duration: {epoch_duration:.2f}s"
         )
 
-        # Compute representation quality metrics at checkpoint intervals.
-        # Source: first VAL batch (not the stale leftover train `images`), so the
-        # probe reflects generalization features rather than the last train batch.
+        # Compute representation quality metrics at checkpoint intervals on tissue-filtered
+        # validation tokens across up to 4 validation volumes (excluding background air tokens).
         rep_metrics = {}
         if epoch % 10 == 0 or epoch == epochs or args.smoke_test:
             model.eval()
             with torch.no_grad():
-                val_probe_images = None
-                for _probe_batch in val_loader:
-                    val_probe_images = _probe_batch["images"][:1].to(device)
-                    break
-                if val_probe_images is not None:
-                    sample_tokens = model.context_encoder(val_probe_images)
+                val_probe_batch = next(iter(val_loader), None)
+                if val_probe_batch is not None:
+                    probe_imgs = val_probe_batch["images"][:4].to(device)
+                    probe_ctx = val_probe_batch["context_indices"][:4].to(device)
+                    probe_tgts = [t[:4].to(device) for t in val_probe_batch["target_indices_list"]]
+                    probe_tmask = (
+                        val_probe_batch["context_tissue_mask"][:4].to(device)
+                        if "context_tissue_mask" in val_probe_batch
+                        else None
+                    )
+                    probe_out = model(
+                        probe_imgs,
+                        probe_ctx,
+                        probe_tgts,
+                        context_tissue_mask=probe_tmask,
+                    )
+                    sample_tokens = probe_out["tissue_tokens"]
                     rep_metrics = compute_representation_collapse_metrics(sample_tokens)
             if rep_metrics:
                 logger.info(
-                    f"Representation Quality (val) - EffRank: {rep_metrics['effective_rank']:.2f} | "
+                    f"Representation Quality (val tissue) - EffRank: {rep_metrics['effective_rank']:.2f} | "
                     f"CenteredCosSim: {rep_metrics['avg_cosine_sim_centered']:.4f} | "
                     f"FeatureVar: {rep_metrics['feature_variance']:.4f}"
                 )

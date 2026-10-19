@@ -77,10 +77,49 @@ def test_low_data_flags():
     a = m.parse_args()
     assert a.decoder_type == "multiscale" and a.loss_type == "dice_bce" and a.tta is False
     assert a.deep_supervision is True
-    sys.argv = ["x", "--decoder_type", "unetr_hybrid", "--loss_type", "tversky", "--tta", "--no_deep_supervision"]
+    assert a.min_steps == 250
+    sys.argv = ["x", "--decoder_type", "unetr_hybrid", "--loss_type", "tversky", "--tta", "--no_deep_supervision", "--min_steps", "500"]
     a = m.parse_args()
     assert a.decoder_type == "unetr_hybrid" and a.loss_type == "tversky" and a.tta is True
     assert a.deep_supervision is False
+    assert a.min_steps == 500
+
+
+def test_paired_significance_table(tmp_path):
+    from brats_jepa_3d.utils.aggregation import compute_paired_significance_table
+
+    exp_a = tmp_path / "exp_visreg" / "metrics"
+    exp_b = tmp_path / "exp_nnunet" / "metrics"
+    exp_a.mkdir(parents=True)
+    exp_b.mkdir(parents=True)
+    pids = [f"BraTS-GLI-{i:04d}" for i in range(20)]
+    df_a = pd.DataFrame({
+        "patient_id": pids,
+        "model": ["3D VisReg JEPA (FPN) [unetr_hybrid]"] * 20,
+        "Dice_WT": np.linspace(0.80, 0.90, 20),
+        "Dice_TC": np.linspace(0.75, 0.85, 20),
+        "Dice_ET": np.linspace(0.70, 0.80, 20),
+        "Dice_Mean": np.linspace(0.75, 0.85, 20),
+    })
+    df_b = pd.DataFrame({
+        "patient_id": pids,
+        "model": ["3D nnU-Net (DynUNet)"] * 20,
+        "Dice_WT": np.linspace(0.78, 0.88, 20),
+        "Dice_TC": np.linspace(0.72, 0.82, 20),
+        "Dice_ET": np.linspace(0.68, 0.78, 20),
+        "Dice_Mean": np.linspace(0.7267, 0.8267, 20),
+    })
+    df_a.to_csv(exp_a / "visreg_per_case.csv", index=False)
+    df_b.to_csv(exp_b / "nnunet_per_case.csv", index=False)
+
+    sig_df = compute_paired_significance_table(
+        [tmp_path / "exp_visreg", tmp_path / "exp_nnunet"],
+        output_dir=tmp_path / "reports",
+        n_boot=500,
+    )
+    assert len(sig_df) == 4
+    assert (tmp_path / "reports" / "paired_significance_3d.csv").exists()
+    assert set(sig_df["Metric"]) == {"Dice_WT", "Dice_TC", "Dice_ET", "Dice_Mean"}
 
 
 def test_ood_flags():
@@ -604,21 +643,6 @@ def test_export_latex_tables(mock_experiment_dirs):
     assert tex_out.exists()
 
 
-def test_generate_figures_safe_float():
-    """Verify safe_float in generate_figures_3d handles edge cases properly."""
-    scripts_dir = str(PROJECT_ROOT / "scripts")
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
-    from generate_figures_3d import safe_float
-
-    assert safe_float("12.5%") == pytest.approx(12.5)
-    assert safe_float("N/A") == 0.0
-    assert safe_float("-") == 0.0
-    assert safe_float("") == 0.0
-    assert safe_float(None) == 0.0
-    assert safe_float(42.5) == pytest.approx(42.5)
-
-
 def test_benchmark_model_region_rows():
     scripts_dir = str(PROJECT_ROOT / "scripts")
     if scripts_dir not in sys.path:
@@ -896,7 +920,7 @@ def test_seed_and_num_workers_environment_overrides(monkeypatch):
     parser.add_argument("--num_workers", type=int, default=2)
     args = parser.parse_args([])
     config = {"seed": 42, "num_workers": 2}
-    merged_args = merge_config_with_args(config, args, cli_args=[])
+    merged_args = merge_config_with_args(config, args)
     assert merged_args.seed == 99
     assert merged_args.num_workers == 4
 

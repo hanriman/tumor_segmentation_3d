@@ -83,6 +83,7 @@ def test_jepa_predictor_3d():
 
 
 def test_sigreg_jepa_3d():
+    assert SigRegJEPA3D is SingleEncoderJEPA3D
     model = SigRegJEPA3D(
         img_size=(128, 128, 128),
         patch_size=(16, 16, 16),
@@ -92,6 +93,7 @@ def test_sigreg_jepa_3d():
         predictor_depth=2,
         num_heads=6,
     )
+    assert not hasattr(model, "projector")
     images = torch.randn(2, 4, 128, 128, 128)
     context_indices = torch.randint(0, 512, (2, 192))
     target_indices_list = [
@@ -104,10 +106,12 @@ def test_sigreg_jepa_3d():
     assert "targets" in out
     assert len(out["predictions"]) == 2
     assert out["predictions"][0].shape == (2, 27, 384)
-    assert out["projected_tokens"].shape == (2, 192, 128)
+    assert out["tissue_tokens"].shape == (2, 192, 384)
+    assert "projected_tokens" not in out
 
 
 def test_visreg_jepa_3d():
+    assert VisRegJEPA3D is SingleEncoderJEPA3D
     model = VisRegJEPA3D(
         img_size=(128, 128, 128),
         patch_size=(16, 16, 16),
@@ -117,6 +121,7 @@ def test_visreg_jepa_3d():
         predictor_depth=2,
         num_heads=6,
     )
+    assert not hasattr(model, "projector")
     images = torch.randn(2, 4, 128, 128, 128)
     context_indices = torch.randint(0, 512, (2, 192))
     target_indices_list = [
@@ -129,7 +134,8 @@ def test_visreg_jepa_3d():
     assert "targets" in out
     assert len(out["predictions"]) == 2
     assert out["predictions"][0].shape == (2, 27, 384)
-    assert out["projected_tokens"].shape == (2, 192, 128)
+    assert out["tissue_tokens"].shape == (2, 192, 384)
+    assert "projected_tokens" not in out
 
 
 def test_jepa_predictor_forward_multi_targets():
@@ -163,18 +169,18 @@ def test_jepa_predictor_forward_multi_targets():
 
 
 def test_single_encoder_jepa_3d():
-    """Verify SingleEncoderJEPA3D architecture and forward pass."""
+    """Verify SingleEncoderJEPA3D architecture and forward pass in encoder space."""
     model = SingleEncoderJEPA3D(
         img_size=(64, 64, 64),
         patch_size=(16, 16, 16),
         in_channels=4,
         embed_dim=64,
-        proj_dim=32,
         encoder_depth=2,
         predictor_depth=2,
         predictor_embed_dim=32,
         num_heads=2,
     )
+    assert not hasattr(model, "projector")
     images = torch.randn(2, 4, 64, 64, 64)
     context_indices = torch.randint(0, 64, (2, 24))
     target_indices_list = [torch.randint(0, 64, (2, 8)), torch.randint(0, 64, (2, 4))]
@@ -182,7 +188,8 @@ def test_single_encoder_jepa_3d():
     out = model(images, context_indices, target_indices_list)
     assert len(out["predictions"]) == 2
     assert len(out["targets"]) == 2
-    assert out["projected_tokens"].shape == (2, 24, 32)
+    assert out["tissue_tokens"].shape == (2, 24, 64)
+    assert "projected_tokens" not in out
     assert out["predictions"][0].shape == (2, 8, 64)
     assert out["predictions"][1].shape == (2, 4, 64)
 
@@ -295,19 +302,22 @@ def test_segmentation_decoders_3d():
     assert isinstance(out_ms_eval, torch.Tensor)
     assert out_ms_eval.shape == (2, 5, 128, 128, 128)
 
-    # 2. Linear Segmentation Decoder
-    model_lin = JEPASegmentationModel3D(
+    # 2. UNETR Hybrid Decoder
+    model_hyb = JEPASegmentationModel3D(
         img_size=(128, 128, 128),
         patch_size=(16, 16, 16),
         in_channels=4,
         embed_dim=384,
         encoder_depth=2,
         num_heads=6,
-        decoder_type="linear",
+        decoder_type="unetr_hybrid",
         deep_supervision=False,
     )
-    out_lin = model_lin(x)
-    assert out_lin.shape == (2, 5, 128, 128, 128)
+    out_hyb = model_hyb(x)
+    assert out_hyb.shape == (2, 5, 128, 128, 128)
+
+    with pytest.raises(ValueError, match="Unknown decoder_type"):
+        JEPASegmentationModel3D(decoder_type="bottleneck")
 
 
 def test_supervised_baselines_3d():
@@ -632,7 +642,7 @@ def test_anisotropic_full_model_forward_and_loss_backward():
     )
     visreg_crit = VisRegLoss()
     out_vr = visreg(images, ctx, tgt_list)
-    loss_vr = visreg_crit(out_vr["predictions"], out_vr["targets"], projected_tokens=out_vr["projected_tokens"])
+    loss_vr = visreg_crit(out_vr["predictions"], out_vr["targets"], tokens=out_vr["tissue_tokens"])
     loss_vr["loss"].backward()
     assert any(p.grad is not None for p in visreg.parameters())
 
@@ -649,7 +659,42 @@ def test_anisotropic_full_model_forward_and_loss_backward():
     )
     sigreg_crit = SigRegLoss()
     out_sr = sigreg(images, ctx, tgt_list)
-    loss_sr = sigreg_crit(out_sr["predictions"], out_sr["targets"], projected_tokens=out_sr["projected_tokens"])
+    loss_sr = sigreg_crit(out_sr["predictions"], out_sr["targets"], tokens=out_sr["tissue_tokens"])
     loss_sr["loss"].backward()
     assert any(p.grad is not None for p in sigreg.parameters())
+
+
+def test_builder_helpers(tmp_path):
+    """Verify normalize_patch_size, resolve_model_alias, find_ssl_checkpoint, and find_downstream_checkpoint."""
+    from brats_jepa_3d.models import (
+        find_downstream_checkpoint,
+        find_ssl_checkpoint,
+        normalize_patch_size,
+        resolve_model_alias,
+    )
+
+    assert normalize_patch_size(None, default=(8, 8, 8)) == (8, 8, 8)
+    assert normalize_patch_size(16) == (16, 16, 16)
+    assert normalize_patch_size([8]) == (8, 8, 8)
+    assert normalize_patch_size([8, 16, 16]) == (8, 16, 16)
+
+    assert resolve_model_alias("visreg") == "visreg_jepa"
+    assert resolve_model_alias("sigreg") == "sigreg_jepa"
+    assert resolve_model_alias("unet") == "unet_3d"
+    assert resolve_model_alias("nnunet") == "nnunet_3d"
+    assert resolve_model_alias("scratch") == "vit_scratch"
+    assert resolve_model_alias("frozen") == "vit_frozen"
+    assert resolve_model_alias(None) == "all"
+
+    ssl_ckpt = tmp_path / "visreg_jepa_3d_best.pt"
+    ssl_ckpt.write_bytes(b"ssl")
+    assert find_ssl_checkpoint("visreg_jepa", checkpoints_dir=tmp_path) == ssl_ckpt
+
+    ds_ckpt = tmp_path / "visreg_jepa_unetr_hybrid_best.pt"
+    ds_ckpt.write_bytes(b"ds")
+    assert (
+        find_downstream_checkpoint("visreg_jepa", decoder_type="unetr_hybrid", checkpoints_dir=tmp_path)
+        == ds_ckpt
+    )
+
 

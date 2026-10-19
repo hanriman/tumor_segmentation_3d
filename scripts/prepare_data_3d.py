@@ -89,6 +89,12 @@ def parse_args():
         default=42,
         help="Random seed for deterministic train/val/test patient splitting",
     )
+    parser.add_argument(
+        "--refresh_metadata_only",
+        action="store_true",
+        default=False,
+        help="Recompute num_voxels_et, has_et, and num_voxels_tumor in existing metadata.csv from .npz masks without altering splits",
+    )
     return parser.parse_args()
 
 
@@ -145,11 +151,13 @@ def resample_3d_volume(
     return resampled.numpy().astype(np.float32)
 
 
-#: Valid BraTS 2024 GLI labels: 0=background, 1=NCR, 2=ED, 3=NET, 4=ET.
-#: Verified on the full 1,350-volume training pool (Sep 2026).
+#: Valid BraTS 2024 Post-Treatment GLI labels (de Verdier et al., 2024, arXiv:2405.18368):
+#:   0=Background, 1=NETC, 2=SNFH, 3=ET, 4=RC (Resection Cavity).
 BRATS_GLI_LABELS = (0, 1, 2, 3, 4)
-#: Enhancing-tumor label for `has_et` / ET-region derivation.
-ET_LABEL = 4
+#: Whole-tumor labels (excluding post-surgical resection cavity RC=4).
+WT_LABELS = (1, 2, 3)
+#: Enhancing-tissue label for `has_et` / ET-region derivation.
+ET_LABEL = 3
 
 
 def process_patient(
@@ -261,7 +269,7 @@ def process_patient(
     )
 
     num_voxels_brain = int(np.sum(brain_mask_resampled))
-    num_voxels_tumor = int(np.sum(mask_1ch > 0))
+    num_voxels_tumor = int(np.isin(mask_1ch, WT_LABELS).sum())
     has_tumor = bool(num_voxels_tumor > 0)
     num_voxels_et = int(np.sum(mask_1ch == ET_LABEL))
     has_et = bool(num_voxels_et > 0)
@@ -295,10 +303,47 @@ def _process_patient_worker(args_tuple):
     )
 
 
+def refresh_metadata_in_place(output_dir: Path) -> pd.DataFrame:
+    """Recomputes num_voxels_et, has_et, and num_voxels_tumor from existing .npz masks
+    using official BraTS 2024 Post-Treatment GLI labels (ET=3, WT={1,2,3}) without modifying splits.
+    """
+    meta_path = output_dir / "metadata.csv"
+    if not meta_path.exists():
+        raise FileNotFoundError(f"metadata.csv not found in {output_dir}")
+    df = pd.read_csv(meta_path)
+    et_counts = []
+    has_ets = []
+    wt_counts = []
+    has_tumors = []
+    for row in tqdm(df.itertuples(), total=len(df), desc="Refreshing metadata.csv from .npz masks"):
+        npz_path = output_dir / str(row.file_name)
+        with np.load(npz_path) as data:
+            mask = data["mask"]
+            n_et = int((mask == ET_LABEL).sum())
+            n_wt = int(np.isin(mask, WT_LABELS).sum())
+        et_counts.append(n_et)
+        has_ets.append(bool(n_et > 0))
+        wt_counts.append(n_wt)
+        has_tumors.append(bool(n_wt > 0))
+    df["num_voxels_et"] = et_counts
+    df["has_et"] = has_ets
+    df["num_voxels_tumor"] = wt_counts
+    df["has_tumor"] = has_tumors
+    df.to_csv(meta_path, index=False)
+    print(f"Refreshed {len(df)} rows in {meta_path} (ET={ET_LABEL}, WT={WT_LABELS}).")
+    print(f"has_et prevalence: {df['has_et'].mean() * 100:.1f}% ({df['has_et'].sum()}/{len(df)})")
+    print("Split distribution (unchanged):")
+    print(df["split"].value_counts().to_string())
+    return df
+
+
 def main():
     args = parse_args()
-    data_dir = Path(args.data_dir).resolve()
     output_dir = Path(args.output_dir).resolve()
+    if getattr(args, "refresh_metadata_only", False):
+        refresh_metadata_in_place(output_dir)
+        return
+    data_dir = Path(args.data_dir).resolve()
 
     # Fallback to local and Kaggle search if default path is not found directly
     if not data_dir.exists():

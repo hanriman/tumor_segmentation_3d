@@ -19,21 +19,22 @@ class RandomModalityDropout3D(nn.Module):
     3. Guaranteed Non-Empty Fallback:
        If all 4 channels are sampled for dropout (\prod_c (1 - m_c) = 1), one channel is randomly
        forced active, preventing degenerate all-zero inputs from generating zero-gradient steps.
-    4. Inverted-Dropout Magnitude Preservation:
-       Kept channels are rescaled by `C / keep_count` so that the expected channel
-       sum matches evaluation (no-dropout) magnitude — i.e. `E[output|train] ≈ input`.
-       Without rescaling, training sees ~25% lower expected activation magnitude
-       than testing (train/test shift). The binary `mask` semantics (0/1 kept/dropped)
-       are preserved; only the kept-channel gain changes.
+    4. Zero-Imputed Modality Dropout (`rescale=False` by default, Havaei et al., 2017; Dorent et al., 2019):
+       Because each MRI sequence is independently Z-score normalized (\mu=0, \sigma=1) and
+       distinct physical sequences (T1n, T1c, T2w, T2f) are not interchangeable activation
+       features, dropped sequences are zero-imputed (`0.0`, the sequence mean) without multiplying
+       surviving channels by `C / keep_count`, matching test-time missing-modality evaluation.
+       Optional inverted-dropout rescaling can be enabled via `rescale=True`.
     5. Strict PyTorch PRNG Determinism:
        Uses `torch.bernoulli` and `torch.randint` on `image.device` rather than Python's non-seeded
        `random` module, guaranteeing exact bitwise reproducibility under `torch.manual_seed` across
        DataLoader multiprocessing workers and distributed ranks.
     """
 
-    def __init__(self, p_drop: float = 0.25):
+    def __init__(self, p_drop: float = 0.25, rescale: bool = False):
         super().__init__()
         self.p_drop = p_drop
+        self.rescale = rescale
 
     def forward(self, image: torch.Tensor, generator: torch.Generator | None = None) -> torch.Tensor:
         """
@@ -65,10 +66,8 @@ class RandomModalityDropout3D(nn.Module):
                     active_idx = torch.randint(0, C, (1,), generator=generator).item()
                 mask[active_idx] = 1.0
 
-            # Inverted-dropout rescaling: preserve expected activation magnitude
-            # (fallback single channel scales by C to match full-input energy).
             keep = float(mask.sum().item())
-            scale = (C / keep) if keep > 0 else 1.0
+            scale = (C / keep) if (self.rescale and keep > 0) else 1.0
             out[b] = out[b] * mask.view(C, 1, 1, 1) * scale
 
         if not is_batched:
@@ -92,13 +91,16 @@ class VolumetricAugmentations3D:
         noise_prob: float = 0.3,
         noise_std: float = 0.05,
         modality_dropout_prob: float = 0.25,
+        modality_dropout_rescale: bool = False,
         is_training: bool = True,
     ):
         self.flip_prob = flip_prob
         self.noise_prob = noise_prob
         self.noise_std = noise_std
         self.is_training = is_training
-        self.modality_dropout = RandomModalityDropout3D(p_drop=modality_dropout_prob)
+        self.modality_dropout = RandomModalityDropout3D(
+            p_drop=modality_dropout_prob, rescale=modality_dropout_rescale
+        )
 
     @staticmethod
     def _coin_flip(prob: float, generator: torch.Generator | None) -> bool:

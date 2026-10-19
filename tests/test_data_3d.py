@@ -272,17 +272,26 @@ def test_random_modality_dropout_pytorch_prng_determinism():
 
 
 def test_p0_step1_modality_dropout_preserves_expectation():
-    """Inverted dropout: E[output|train] ~= input (kept channels rescaled)."""
+    """Default rescale=False preserves surviving channel Z-score scale (1.0); rescale=True preserves expected sum."""
     torch.manual_seed(0)
-    drop = RandomModalityDropout3D(p_drop=0.25)
-    drop.train()
-    x = torch.ones(64, 4, 8, 8, 8)
-    acc = torch.zeros_like(x)
+    drop_default = RandomModalityDropout3D(p_drop=0.25)
+    assert drop_default.rescale is False
+    drop_default.train()
+    x = torch.ones(16, 4, 8, 8, 8)
+    y_def = drop_default(x)
+    unique_vals = set(torch.unique(y_def).tolist())
+    assert unique_vals <= {0.0, 1.0}, f"rescale=False must not scale surviving channels: {unique_vals}"
+
+    torch.manual_seed(0)
+    drop_rescaled = RandomModalityDropout3D(p_drop=0.25, rescale=True)
+    drop_rescaled.train()
+    x64 = torch.ones(64, 4, 8, 8, 8)
+    acc = torch.zeros_like(x64)
     n = 20
     for _ in range(n):
-        acc += drop(x)
+        acc += drop_rescaled(x64)
     mean = (acc / n).mean().item()
-    assert abs(mean - 1.0) < 0.15, f"train/test magnitude shift: E={mean}"
+    assert abs(mean - 1.0) < 0.15, f"train/test magnitude shift under rescale=True: E={mean}"
 
 
 def test_p0_step1_dropout_eval_identity_and_fallback():
@@ -291,9 +300,10 @@ def test_p0_step1_dropout_eval_identity_and_fallback():
     x = torch.randn(2, 4, 8, 8, 8)
     assert torch.equal(drop(x), x)
     drop.train()
-    drop.p_drop = 1.0  # force all-drop -> exactly one scaled active channel
+    drop.p_drop = 1.0  # force all-drop -> exactly one active channel at unit scale
     y = drop(torch.ones(1, 4, 4, 4, 4))
     assert (y[0, :, 0, 0, 0] > 0).sum().item() == 1
+    assert y.max().item() == 1.0
 
 
 def test_volumetric_augmentations_3d():
@@ -512,7 +522,7 @@ def test_multiregion_preserves_labels(tmp_path):
     assert vals <= set(BRATS_GLI_LABELS), vals
     assert vals >= {1, 2, 3, 4}, f"octant labels lost in resampling: {vals}"
     assert rec["has_et"] is True and rec["num_voxels_et"] > 0
-    assert ET_LABEL == 4
+    assert ET_LABEL == 3
 
 
 def test_multiregion_rejects_stray_labels(tmp_path):

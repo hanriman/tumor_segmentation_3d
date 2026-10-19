@@ -85,7 +85,7 @@ $$\text{Total Target Tokens (16³ Grid)} = 216 + 144 + 144 + 144 + 64 + 64 = \ma
 
 1. **Volume & Physical Millimeter Preservation**: Maintains dense supervisory signal ($\approx 100$ tokens on $8^3$ grid, $776$ tokens on $16^3$ grid) corresponding to an identical $48\text{ mm}$ isotropic cube, $32 \times 48 \times 48\text{ mm}$ planar slabs, and $32\text{ mm}$ regional meso blocks.
 2. **Proportional Tissue Filtering**:
-   $$\text{min\_tissue} = \max\big(4, \, \lfloor 0.40 \times (c_z \times c_y \times c_x) \rfloor\big)$$
+   $$\text{min\_tissue} = \max\big(2, \, \lfloor 0.25 \times (c_z \times c_y \times c_x) \rfloor\big)$$
    This proportional threshold prevents rejection deadlock on small 8-token and 18-token cuboids while guaranteeing that no target samples empty background air.
 3. **Multi-Aspect Fallback Bounds**: When sampling falls back due to high tissue occupancy constraints, dimensions are clamped strictly within $[2, 3]^3$ (or $[4, 6]^3$ for $16^3$ grid), preserving anisotropic diversity.
 
@@ -115,72 +115,58 @@ Current Batch Tokens [B * N_tokens, D] (requires_grad=True)
 
 ---
 
-### 3.3 Upgrade C: Cosine Regularizer Annealing Schedule
-
-#### The Optimization Problem
-At constant regularizer strength ($\lambda_{\text{reg}} = 1.0$), statistical anti-collapse forces remain dominant throughout training, competing with the prediction loss and creating an optimization plateau around Epoch 12.
+### 3.3 Upgrade C: Regularizer Warmup & Constant Full-Strength Schedule
 
 #### Algorithmic Formulation
 Implemented in [`scripts/train_jepa_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/scripts/train_jepa_3d.py):
-$$\lambda_{\text{reg}}(t) = \begin{cases} 1.0, & t \le T_{\text{warmup}} \\ 0.10 + 0.90 \times \frac{1}{2}\left(1 + \cos\left(\frac{t - T_{\text{warmup}}}{T_{\text{max}} - T_{\text{warmup}}} \pi\right)\right), & t > T_{\text{warmup}} \end{cases}$$
+$$\lambda_{\text{reg}}(t) = \begin{cases} \frac{t}{T_{\text{warmup}}}, & t < T_{\text{warmup}} \\ 1.0, & t \ge T_{\text{warmup}} \end{cases}$$
 
-- **Warmup Phase ($t \le T_{\text{warmup}}$ epochs, e.g., 30 epochs for $T_{\text{max}}=200$, 15 epochs for $T_{\text{max}}=100$)**: Full strength ($\lambda_{\text{reg}} = 1.0$) rapidly pushes representations away from the trivial constant collapse basin.
-- **Annealing Phase ($t > T_{\text{warmup}}$ epochs)**: Smooth cosine decay down to $\lambda_{\text{min}} = 0.10$, allowing the predictor to refine fine-grained anatomical representations without excessive regularizer penalty.
+- **Linear Warmup ($t < 30$ epochs)**: Linearly ramps regularizer weight from $0 \to 1.0$ while early attention representations form.
+- **Constant Full-Strength Phase ($t \ge 30$ epochs, `reg_min_scale=1.0`)**: Following VISReg (Wu, Balestriero, & Levine, 2026) and LeJEPA (Balestriero & LeCun, 2025), $\lambda_{\text{reg}}$ remains at $1.0$ throughout training to prevent late-stage variance decay across all 384 encoder dimensions.
 
 ---
 
-### 3.4 Upgrade D: Dual Schedule Synergy (Learning Rate Warmup & Cosine Decay)
-
-#### The Optimization Dynamics
-Pre-training 3D Vision Transformers on volumetric MRI with optimal transport regularizers presents dual optimization challenges: early attention gradient instability and late-stage regularizer interference. To resolve both, the training pipeline pairs two synchronized schedules:
+### 3.4 Upgrade D: Learning Rate Linear Warmup & Cosine Decay
 
 1. **Learning Rate Schedule with Linear Warmup**:
    $$\eta(t) = \begin{cases} \eta_{\text{base}} \times \frac{t}{T_{\text{lr\_warmup}}}, & t \le T_{\text{lr\_warmup}} \\ \eta_{\text{min}} + \frac{1}{2}(\eta_{\text{base}} - \eta_{\text{min}})\left(1 + \cos\left(\frac{t - T_{\text{lr\_warmup}}}{T_{\text{max}} - T_{\text{lr\_warmup}}} \pi\right)\right), & t > T_{\text{lr\_warmup}} \end{cases}$$
-   With $\eta_{\text{base}} = 5 \times 10^{-4}$, $\eta_{\text{min}} = 1 \times 10^{-5}$, and $T_{\text{lr\_warmup}} = 20$ epochs for canonical 200-epoch pre-training ($T_{\text{lr\_warmup}} = 10$ epochs for 100-epoch runs).
-
-2. **Synergistic Phasing Across Training Epochs (200-Epoch Canonical Schedule)**:
-   - **Phase 1 (Epochs 1–20: Gradient Stabilization & Dispersal)**: $\eta(t)$ ramps up linearly while $\lambda_{\text{reg}} = 1.0$. The low early learning rate prevents self-attention divergence, while maximal regularizer forces actively repel token clusters outward across the latent hypersphere.
-   - **Phase 2 (Epochs 21–30: Latent Geometry Stabilization)**: $\eta(t)$ begins its cosine decay while $\lambda_{\text{reg}}$ remains clamped at $1.0$, allowing the backbone to consolidate the high-dimensional latent manifold before regularizer relaxation.
-   - **Phase 3 (Epochs 31–200: Asymptotic Predictor Convergence)**: Both $\eta(t)$ and $\lambda_{\text{reg}}(t)$ anneal via smooth cosine decay toward their floors ($\eta_{\text{min}} = 1 \times 10^{-5}$, $\lambda_{\text{min}} = 0.10$). As parameter updates become subtle, the predictor refines complex anatomical boundaries without fighting strong regularizer gradient repulsion.
+   With $\eta_{\text{base}} = 5 \times 10^{-4}$, $\eta_{\text{min}} = 1 \times 10^{-5}$, and $T_{\text{lr\_warmup}} = 10$ epochs for canonical 200-epoch pre-training.
 
 ---
 
-## 4. Phase 3: Scientific Validity & Forensic Remediations
+## 4. Phase 3 & 4: Scientific Validity, Paper-Faithful Alignment & Code Unification
 
-Following an exhaustive forensic audit against scientific integrity standards ([`AGENTS.md`](../AGENTS.md)), six methodological vulnerabilities and validity threats were systematically remediated across the codebase and manuscript:
+Following an exhaustive forensic audit against scientific integrity standards ([`AGENTS.md`](../AGENTS.md)) and the original VISReg (`arXiv:2602.11401`) and LeJEPA/SigReg (`arXiv:2511.08544`) papers, the codebase was aligned and simplified:
 
 ### 4.1 Remediation I: Architectural Patch Size & Grid Realignment ($8^3$ vs. $16^3$)
-- **Vulnerability**: Checkpoints in `outputs/experiments/` were trained on an $8 \times 8 \times 8$ patch embedding ($16^3 = 4,096$ tokens, $N_{\text{ctx}} = 1,536$, $N_{\text{tgt}} = 776$), whereas early manuscript drafts claimed $16 \times 16 \times 16$ patches ($512$ tokens). Discussion text erroneously attributed boundary smoothing to a "$16^3$ patch bottleneck."
+- **Vulnerability**: Checkpoints in `outputs/experiments/` were trained on an $8 \times 8 \times 8$ patch embedding ($16^3 = 4,096$ tokens, $N_{\text{ctx}} = 1,536$, $N_{\text{tgt}} = 776$), whereas early manuscript drafts claimed $16 \times 16 \times 16$ patches ($512$ tokens).
 - **Remediation**:
-  1. Updated [`paper/latex/main.tex`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/paper/latex/main.tex) (Sections 3.1, 3.2, 4.2, 5.1) to accurately specify the canonical $8 \times 8 \times 8$ voxel patch embedding ($16^3 = 4,096$ tokens).
-  2. Set default `patch_size: [8, 8, 8]` across all YAML configuration files ([`configs/model/visreg_jepa_3d.yaml`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/model/visreg_jepa_3d.yaml), [`configs/model/sigreg_jepa_3d.yaml`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/model/sigreg_jepa_3d.yaml), [`configs/dataset/brats3d.yaml`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/dataset/brats3d.yaml)) and fallback evaluation scripts.
-  3. Maintained the $16^3$ patch configuration in the Kaggle suite for resource-constrained 16 GB T4 environments.
+  1. Updated [`paper/latex/main.tex`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/paper/latex/main.tex) to specify the canonical $8 \times 8 \times 8$ voxel patch embedding ($16^3 = 4,096$ tokens).
+  2. Set default `patch_size: [8, 8, 8]` across all YAML configuration files ([`configs/model/visreg_jepa_3d.yaml`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/model/visreg_jepa_3d.yaml), [`configs/model/sigreg_jepa_3d.yaml`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/model/sigreg_jepa_3d.yaml), [`configs/dataset/brats3d.yaml`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/dataset/brats3d.yaml)) and evaluation scripts.
 
-### 4.2 Remediation II: Frozen Probing Confounder Disentanglement
-- **Vulnerability**: In [`src/brats_jepa_3d/models/segmentation_head_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/models/segmentation_head_3d.py), `HybridUNETRDecoder3D` incorporates a trainable convolutional stem (`stem_128` and `stem_64`) operating directly on raw 4-channel input volumes. Labeling frozen ViT-UNETR ($75.13\%$ Dice) as a "pure linear probe" conflated latent representation quality with raw-voxel convolutional feature extraction.
+### 4.2 Remediation II: Direct Encoder-Space VISReg/SigReg Regularization
+- **Vulnerability**: Applying anti-collapse regularization after a bottleneck projector MLP ($384 \to 1024 \to 128$) allowed the projector to satisfy Gaussianity in $\mathbb{R}^{128}$ while the encoder representations in $\mathbb{R}^{384}$ collapsed along their nullspace, and omitting standardization before unit-sphere projection conflated scale and shape gradients.
 - **Remediation**:
-  1. Delineated the **Pure Latent Probe** (ViT-FPN: $72.31\%$ Dice), which decodes strictly from frozen transformer latents without raw-image bypass.
-  2. Reclassified ViT-UNETR ($75.13\%$ Dice) as a **Frozen Hybrid Probe**, demonstrating that frozen JEPA latents complement lightweight trainable convolutional edge extractors.
+  1. Removed the projector MLP from [`SingleEncoderJEPA3D`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/models/single_encoder_jepa_3d.py) so both `VisRegLoss` and `SigRegLoss` operate directly on tissue-filtered context encoder tokens $\mathbf{Z}_{\text{tissue}} \in \mathbb{R}^{N_{\text{tissue}} \times 384}$ (matching VISReg Section 3 and LeJEPA Section 3).
+  2. Aligned [`VisRegLoss._sliced_wasserstein_distance`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/losses/visreg_loss.py) with Algorithm 1 of Wu et al. (2026): standardizing tokens via detached moments `z_std = (z - mu.detach()) / sigma.detach()` before projecting onto $M=1024$ unit directions with $\lambda_{\text{sh}} = 4.0$.
 
-### 4.3 Remediation III: Out-of-Distribution Modality Energy Scaling
-- **Vulnerability**: Pre-training applies `RandomModalityDropout3D` with inverted dropout energy scaling ($4.0\times$ multiplication on single surviving channels). In contrast, evaluation scripts in [`scripts/evaluate_ood_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/scripts/evaluate_ood_3d.py) passed single channels with scale $1.0$ (a $75\%$ energy deficit). Because CNNs use `InstanceNorm3d` ($\text{IN}(4X) = \text{IN}(X)$), they were completely immune, whereas ViTs with `LayerNorm` suffered from positional embedding overpowering.
+### 4.3 Remediation III: Zero-Imputed Modality Dropout Parity
+- **Vulnerability**: Training with inverted-dropout channel rescaling ($C / \text{keep} = 4\times$ when 1 of 4 MRI modalities survives) while evaluating missing-modality OOD regimes with zero-imputed unscaled inputs created a $4\times$ input magnitude mismatch for ViT `PatchEmbed3D` + `LayerNorm` relative to `InstanceNorm3d` CNNs.
 - **Remediation**:
-  1. Added explicit discussion in `paper/latex/main.tex` Section 4.2 explaining the biophysical and normalization mechanisms underlying the energy deficit.
-  2. Implemented the `--rescale_missing_modalities` CLI flag in [`scripts/evaluate_ood_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/scripts/evaluate_ood_3d.py) enabling researchers to test with matched $4.0\times$ energy scaling.
+  1. Set `rescale: bool = False` by default in [`RandomModalityDropout3D`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/data/transforms.py), ensuring training-time modality dropout uses exact zero-imputation matching [`evaluate_ood_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/scripts/evaluate_ood_3d.py).
 
-### 4.4 Remediation IV: Intracranial Brain-Tissue Decoupling in Effective Rank
-- **Vulnerability**: Because $\approx 60\%$ of brain MRI volumes consist of background air zeros ($X=0$), over half of all tokens fed into `compute_representation_collapse_metrics` were deterministic linear functions of static sinusoidal positional embeddings ($\mathbf{z}_{0, i} = \mathbf{b} + \mathbf{pe}_i$), contaminating Effective Spectral Rank ($S^2$) and Centered Cosine Similarity.
+### 4.4 Remediation IV: Low-Data Step-Budget Floor & Validation Selection
+- **Vulnerability**: Fixed 25-epoch training at $1\%$ labels ($12$ volumes, batch size $4$) yielded only $75$ gradient updates, and selecting the best low-data epoch directly on the test split risked optimistic selection bias.
 - **Remediation**:
-  1. Updated `evaluate_representation` in [`scripts/evaluate_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/scripts/evaluate_3d.py) to pool `brain_mask` onto the token grid and extract tissue-only tokens ($\ge 40\%$ parenchyma occupancy).
-  2. Computes and logs both all-token metrics (`eRank(all)`) and tissue-filtered metrics (`eRank(tissue)`).
+  1. Added `--min_steps 250` floor in [`scripts/evaluate_low_data_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/scripts/evaluate_low_data_3d.py) so every low-data fraction receives at least $250$ gradient updates.
+  2. Selects the best checkpoint strictly on the validation split (`val_loader`) before evaluating the selected checkpoint once on `test_loader`.
 
-### 4.5 Remediation V: Low-Data 1% Regime Step-Budget Analysis
-- **Vulnerability**: Fixed-epoch training (25 epochs) at $1\%$ labels (12 volumes, batch size 2) yielded only **150 total gradient updates**, compared to 14,300 updates at $100\%$ labels. Attributing the $5.86\%$ Dice of randomly initialized Residual UNet purely to architectural inferiority ignored optimization undertraining.
-- **Remediation**: Added rigorous step-budget analysis in `paper/latex/main.tex` Section 4.1 clarifying that self-supervised pre-training provides an essential initialization that enables rapid downstream convergence within ultra-sparse optimization budgets.
+### 4.5 Remediation V: Intracranial Brain-Tissue Decoupling in Effective Rank
+- **Vulnerability**: Because $\approx 60\%$ of brain MRI volumes consist of background air zeros ($X=0$), over half of all tokens fed into `compute_representation_collapse_metrics` were deterministic functions of static sinusoidal positional embeddings, contaminating Effective Spectral Rank ($S^2$).
+- **Remediation**: [`scripts/evaluate_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/scripts/evaluate_3d.py) pools `brain_mask` onto the token grid to compute both all-token metrics (`eRank(all)`) and tissue-filtered metrics (`eRank(tissue)`).
 
-### 4.6 Remediation VI: Test Output Isolation (Zero Data Risk)
-- **Vulnerability**: Integration test teardown previously targeted `outputs/`, posing a risk of deleting genuine cluster benchmark artifacts.
-- **Remediation**: Scoped all test outputs and automated cleanup strictly to `tests/test_outputs/`, leaving real experimental results in `outputs/` completely isolated and protected.
+### 4.6 Remediation VI: Central Model Factory & Shared Supervised Trainer
+- **Architectural Unification**: Consolidated all model construction and checkpoint loading into [`src/brats_jepa_3d/models/builder.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/models/builder.py) and unified downstream/baseline training loops into [`src/brats_jepa_3d/training/supervised_trainer.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/training/supervised_trainer.py), guaranteeing identical training, validation, and evaluation semantics across ViT-JEPA, Scratch ViT, 3D Residual UNet, and 3D nnU-Net.
 
 ---
 
@@ -190,11 +176,11 @@ The complete codebase is guarded by a comprehensive 7-suite regression harness:
 
 | Suite | File | Test Count | Scope |
 | :--- | :--- | :---: | :--- |
-| **Benchmark Consistency** | [`test_benchmark_consistency.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_benchmark_consistency.py) | 6 | Mathematical synchronization between CSV benchmarks, paper tables, and documentation. |
-| **Data Suite** | [`test_data_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_data_3d.py) | 30 | 0% leakage, anisotropic jitter token counts, proportional tissue rejection, fallback bounds. |
-| **Evaluation Suite** | [`test_evaluation_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_evaluation_3d.py) | 40 | Deep supervision parity, Simpson's paradox elimination, uninit decoder guard, encoder-only check. |
-| **Integration Suite** | [`test_integration_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_integration_3d.py) | 10 | End-to-end smoke tests for training and low-data evaluation pipelines with safe teardown. |
-| **Losses Suite** | [`test_losses_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_losses_3d.py) | 32 | VisReg SWD shape loss, SigReg Epps-Pulley test, Dice/BCE/Tversky, deep supervision, cosine annealing. |
+| **Benchmark Consistency** | [`test_benchmark_consistency.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_benchmark_consistency.py) | 7 | Mathematical synchronization between CSV benchmarks, paper tables, and documentation. |
+| **Data Suite** | [`test_data_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_data_3d.py) | 30 | 0% leakage, anisotropic jitter token counts, proportional tissue rejection, fallback bounds, zero-imputed modality dropout. |
+| **Evaluation Suite** | [`test_evaluation_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_evaluation_3d.py) | 39 | Central model builder, checkpoint loader, Simpson's paradox elimination, uninit decoder guard. |
+| **Integration Suite** | [`test_integration_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_integration_3d.py) | 10 | End-to-end smoke tests for training and low-data evaluation pipelines with safe teardown in `tests/test_outputs/`. |
+| **Losses Suite** | [`test_losses_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_losses_3d.py) | 35 | VISReg SWD shape loss (detached $\mu,\sigma$), SigReg Epps-Pulley test, Dice/BCE/Tversky, deep supervision, warmup schedule. |
 | **Metrics Suite** | [`test_metrics_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_metrics_3d.py) | 19 | 3D HD95, Dice, IoU calculation, multi-region zero handling. |
-| **Models Suite** | [`test_models_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_models_3d.py) | 32 | ViT encoder, predictor, FPN, UNETR hybrid, DynUNet, Residual UNet architectures. |
-| **Total** | — | **169** | **100% Pass Rate** |
+| **Models Suite** | [`test_models_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/tests/test_models_3d.py) | 32 | ViT encoder, predictor, `SingleEncoderJEPA3D`, FPN, UNETR hybrid, DynUNet, Residual UNet architectures. |
+| **Total** | — | **172** | **100% Pass Rate** |

@@ -216,3 +216,42 @@ def test_latex_table3_and_4_match_ood_csv():
     csv_flair_wt = float(str(df.loc["Missing Modalities: FLAIR Only", "3D nnU-Net [WT]"]).replace("%", "").strip())
     assert abs(flair_wt - csv_flair_wt) < 0.05, f"Mismatch on FLAIR Only nnU-Net WT: {flair_wt} vs {csv_flair_wt}"
 
+
+def test_readme_tables_match_csvs():
+    """Verify README.md §6.1 and §6.2 tables match master_3d_benchmark.csv and low_data_3d_summary.csv."""
+    readme_path = REPO_ROOT / "README.md"
+    assert readme_path.exists()
+    readme_text = readme_path.read_text(encoding="utf-8")
+
+    # 1. Verify README §6.1 reports regional HD95 (voxels) from master_3d_benchmark.csv
+    assert "5.63 / 4.64 / 10.34" in readme_text, "README §6.1 missing nnU-Net WT/TC/ET HD95 (voxels)"
+    assert "6.58 / 7.54 / 14.72" in readme_text, "README §6.1 missing VisReg FPN WT/TC/ET HD95 (voxels)"
+    assert "5.71 / 7.13 / 22.05" in readme_text, "README §6.1 missing VisReg UNETR WT/TC/ET HD95 (voxels)"
+    assert "6.88 ± 6.42" not in readme_text, "Fabricated HD95 '6.88 ± 6.42' still present in README.md"
+
+    # 2. Verify README §6.2 low-data table matches low_data_3d_summary.csv
+    df_low = pd.read_csv(CSV_PATH).set_index("Fraction")
+    expected_fpn_scores = [
+        str(df_low.loc[frac, "3D VisReg JEPA (FPN) [mean]"]).strip()
+        for frac in ["1.0%", "5.0%", "10.0%", "25.0%", "50.0%", "100.0%"]
+    ]
+    for score in expected_fpn_scores:
+        assert score in readme_text, f"Low-data VisReg FPN score {score} missing from README.md"
+    assert "65.20%" not in readme_text, "Fabricated 10% score 65.20% still present in README.md"
+    assert "76.80%" not in readme_text, "Fabricated 50% score 76.80% still present in README.md"
+
+
+def test_paper_hyperparameters_consistent():
+    """Verify paper/latex/main.tex hyperparameters match actual code and training logs."""
+    assert TEX_PATH.exists()
+    tex_content = TEX_PATH.read_text(encoding="utf-8")
+
+    assert "10-epoch linear warmup" in tex_content, "Paper should report 10-epoch linear warmup"
+    assert r"\max(2, \lfloor 0.25 \times \text{vol} \rfloor)" in tex_content, "Paper §3.2 should report 0.25 tissue occupancy threshold"
+    assert "merely $75$ total gradient updates" in tex_content, "Paper §5.2 should report 75 gradient updates at 1% (batch_size=4)"
+    assert r"Scratch FPN: $\text{erank}=46.20$ [$12.0\%$]" in tex_content, "Paper should report Scratch FPN Effective Rank 46.20 (12.0%)"
+
+
+
+
+

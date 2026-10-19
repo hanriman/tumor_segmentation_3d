@@ -8,9 +8,8 @@ import yaml
 # Root directory of thesis_3d
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Detect Cloud execution environments (Colab has /content, Kaggle has /kaggle without /content)
+# Detect Google Colab execution environment
 IN_COLAB = "google.colab" in sys.modules or Path("/content").exists()
-IN_KAGGLE = not IN_COLAB and (Path("/kaggle/working").exists() or Path("/kaggle/input").exists())
 
 DEFAULT_NUM_WORKERS = int(
     os.environ.get(
@@ -26,7 +25,7 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed" / "brats_gli_3d"
 
 
 def get_dataset_dir(dataset_name: str = "brats_gli_3d") -> Path:
-    """Dynamically resolves the path to a 3D dataset directory across Kaggle, Colab, env vars, and local storage."""
+    """Dynamically resolves the path to a 3D dataset directory across Colab, env vars, and local storage."""
     # 1. Environment variable overrides
     env_key = f"BRATS_{dataset_name.upper()}_DIR"
     if os.environ.get(env_key):
@@ -42,32 +41,7 @@ def get_dataset_dir(dataset_name: str = "brats_gli_3d") -> Path:
         if p.exists():
             return p
 
-    # 2. Check Kaggle input mounts
-    if Path("/kaggle/input").exists():
-        name_variants = ["brats_gli_3d_v2", "brats_gli_3d_full", dataset_name]
-        seen_variants = set()
-        unique_variants = [x for x in name_variants if not (x in seen_variants or seen_variants.add(x))]
-
-        for variant in unique_variants:
-            kaggle_matches = list(Path("/kaggle/input").glob(f"**/{variant}"))
-            for m in kaggle_matches:
-                if m.is_dir() and (m / "metadata.csv").exists():
-                    return m.resolve()
-
-        # Check subdirectories of each input folder
-        for cand in Path("/kaggle/input").iterdir():
-            if cand.is_dir():
-                for variant in unique_variants:
-                    sub = cand / variant
-                    if sub.is_dir() and (sub / "metadata.csv").exists():
-                        return sub.resolve()
-
-        # Check if an input folder directly contains metadata.csv (flat layout)
-        for cand in Path("/kaggle/input").iterdir():
-            if cand.is_dir() and (cand / "metadata.csv").exists():
-                return cand.resolve()
-
-    # 3. Check Google Colab local & Drive mounts
+    # 2. Check Google Colab local & Drive mounts
     if Path("/content").exists():
         colab_candidates = [
             Path("/content") / "data" / "processed" / dataset_name,
@@ -84,15 +58,14 @@ def get_dataset_dir(dataset_name: str = "brats_gli_3d") -> Path:
         if colab_matches and (colab_matches[0] / "metadata.csv").exists():
             return colab_matches[0].resolve()
 
-    # 4. Local project processed dataset directory
+    # 3. Local project processed dataset directory
     local_variants = ["brats_gli_3d_v2", "brats_gli_3d_full", dataset_name]
     for variant in local_variants:
         cand = (DATA_DIR / "processed" / variant).resolve()
         if cand.is_dir() and (cand / "metadata.csv").exists():
             return cand
 
-    local_target = (DATA_DIR / "processed" / dataset_name).resolve()
-    return local_target
+    return (DATA_DIR / "processed" / dataset_name).resolve()
 
 
 def get_metadata_path(dataset_name: str = "brats_gli_3d") -> Path:
@@ -101,14 +74,9 @@ def get_metadata_path(dataset_name: str = "brats_gli_3d") -> Path:
 
 
 # Output directory resolution
-if IN_KAGGLE:
-    OUTPUTS_DIR = Path("/kaggle/working/outputs")
-elif IN_COLAB:
+if IN_COLAB:
     drive_out = Path("/content/drive/MyDrive/thesis_3d_outputs")
-    if Path("/content/drive/MyDrive").exists():
-        OUTPUTS_DIR = drive_out
-    else:
-        OUTPUTS_DIR = Path("/content/outputs")
+    OUTPUTS_DIR = drive_out if Path("/content/drive/MyDrive").exists() else Path("/content/outputs")
 else:
     OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 
@@ -145,7 +113,7 @@ def ensure_directories(base_output_dir: Path | str | None = None):
 
 
 def get_checkpoint_search_dirs(primary_dir: Path | str | None = None) -> list[Path]:
-    """Returns candidate checkpoint search directories in priority order across cloud & local layouts."""
+    """Returns candidate checkpoint search directories in priority order across Colab & local layouts."""
     primary = Path(primary_dir).resolve() if primary_dir else CHECKPOINTS_DIR
     candidates = [
         primary,
@@ -153,9 +121,6 @@ def get_checkpoint_search_dirs(primary_dir: Path | str | None = None) -> list[Pa
         Path("outputs/checkpoints").resolve(),
         Path.cwd() / "outputs" / "checkpoints",
         PROJECT_ROOT / "outputs" / "checkpoints",
-        Path("/kaggle/working/outputs/checkpoints"),
-        Path("/kaggle/working/tumor_segmentation_3d/outputs/checkpoints"),
-        Path("/kaggle/working/thesis_repo/outputs/checkpoints"),
     ]
     seen: set[Path] = set()
     result: list[Path] = []
@@ -222,12 +187,5 @@ def merge_config_with_args(
 
     if "BRATS3D_NUM_WORKERS" in os.environ and "num_workers" not in explicit_cli_flags:
         apply_kv("num_workers", int(os.environ["BRATS3D_NUM_WORKERS"]))
-
-    # Record which flags the user passed explicitly so downstream resolvers
-    # (e.g. resolve_seg_loss_type) need not sniff sys.argv.
-    try:
-        setattr(args, "_explicit_cli_flags", set(explicit_cli_flags))
-    except (AttributeError, TypeError):
-        pass
 
     return args

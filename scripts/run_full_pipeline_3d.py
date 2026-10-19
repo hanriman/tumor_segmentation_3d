@@ -83,7 +83,7 @@ def main():
     run_cmd([py, "scripts/evaluate_3d.py"] + eval_model_arg + smoke_flag)
 
     # 6. Figures
-    run_cmd([py, "scripts/generate_figures_3d.py"])
+    run_cmd([py, "paper/latex/figures/gen_figures.py"])
 
     print("\n=======================================================")
     print("3D Multimodal JEPA Research Pipeline Completed Successfully!")

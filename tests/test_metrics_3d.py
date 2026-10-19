@@ -199,29 +199,45 @@ def test_p1_step8_hd95_tumor_only_nan_semantics():
 
 def _hand_built_multiregion():
     logits = torch.full((1, 5, 8, 8, 8), -10.0)
-    # class 1 (NEC/NCR) at z in [0, 2)
+    # class 1 (NETC) at z in [0, 2)
     logits[0, 1, 0:2, :, :] = 10.0
-    # class 2 (ED) at z in [2, 4)
+    # class 2 (SNFH) at z in [2, 4)
     logits[0, 2, 2:4, :, :] = 10.0
-    # class 4 (ET) at z in [4, 6)
-    logits[0, 4, 4:6, :, :] = 10.0
+    # class 3 (ET) at z in [4, 6)
+    logits[0, 3, 4:6, :, :] = 10.0
+    # class 4 (RC - Resection Cavity) at z in [6, 7)
+    logits[0, 4, 6:7, :, :] = 10.0
     # background elsewhere (class 0)
-    logits[0, 0, 6:8, :, :] = 10.0
+    logits[0, 0, 7:8, :, :] = 10.0
 
     target = torch.zeros((1, 1, 8, 8, 8), dtype=torch.float32)
     target[0, 0, 0:2, :, :] = 1.0
     target[0, 0, 2:4, :, :] = 2.0
-    target[0, 0, 4:6, :, :] = 4.0
+    target[0, 0, 4:6, :, :] = 3.0
+    target[0, 0, 6:7, :, :] = 4.0
     return logits, target
 
 
 def test_region_metrics_perfect_and_et_free_nan():
+    from brats_jepa_3d.metrics import BRATS_REGIONS, brats_region_masks_from_target
+
+    assert BRATS_REGIONS == {"WT": (1, 2, 3), "TC": (1, 3), "ET": (3,)}
     logits, target = _hand_built_multiregion()
+    rmasks = brats_region_masks_from_target(target)
+    # Verify Resection Cavity (z in [6, 7), label 4) is excluded from WT, TC, and ET
+    assert rmasks["WT"][0, 0, 6, 0, 0].item() == 0.0
+    assert rmasks["TC"][0, 0, 6, 0, 0].item() == 0.0
+    assert rmasks["ET"][0, 0, 6, 0, 0].item() == 0.0
+    # Verify Enhancing Tumor (z in [4, 6), label 3) is included in WT, TC, and ET
+    assert rmasks["WT"][0, 0, 4, 0, 0].item() == 1.0
+    assert rmasks["TC"][0, 0, 4, 0, 0].item() == 1.0
+    assert rmasks["ET"][0, 0, 4, 0, 0].item() == 1.0
+
     res = compute_brats_regions_3d(logits, target, compute_hd95=False)
     assert res["WT"]["dice"] == 1.0 and res["TC"]["dice"] == 1.0 and res["ET"]["dice"] == 1.0
     # ET-free cohort: ET dice falls back gracefully, ET HD95 is NaN (never 0.0).
     tgt_noet = target.clone()
-    tgt_noet[tgt_noet == 4] = 2.0
+    tgt_noet[tgt_noet == 3] = 2.0
     res2 = compute_brats_regions_3d(logits, tgt_noet, compute_hd95=True)
     assert res2["ET"]["hd95_tumor_only"] != res2["ET"]["hd95_tumor_only"]
     assert res2["WT"]["dice"] > 0.0

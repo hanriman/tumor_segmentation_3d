@@ -324,7 +324,7 @@ def plot_latent_geometry_and_probing():
     """
     Renders representation probing comparison:
     (A) Effective Rank (S^2) across encoders (dimensional non-collapse verification)
-    (B) Full Fine-Tuning vs. Frozen Linear Probing Test Dice (%)
+    (B) Full Fine-Tuning vs. Frozen Decoder Probing Test Dice (%)
     """
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10.5, 4.2))
 
@@ -350,10 +350,10 @@ def plot_latent_geometry_and_probing():
         pct = (yval / 384.0) * 100
         ax1.text(bar.get_x() + bar.get_width() / 2, yval + 1.2, f"{yval:.1f}\n({pct:.1f}%)", ha="center", va="bottom", fontsize=8.5)
 
-    # Panel B: Full vs Frozen Probe Test Dice
+    # Panel B: Full vs Frozen Probe Test Dice (60-epoch canonical benchmark with TTA, Table 1)
     probe_models = ["UNETR Hybrid", "MultiScale FPN"]
     full_dice = [75.61, 76.58]
-    frozen_dice = [73.85, 71.38]
+    frozen_dice = [75.13, 72.31]
     scratch_dice = [74.80, 75.15]
 
     xp = np.arange(len(probe_models))

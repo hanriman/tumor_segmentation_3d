@@ -9,8 +9,10 @@ Evaluates all models on the BraTS 2024 GLI test split across:
 
 import argparse
 import gc
+import re
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -18,14 +20,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from brats_jepa_3d.config import (
-    CHECKPOINTS_DIR,
-    CONFIGS_DIR,
-    OUTPUTS_DIR,
-    ensure_directories,
-    get_checkpoint_search_dirs,
-    load_yaml_config,
-)
+from brats_jepa_3d.config import OUTPUTS_DIR, ensure_directories
 from brats_jepa_3d.data import BraTS3DDataset
 from brats_jepa_3d.metrics import (
     BRATS_REGIONS,
@@ -33,19 +28,13 @@ from brats_jepa_3d.metrics import (
     compute_brats_regions_3d,
     compute_representation_collapse_metrics,
 )
-from brats_jepa_3d.models import (
-    BraTS3DnnUNet,
-    BraTS3DUNet,
-    JEPASegmentationModel3D,
-    load_downstream_state_dict,
-)
+from brats_jepa_3d.models import load_segmentation_model_for_eval, resolve_model_alias
 from brats_jepa_3d.utils import (
     get_autocast_context,
     get_device,
-    tta_predict_logits,
     set_seed,
     setup_logger,
-    sort_checkpoints_by_epoch,
+    tta_predict_logits,
 )
 
 
@@ -66,14 +55,14 @@ def parse_args():
         "--decoder_type",
         type=str,
         default="multiscale",
-        choices=["multiscale", "bottleneck", "unetr_hybrid"],
+        choices=["multiscale", "unetr_hybrid"],
         help="Decoder type for JEPA models",
     )
     parser.add_argument(
         "--all_models",
         action="store_true",
         default=False,
-        help="Evaluate all 5 benchmark models",
+        help="Evaluate all benchmark models",
     )
     parser.add_argument(
         "--checkpoint",
@@ -113,12 +102,6 @@ def parse_args():
         help="4-fold orthogonal-reflection test-time augmentation (original + flip X/Y/Z)",
     )
     parser.add_argument(
-        "--deep_supervision",
-        action="store_true",
-        default=False,
-        help="Model was trained with deep supervision (enables multi-head checkpoint loading)",
-    )
-    parser.add_argument(
         "--voxel_spacing",
         type=float,
         nargs=3,
@@ -148,7 +131,7 @@ def parse_args():
         type=int,
         nargs="+",
         default=None,
-        help="Voxel patch size (e.g. 8 8 8 or 16 16 16, default: from model config or 16 16 16)",
+        help="Voxel patch size (e.g. 8 8 8 or 16 16 16, default: from model config)",
     )
     return parser.parse_args()
 
@@ -161,15 +144,23 @@ def benchmark_model(
     smoke_test: bool = False,
     tta: bool = False,
     voxel_spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
-) -> dict[str, float]:
+) -> dict[str, Any]:
     model.eval()
     latencies: list[float] = []
     region_acc: dict[str, dict[str, list]] | None = None
+    per_case_records: list[dict[str, Any]] = []
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(loader, desc="Evaluating", leave=False)):
             images = batch["image"].to(device)
             masks = batch["mask"].to(device)
+            raw_pids = batch.get("patient_id")
+            if isinstance(raw_pids, (list, tuple)):
+                pids = [str(p) for p in raw_pids]
+            elif raw_pids is not None:
+                pids = [str(raw_pids)]
+            else:
+                pids = [f"case_{batch_idx}_{i}" for i in range(images.shape[0])]
 
             if device.type == "cuda":
                 torch.cuda.synchronize()
@@ -213,12 +204,44 @@ def benchmark_model(
                         if i < len(rmet["hd95_per_sample"]) and np.isfinite(rmet["hd95_per_sample"][i]):
                             acc["hd95_tumor"].append(rmet["hd95_per_sample"][i])
 
+            B = images.shape[0]
+            for i in range(B):
+                pid = pids[i] if i < len(pids) else f"case_{batch_idx}_{i}"
+                d_wt = float(res["WT"]["dice_per_sample"][i])
+                d_tc = float(res["TC"]["dice_per_sample"][i])
+                d_et = float(res["ET"]["dice_per_sample"][i])
+                i_wt = float(res["WT"]["iou_per_sample"][i])
+                i_tc = float(res["TC"]["iou_per_sample"][i])
+                i_et = float(res["ET"]["iou_per_sample"][i])
+                h_wt = float(res["WT"]["hd95_per_sample"][i])
+                h_tc = float(res["TC"]["hd95_per_sample"][i])
+                h_et = float(res["ET"]["hd95_per_sample"][i])
+                finite_h = [h for h in (h_wt, h_tc, h_et) if np.isfinite(h)]
+                per_case_records.append(
+                    {
+                        "patient_id": pid,
+                        "Dice_WT": d_wt,
+                        "Dice_TC": d_tc,
+                        "Dice_ET": d_et,
+                        "Dice_Mean": float(np.nanmean([d_wt, d_tc, d_et])),
+                        "IoU_WT": i_wt,
+                        "IoU_TC": i_tc,
+                        "IoU_ET": i_et,
+                        "IoU_Mean": float(np.nanmean([i_wt, i_tc, i_et])),
+                        "HD95_WT": h_wt,
+                        "HD95_TC": h_tc,
+                        "HD95_ET": h_et,
+                        "HD95_Mean": float(np.mean(finite_h)) if finite_h else float("nan"),
+                    }
+                )
+
             if smoke_test and batch_idx >= 1:
                 break
 
     out: dict[str, Any] = {
         "latency_ms": float(np.nanmean(latencies)) if latencies else 0.0,
         "regions": {},
+        "per_case": per_case_records,
     }
     if region_acc is not None:
         for rname, acc in region_acc.items():
@@ -254,25 +277,27 @@ def evaluate_representation(
     with torch.no_grad():
         for batch_idx, batch in enumerate(loader):
             images = batch["image"].to(device)
-            tokens = encoder(images)  # [B, N, D]
-            all_tokens.append(tokens.cpu())
+            tokens_cpu = encoder(images).cpu()  # [B, N, D]
+            all_tokens.append(tokens_cpu)
 
             bm = batch.get("brain_mask")
-            if bm is not None:
-                bm = bm.to(device).float()
+            if bm is None:
+                bm = (batch["image"] != 0).any(dim=1, keepdim=True).float()
+            else:
+                bm = bm.cpu().float()
                 if bm.dim() == 4:
                     bm = bm.unsqueeze(1)
-                N = tokens.shape[1]
-                grid_side = int(round(N ** (1.0 / 3.0)))
-                if grid_side ** 3 == N:
-                    grid_size = (grid_side, grid_side, grid_side)
-                    pooled_bm = torch.nn.functional.adaptive_avg_pool3d(bm, output_size=grid_size)
-                    pooled_bm = pooled_bm.reshape(tokens.shape[0], -1)  # [B, N]
-                    tissue_mask = pooled_bm >= 0.40  # 40% brain tissue occupancy
-                    for b in range(tokens.shape[0]):
-                        m_b = tissue_mask[b]
-                        if int(m_b.sum().item()) >= 4:
-                            all_tissue_tokens.append(tokens[b, m_b].cpu())
+            N = tokens_cpu.shape[1]
+            grid_side = int(round(N ** (1.0 / 3.0)))
+            if grid_side ** 3 == N:
+                grid_size = (grid_side, grid_side, grid_side)
+                pooled_bm = torch.nn.functional.adaptive_avg_pool3d(bm, output_size=grid_size)
+                pooled_bm = pooled_bm.reshape(tokens_cpu.shape[0], -1)  # [B, N]
+                tissue_mask = pooled_bm >= 0.10  # 10% brain tissue occupancy matching _tissue_filter.py
+                for b in range(tokens_cpu.shape[0]):
+                    m_b = tissue_mask[b]
+                    if int(m_b.sum().item()) >= 4:
+                        all_tissue_tokens.append(tokens_cpu[b, m_b])
 
             if smoke_test and batch_idx >= 1:
                 break
@@ -352,25 +377,12 @@ def main():
         ("3D nnU-Net (DynUNet)", "nnunet_3d", None),
     ]
 
-    # Filter if user specified a specific model_type
-    req_model = args.model_type.lower() if args.model_type else None
-    if req_model and not args.all_models and req_model not in ("all", "all_models"):
-        alias_map = {
-            "visreg": "visreg_jepa",
-            "visreg_jepa": "visreg_jepa",
-            "vit_scratch": "visreg_jepa",
-            "scratch": "visreg_jepa",
-            "sigreg": "sigreg_jepa",
-            "sigreg_jepa": "sigreg_jepa",
-            "unet": "unet_3d",
-            "unet_3d": "unet_3d",
-            "nnunet": "nnunet_3d",
-            "nnunet_3d": "nnunet_3d",
-        }
-        canonical = alias_map.get(req_model, req_model)
-        models_to_evaluate = [m for m in all_models_list if m[1] == canonical]
+    canonical_req = resolve_model_alias(args.model_type) if args.model_type else "all"
+    if args.model_type and not args.all_models and canonical_req != "all":
+        filter_key = "visreg_jepa" if canonical_req in ("vit_scratch", "vit_frozen") else canonical_req
+        models_to_evaluate = [m for m in all_models_list if m[1] == filter_key]
         if not models_to_evaluate:
-            logger.warning(f"Unknown model_type '{req_model}'. Defaulting to all models.")
+            logger.warning(f"Unknown model_type '{args.model_type}'. Defaulting to all models.")
             models_to_evaluate = all_models_list
     else:
         models_to_evaluate = all_models_list
@@ -381,12 +393,12 @@ def main():
         is_scratch = (
             args.from_scratch
             or (args.checkpoint and "scratch" in Path(args.checkpoint).name.lower())
-            or (args.model_type and args.model_type.lower() in ("vit_scratch", "scratch"))
+            or canonical_req == "vit_scratch"
         )
         is_frozen = (
             getattr(args, "freeze_encoder", False)
             or (args.checkpoint and "frozen" in Path(args.checkpoint).name.lower())
-            or (args.model_type and args.model_type.lower() in ("vit_frozen", "frozen"))
+            or canonical_req == "vit_frozen"
         )
         if is_scratch and "JEPA" in orig_label:
             label = "3D ViT-FPN (From Scratch)"
@@ -394,8 +406,7 @@ def main():
             label = f"{orig_label} [frozen]"
         else:
             label = orig_label
-        # Decoder-aware labels: hybrid and multiscale rows must coexist in the
-        # merged benchmark CSVs instead of overwriting each other by model name.
+
         if decoder_type and decoder_type != "multiscale" and "JEPA" in orig_label:
             if "[frozen]" in label:
                 label = label.replace(" [frozen]", f" [{decoder_type}, frozen]")
@@ -403,192 +414,59 @@ def main():
                 label = f"{label} [{decoder_type}]"
         logger.info(f"Evaluating: {label}")
 
-        if args.checkpoint and len(models_to_evaluate) == 1:
-            ckpt_file = Path(args.checkpoint)
-        else:
-            if args.checkpoint and len(models_to_evaluate) > 1:
-                logger.warning(
-                    f"--checkpoint was specified ({args.checkpoint}), but multiple models are being evaluated. "
-                    f"Using default checkpoint path for {label}."
-                )
-            search_dirs = get_checkpoint_search_dirs(checkpoints_dir)
-            if model_type == "unet_3d":
-                ckpt_file = next((d / "unet_3d_best.pt" for d in search_dirs if (d / "unet_3d_best.pt").exists()), checkpoints_dir / "unet_3d_best.pt")
-            elif model_type == "nnunet_3d":
-                ckpt_file = next((d / "nnunet_3d_best.pt" for d in search_dirs if (d / "nnunet_3d_best.pt").exists()), checkpoints_dir / "nnunet_3d_best.pt")
-            elif is_scratch:
-                ckpt_file = None
-                for d in search_dirs:
-                    if d.exists():
-                        scratch_ckpts = (
-                            sorted(d.glob(f"{model_type}_{decoder_type}_scratch_best.pt"))
-                            or sorted(d.glob(f"*{model_type}*{decoder_type}*scratch*best.pt"))
-                            or sorted(d.glob(f"*{model_type}*scratch*best.pt"))
-                        )
-                        if scratch_ckpts:
-                            ckpt_file = scratch_ckpts[-1]
-                            break
-                if ckpt_file is None:
-                    ckpt_file = checkpoints_dir / f"{model_type}_{decoder_type}_scratch_best.pt"
-            elif is_frozen:
-                ckpt_file = None
-                for d in search_dirs:
-                    if d.exists():
-                        frozen_ckpts = (
-                            sorted(d.glob(f"{model_type}_{decoder_type}_frozen_best.pt"))
-                            or sorted(d.glob(f"*{model_type}*{decoder_type}*frozen*best.pt"))
-                            or sorted(d.glob(f"*{model_type}*frozen*best.pt"))
-                        )
-                        if frozen_ckpts:
-                            ckpt_file = frozen_ckpts[-1]
-                            break
-                if ckpt_file is None:
-                    ckpt_file = checkpoints_dir / f"{model_type}_{decoder_type}_frozen_best.pt"
-            else:
-                ckpt_file = None
-                for d in search_dirs:
-                    if d.exists():
-                        downstream_ckpts = (
-                            [p for p in sorted(d.glob(f"{model_type}_{decoder_type}_best.pt")) if not any(x in p.name.lower() for x in ("scratch", "frozen"))]
-                            or [p for p in sorted(d.glob(f"*{model_type}*{decoder_type}*best.pt")) if not any(x in p.name.lower() for x in ("scratch", "frozen"))]
-                        )
-                        if downstream_ckpts:
-                            ckpt_file = downstream_ckpts[-1]
-                            break
-                if ckpt_file is None:
-                    ckpt_file = checkpoints_dir / f"{model_type}_{decoder_type}_best.pt"
+        explicit_ckpt = args.checkpoint if (args.checkpoint and len(models_to_evaluate) == 1) else None
+        if args.checkpoint and len(models_to_evaluate) > 1:
+            logger.warning(
+                f"--checkpoint was specified ({args.checkpoint}), but multiple models are being evaluated. "
+                f"Using default checkpoint path for {label}."
+            )
 
-        if model_type == "unet_3d":
-            if not ckpt_file.exists():
-                logger.warning(
-                    f"Checkpoint for {label} not found at {ckpt_file}. Skipping evaluation."
-                )
-                continue
-            unet_cfg_path = CONFIGS_DIR / "model" / "unet_3d.yaml"
-            unet_cfg = load_yaml_config(unet_cfg_path) if unet_cfg_path.exists() else {}
-            model = BraTS3DUNet(
-                in_channels=unet_cfg.get("in_channels", 4),
-                out_channels=unet_cfg.get("out_channels", 5),
-                channels=tuple(unet_cfg.get("channels", (32, 64, 128, 256, 512))),
-                strides=tuple(unet_cfg.get("strides", (2, 2, 2, 2))),
-                num_res_units=unet_cfg.get("num_res_units", 2),
-                dropout=unet_cfg.get("dropout", 0.1),
-            ).to(device)
-            sd = torch.load(ckpt_file, map_location=device)
-            sd = sd.get("model_state_dict", sd)
-            missing, _unexpected = model.load_state_dict(sd, strict=False)
-            matched = [k for k in model.state_dict() if k not in missing]
-            if len(matched) == 0:
-                raise RuntimeError(f"Failed to load any weights for {label} from {ckpt_file}")
-            logger.info(f"Loaded {label} weights from {ckpt_file.name} ({len(matched)} matched keys)")
-            erank, cossim = "-", "-"
+        model = load_segmentation_model_for_eval(
+            model_type=model_type,
+            label=label,
+            device=device,
+            decoder_type=decoder_type or "multiscale",
+            is_scratch=is_scratch,
+            is_frozen=is_frozen,
+            patch_size=getattr(args, "patch_size", None),
+            checkpoints_dir=checkpoints_dir,
+            explicit_checkpoint=explicit_ckpt,
+            resolved_data_dir=resolved_data_dir,
+            logger=logger,
+        )
+        if model is None:
+            continue
 
-        elif model_type == "nnunet_3d":
-            if not ckpt_file.exists():
-                logger.warning(
-                    f"Checkpoint for {label} not found at {ckpt_file}. Skipping evaluation."
-                )
-                continue
-            nnunet_cfg_path = CONFIGS_DIR / "model" / "nnunet_3d.yaml"
-            nnunet_cfg = load_yaml_config(nnunet_cfg_path) if nnunet_cfg_path.exists() else {}
-            model = BraTS3DnnUNet(
-                in_channels=nnunet_cfg.get("in_channels", 4),
-                out_channels=nnunet_cfg.get("out_channels", 5),
-                deep_supervision=nnunet_cfg.get("deep_supervision", True),
-                deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
-                res_block=nnunet_cfg.get("res_block", True),
-            ).to(device)
-            sd = torch.load(ckpt_file, map_location=device)
-            sd = sd.get("model_state_dict", sd)
-            missing, _unexpected = model.load_state_dict(sd, strict=False)
-            matched = [k for k in model.state_dict() if k not in missing]
-            if len(matched) == 0:
-                raise RuntimeError(f"Failed to load any weights for {label} from {ckpt_file}")
-            logger.info(f"Loaded {label} weights from {ckpt_file.name} ({len(matched)} matched keys)")
-            erank, cossim = "-", "-"
-
-        else:
-            if not (ckpt_file and ckpt_file.exists()):
-                logger.warning(
-                    f"Checkpoint for {label} not found at {ckpt_file}. Skipping evaluation."
-                )
-                continue
-            # JEPA Downstream Model
-            jepa_cfg_path = CONFIGS_DIR / "model" / f"{model_type}_3d.yaml"
-            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
-
-            # Detect whether checkpoint has deep supervision heads
-            ds_flag = getattr(args, "deep_supervision", False)
-            try:
-                sd_peek = torch.load(ckpt_file, map_location="cpu")
-                sd_peek = sd_peek.get("model_state_dict", sd_peek)
-                if any(k.startswith("decoder.ds") for k in sd_peek):
-                    ds_flag = True
-            except (KeyError, OSError, RuntimeError, AttributeError):
-                pass
-
-            raw_patch = getattr(args, "patch_size", None)
-            if raw_patch is not None:
-                if isinstance(raw_patch, int):
-                    patch_size = (raw_patch, raw_patch, raw_patch)
-                elif len(raw_patch) == 1:
-                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
-                else:
-                    patch_size = tuple(int(x) for x in raw_patch)
-            else:
-                patch_size = tuple(jepa_cfg.get("patch_size", (8, 8, 8)))
-
-            model = JEPASegmentationModel3D(
-                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
-                patch_size=patch_size,
-                in_channels=jepa_cfg.get("in_channels", 4),
-                embed_dim=jepa_cfg.get("embed_dim", 384),
-                encoder_depth=jepa_cfg.get("encoder_depth", 8),
-                num_heads=jepa_cfg.get("num_heads", 6),
-                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                out_channels=jepa_cfg.get("out_channels", 5),
-                decoder_type=decoder_type or "multiscale",
-                deep_supervision=ds_flag,
-            ).to(device)
-            sd = torch.load(ckpt_file, map_location=device)
-            sd = sd.get("model_state_dict", sd)
-            has_downstream = any(k.startswith("encoder.") for k in sd) or any(k.startswith("decoder.") for k in sd)
-            has_pretrain = any(k.startswith("context_encoder.") for k in sd)
-            if has_downstream:
-                missing, _unexpected = load_downstream_state_dict(model, sd, label)
-                matched = [k for k in model.state_dict() if k not in missing]
-                logger.info(f"Loaded downstream fine-tuned weights from {ckpt_file.name} ({len(matched)} matched keys)")
-            elif has_pretrain:
-                raise RuntimeError(
-                    f"{label}: Checkpoint {ckpt_file.name} contains only pre-trained encoder weights. "
-                    f"Evaluating a randomly initialized downstream decoder produces invalid benchmark numbers. "
-                    f"Train downstream model with train_downstream_3d.py first."
-                )
-            else:
-                missing, _unexpected = load_downstream_state_dict(model, sd, label)
-                matched = [k for k in model.state_dict() if k not in missing]
-                logger.info(f"Loaded weights from {ckpt_file.name} ({len(matched)} matched keys)")
-
-            # Evaluate representation diagnostics
+        if hasattr(model, "encoder"):
             rep_stats = evaluate_representation(
                 model.encoder, test_loader, device, smoke_test=args.smoke_test
             )
             erank_val = rep_stats["erank"]
             embed_dim = getattr(model.encoder, "embed_dim", 384)
-            erank = f"{erank_val:.2f} ({erank_val / embed_dim * 100:.1f}%)"
-            cossim = f"{rep_stats['centered_cossim']:.4f}"
             t_val = rep_stats.get("erank_tissue", erank_val)
             t_cos = rep_stats.get("centered_cossim_tissue", rep_stats["centered_cossim"])
+            erank = f"{t_val:.2f} ({t_val / embed_dim * 100:.1f}%)"
+            cossim = f"{t_cos:.4f}"
             logger.info(
-                f"Representation: eRank(all)={erank_val:.2f} ({erank_val / embed_dim * 100:.1f}%), "
-                f"eRank(tissue)={t_val:.2f} ({t_val / embed_dim * 100:.1f}%), "
-                f"CosSim(all)={rep_stats['centered_cossim']:.4f}, CosSim(tissue)={t_cos:.4f}"
+                f"Representation: eRank(tissue)={t_val:.2f} ({t_val / embed_dim * 100:.1f}%), "
+                f"eRank(all)={erank_val:.2f} ({erank_val / embed_dim * 100:.1f}%), "
+                f"CosSim(tissue)={t_cos:.4f}, CosSim(all)={rep_stats['centered_cossim']:.4f}"
             )
+        else:
+            erank, cossim = "-", "-"
 
         seg_stats = benchmark_model(
             model, test_loader, device, amp=args.amp, smoke_test=args.smoke_test,
             tta=args.tta, voxel_spacing=tuple(args.voxel_spacing),
         )
+
+        if not (args.no_write or args.smoke_test) and seg_stats.get("per_case"):
+            safe_name = re.sub(r"[^a-zA-Z0-9_]+", "_", label.lower()).strip("_")
+            per_case_df = pd.DataFrame(seg_stats["per_case"])
+            per_case_df.insert(1, "model", label)
+            per_case_path = metrics_dir / f"{safe_name}_per_case.csv"
+            per_case_df.to_csv(per_case_path, index=False)
+            logger.info(f"Saved per-patient test metrics ({len(per_case_df)} cases) to {per_case_path}")
 
         for rname in ("WT", "TC", "ET"):
             if rname not in seg_stats.get("regions", {}):
@@ -605,10 +483,7 @@ def main():
                         f"{dt * 100:.2f}" if dt == dt else "n/a"),
                     "IoU (%)": f"{rs['iou_mean'] * 100:.2f} ± {rs['iou_std'] * 100:.2f}",
                     "HD95 (voxels)": f"{rs['hd95_mean']:.2f} ± {rs['hd95_std']:.2f}",
-                    "HD95 (mm)": f"{rs['hd95_mean']:.2f} ± {rs['hd95_std']:.2f}",
                     "HD95_tumor_only (voxels)": (
-                        f"{ht:.2f}" if ht == ht else "n/a"),
-                    "HD95_tumor_only (mm)": (
                         f"{ht:.2f}" if ht == ht else "n/a"),
                     "Latency (ms)": f"{seg_stats['latency_ms']:.2f}",
                     "EffRank (S²)": erank,

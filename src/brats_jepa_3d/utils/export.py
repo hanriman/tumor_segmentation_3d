@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from brats_jepa_3d.config import (
-    IN_KAGGLE,
     OUTPUTS_DIR,
     PROJECT_ROOT,
 )
@@ -25,7 +24,6 @@ def resolve_outputs_source_dir(preferred_dir: Path | str | None = None) -> Path:
     candidates = [
         OUTPUTS_DIR,
         PROJECT_ROOT / "outputs",
-        Path("/kaggle/working/outputs"),
         Path("outputs").resolve(),
     ]
 
@@ -57,10 +55,9 @@ def export_artifacts(
     """
     src_base = resolve_outputs_source_dir(source_dir)
 
-    base_working = Path("/kaggle/working") if IN_KAGGLE else PROJECT_ROOT
     if export_dir is None:
         prefix_tag = model_prefix.lower() if model_prefix else "all"
-        target_export_dir = base_working / f"export_{prefix_tag}"
+        target_export_dir = PROJECT_ROOT / f"export_{prefix_tag}"
     else:
         target_export_dir = Path(export_dir).resolve()
 
@@ -83,7 +80,7 @@ def export_artifacts(
     # Check primary source; only check fallback candidates if source_dir was not explicitly provided
     fallback_sources = [src_base]
     if source_dir is None:
-        for cand in [OUTPUTS_DIR, PROJECT_ROOT / "outputs", Path("/kaggle/working/outputs"), Path("outputs").resolve()]:
+        for cand in [OUTPUTS_DIR, PROJECT_ROOT / "outputs", Path("outputs").resolve()]:
             if cand.exists() and cand not in fallback_sources:
                 fallback_sources.append(cand)
 

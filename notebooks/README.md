@@ -1,12 +1,11 @@
 # Research Notebook Suite (BraTS 2024 GLI Multiregion Protocol)
 
 **Protocol: BraTS 2024 WT/TC/ET on the v2 dataset version.** 5-class outputs
-(bg/NCR/ED/NET/ET); eval emits one row per `(model, region)`. Never mix these
-tables with legacy v1 binary whole-tumor results.
+(`0=Background`, `1=NETC`, `2=SNFH`, `3=ET`, `4=RC [Resection Cavity]`); evaluation
+scores the three clinical glioma sub-regions (`WT={1,2,3}`, `TC={1,3}`, `ET={3}`)
+and emits one row per `(model, region)`.
 
-The notebook suite is organized into two dedicated execution environments:
-1. **`notebooks/kaggle/`**: Tailored for Kaggle T4 single-session environment ($16^3$ voxel patch, $512$ token grid).
-2. **`notebooks/colab/`**: Tailored for Google Colab GPU environment (T4 / L4 / A100) with high-resolution $8^3$ voxel patch ($4,096$ token grid), Google Drive checkpoint persistence, isolated parallel execution directories, and 1-click downloadable zip archives.
+The notebook suite in **`notebooks/colab/`** is tailored for the Google Colab GPU environment (T4 / L4 / A100) with high-resolution $8^3$ voxel patches ($4,096$ token grid), Google Drive checkpoint persistence, isolated parallel execution directories, and 1-click downloadable zip archives.
 
 ---
 
@@ -30,31 +29,14 @@ Numbered sequentially for structured execution. Each notebook streams directly t
 
 ---
 
-## 2. Kaggle T4 Benchmark Suite (`notebooks/kaggle/`)
-
-Standardized for Kaggle's dual T4 GPU environment ($16^3$ patch size, 512 token grid):
-
-| Kaggle Notebook | Purpose |
-| :--- | :--- |
-| `01_train_visreg_3d.ipynb` | SSL pre-training (label-free; Anisotropic 3D target jitter [97 tokens across 6 cuboids], dual cosine schedules; exports `visreg_pretrain_outputs.zip`). |
-| `02_diagnose_visreg_3d.ipynb` | Label-free SSL masking diagnostics (D1 air fractions; D2/D3 with a VisReg checkpoint). |
-| `03_train_nnunet_3d.ipynb` | 3D nnU-Net baseline (DynUNet with multi-scale deep supervision). |
-| `04_train_unet_3d.ipynb` | 3D Residual UNet baseline (MONAI ResUNet). |
-| `05_train_vit_from_scratch_ablation_3d.ipynb` | From-scratch ViT + Multi-Scale FPN ablation (random initialization control). |
-| `06_vit_unetr_hybrid_ablation_3d.ipynb` | From-scratch ViT + Hybrid UNETR ablation (random initialization control). |
-| `07_finetune_visreg_multiscale_3d.ipynb` | VisReg + Multi-Scale FPN downstream fine-tuning on shared SSL encoder (Kaggle T4, $16^3$ patch). |
-| `08_finetune_visreg_unetr_3d.ipynb` | VisReg + Hybrid UNETR downstream fine-tuning on shared SSL encoder (Kaggle T4, $16^3$ patch). |
-
----
-
 ## Unified Configuration & Reproducibility Schema
 
 All notebooks share a standardized top-level configuration block eliminating hardcoded CLI magic numbers:
 
 ```python
 SEED = 42                 # Deterministic seed for weight init, augmentations, and data splits
-NUM_WORKERS = 4          # Parallel CPU data loading workers (Kaggle T4 / Colab GPU)
-PATCH_SIZE = 8           # 8³ voxel patch (4,096 tokens) on Colab GPU; 16³ voxel patch (512 tokens) on Kaggle T4
+NUM_WORKERS = 4          # Parallel CPU data loading workers (Colab GPU)
+PATCH_SIZE = 8           # 8³ voxel patch (4,096 tokens) on Colab GPU
 BATCH_SIZE = 4           # Volumetric downstream batch size (nnU-Net: B=2)
 EPOCHS = 60              # Supervised training / fine-tuning epochs (pre-training: 200)
 LOW_DATA_EPOCHS = 25     # Low-data label efficiency evaluation epochs

@@ -22,8 +22,8 @@ On the **BraTS 2024 GLI** benchmark under the official three-region protocol (**
 ### Key Scientific Takeaways ([`AGENTS.md`](../AGENTS.md)):
 1. **Full Data Regime**: Supervised 3D CNNs achieve the highest overall Dice (nnU-Net: $79.50\%$, ResUNet: $76.67\%$), followed closely by VisReg FPN ($76.58\%$) and VisReg UNETR ($75.61\%$), confirming that localized 3D convolutional inductive biases remain superior for volumetric dense prediction when annotations are abundant.
 2. **Decisive Low-Data Pre-Training Advantage ($5\%$ & $10\%$ Data)**: At $5\%$ data ($58$ volumes), 3D VisReg UNETR achieves the top performance across the entire benchmark ($\mathbf{63.65\%}$ mean Dice), outperforming matched from-scratch ViT-UNETR ($56.57\%$, $\mathbf{+7.08\text{pp}}$ JEPA gain), deeply supervised 3D nnU-Net ($59.86\%$, $\mathbf{+3.79\text{pp}}$), and 3D Residual UNet ($52.65\%$, $\mathbf{+11.00\text{pp}}$). VisReg FPN similarly achieves $\mathbf{61.45\%}$ ($\mathbf{+10.58\text{pp}}$ over Scratch FPN $50.87\%$). At $10\%$ data ($115$ volumes), VisReg UNETR retains the top rank overall ($\mathbf{66.16\%}$ vs. nnU-Net $65.03\%$).
-3. **Decodability of Frozen Representations (Pure Latent vs. Hybrid Probing)**: Completely freezing the ViT backbone (`freeze_encoder=True`) demonstrates that 3D VisReg JEPA pre-training discovers high-quality anatomical representations without backpropagation into the transformer:
-   - **Pure Latent Probe (ViT-FPN: $72.31\%$ Mean Dice)**: Decodes solely from extracted transformer latents without any raw-image bypass, establishing true linear decodability of the self-supervised manifold.
+3. **Decodability of Frozen Representations (Pure Latent vs. Hybrid Probing)**: Completely freezing the ViT backbone (`freeze_encoder=True`) demonstrates that 3D VisReg JEPA pre-training discovers spatially organized anatomical representations without backpropagation into the transformer:
+   - **Pure Latent Probe (ViT-FPN: $72.31\%$ Mean Dice)**: Decodes solely from extracted transformer latents without any raw-image bypass, establishing multi-scale spatial decodability of the frozen self-supervised manifold.
    - **Frozen Hybrid Probe (ViT-UNETR: $75.13\%$ Mean Dice)**: Combines frozen transformer latents with a lightweight trainable convolutional stem operating on raw inputs, reaching within $0.48\text{pp}$ of full fine-tuning ($75.61\%$) and exceeding fully trained from-scratch ViT-UNETR ($74.80\%$), highlighting architectural complementarity.
 4. **Extreme Scarcity Bifurcation ($1\%$ Data / 12 Volumes)**: The lightweight MultiScale FPN decoder retains $22.45\%$ mean Dice ($20.74\%$ frozen) outperforming from-scratch FPN ($16.70\%$) and standard Residual UNet ($5.86\%$), while high-capacity UNETR without deep supervision struggles ($2.7\text{--}3.2\%$). Deeply supervised nnU-Net maintains $28.05\%$ due to multi-scale auxiliary gradient injection.
 
@@ -37,13 +37,13 @@ Skull-stripped brain parenchyma occupies only **$27\%\text{--}40\%$** of a $128^
 - Every air target wastes optimizer gradient steps learning trivial identity representations.
 
 ### 2.2 The Sliced-Wasserstein Distance (SWD) Air-Spike
-VisReg projects batch representations onto $M=256$ 1D hyperplanes and matches them against standard Gaussian quantiles $\mathcal{N}(0, 1)$. When constant air tokens enter the loss:
+VISReg projects standardized batch representations onto $M=1024$ 1D unit directions and matches them against standard Gaussian quantiles $\mathcal{N}(0, 1)$. When constant air tokens enter the loss:
 - Identical air tokens form a sharp **Dirac delta spike** adjacent to the continuous brain representation cloud.
 - The shape penalty spends massive gradient energy attempting to force the zero spike into a Gaussian bell curve instead of organizing biological brain tissue features:
   - Synthetic test: Scale loss increased from $0.0011 \to 0.0253$ (**$23\times$**); Shape loss increased from $0.0043 \to 0.0811$ (**$19\times$**).
 
 ### 2.3 The Architectural Solution
-1. **Tissue Rejection Sampling**: Target sampling evaluates tissue fraction via `brain_mask` and accepts cuboids meeting proportional tissue thresholds ($\ge \max(4, \lfloor 0.40 \times \text{vol} \rfloor)$).
+1. **Tissue Rejection Sampling**: Target sampling evaluates tissue fraction via `brain_mask` and accepts cuboids meeting proportional tissue thresholds ($\ge \max(2, \lfloor 0.25 \times \text{vol} \rfloor)$).
 2. **Tissue-Only SWD Filtering**: Batch tokens are filtered to tissue-containing rows before regularizer evaluation. Air tokens are excluded from SWD moment matching, ensuring clean Gaussian organization of biological tissue.
 
 ---
@@ -75,25 +75,25 @@ Early in training, unconverged models (e.g., 3D UNet without deep supervision, v
 | :--- | :--- | :--- | :--- |
 | **Primary Scientific Question** | *"Does self-supervised pre-training provide an optimal initialization that outperforms randomly initialized baselines?"* | *"How much spatial and anatomical structure is directly decodable strictly from frozen transformer latents?"* | *"Can frozen self-supervised latents synergize with lightweight trainable high-resolution convolutional stems?"* |
 | **Raw Image Bypass** | No (decodes hierarchical ViT features). | **No** (decodes strictly from frozen ViT features; zero image bypass). | **Yes** (trainable CNN stems operate at $128^3$ and $64^3$ directly on raw MRI). |
-| **Fairness vs. CNN Baselines** | **Fair & Symmetric**: Both 3D nnU-Net and JEPA allow full parameter capacity to adapt to tumor margins. | **Diagnostic**: Isolates representation linearly without encoder adaptation. | **Architectural Synergy**: Combines frozen global transformer context with local CNN edge priors. |
+| **Fairness vs. CNN Baselines** | **Fair & Symmetric**: Both 3D nnU-Net and JEPA allow full parameter capacity to adapt to tumor margins. | **Diagnostic**: Isolates frozen representation spatial decodability without encoder adaptation. | **Architectural Synergy**: Combines frozen global transformer context with local CNN edge priors. |
 | **Empirical Score (Mean Dice)** | **$76.58\%$** (FPN) / **$75.61\%$** (UNETR) | **$72.31\%$** | **$75.13\%$** |
 
 ### 4.2 Research Protocol
-The primary benchmark adopts **full fine-tuning** to establish fair parity with fully supervised CNNs. Frozen probing is reserved as a mechanistic ablation to assess out-of-the-box linear decodability and architectural synergy.
+The primary benchmark adopts **full fine-tuning** to establish fair parity with fully supervised CNNs. Frozen probing is reserved as a mechanistic ablation to assess out-of-the-box spatial decodability and architectural synergy.
 
 ### 4.3 Empirical Probing & Latent Geometry Results
-Empirical evaluation on the held-out test split ($N=242$ volumes) demonstrates the exceptional quality of frozen representations:
-- **Pure Latent Probe (Frozen VisReg FPN)**: Achieves **$72.31\%$ Mean Dice** ($84.79\%$ WT, $71.97\%$ TC, $60.18\%$ ET). Because the FPN decoder possesses no raw-image bypass, this confirms that 3D VisReg JEPA discovers rich, linearly separable anatomical representations entirely without encoder adaptation.
-- **Frozen Hybrid Probe (Frozen VisReg UNETR)**: Achieves **$75.13\%$ Mean Dice** ($85.72\%$ WT, $77.09\%$ TC, $62.59\%$ ET), within $0.48\text{pp}$ of full fine-tuning ($75.61\%$) and exceeding fully trained from-scratch ViT-UNETR ($74.80\%$). The trainable CNN stem restores sub-voxel edge gradients while leveraging frozen JEPA representations for tissue classification.
-- **Latent Manifold Geometry & Tissue Token Filtering**: Analysis of pre-trained encoder representations reveals an Effective Spectral Rank ($S^2$) of $45.08$ ($11.7\%$ of embedding dimension $D_{\text{enc}}=384$) and centered cosine similarity of $-0.0009$, mathematically proving healthy dimensional expansion and complete immunity to representation collapse. Furthermore, filtering out background air tokens (which constitute $\approx 60\%$ of brain bounding boxes) isolates the intrinsic dimensionality of biological tissue representations from static coordinate grid embeddings.
+Empirical evaluation on the held-out test split ($N=242$ volumes) demonstrates the quality of frozen representations:
+- **Pure Latent Probe (Frozen VisReg FPN)**: Achieves **$72.31\%$ Mean Dice** ($84.79\%$ WT, $71.97\%$ TC, $60.18\%$ ET). Because the FPN decoder possesses no raw-image bypass, this confirms that 3D VisReg JEPA discovers spatially decodable anatomical representations without encoder adaptation.
+- **Frozen Hybrid Probe (Frozen VisReg UNETR)**: Achieves **$75.13\%$ Mean Dice** ($85.72\%$ WT, $77.09\%$ TC, $62.59\%$ ET), within $0.48\text{pp}$ of full fine-tuning ($75.61\%$) and exceeding fully trained from-scratch ViT-UNETR ($74.80\%$). The trainable CNN stem restores sub-voxel edge gradients while leveraging frozen JEPA representations for tissue context.
+- **Latent Manifold Geometry & Tissue Token Filtering**: Analysis of tissue-filtered encoder representations confirms the absence of dimensional collapse ($S^2 \to 1.0$) across all evaluated ViT backbones: pre-trained frozen VisReg JEPA achieves an Effective Spectral Rank ($S^2$) of $45.08$ ($11.7\%$ of $D_{\text{enc}}=384$), fine-tuned VisReg FPN achieves $44.24$ ($11.5\%$), fine-tuned VisReg UNETR achieves $41.37$ ($10.8\%$), and supervised from-scratch controls achieve $46.20$ ($12.0\%$, FPN) and $27.51$ ($7.2\%$, UNETR). Filtering out background air tokens (which constitute $\approx 60\%$ of brain bounding boxes) isolates the intrinsic dimensionality of biological tissue representations from static coordinate grid embeddings.
 
 ---
 
 ## 5. Rationale 4: Hardware Dynamics & Methodological Fairness
 
 ### 5.1 Batch Size & Sequence Dynamics: Pre-Training vs. Downstream
-- **Canonical Pre-Training ($B=16\text{--}32$, $8^3$ Patches)**: Operates in 1D sequence space with $N_{\text{tokens}} = 4,096$ per volume ($D=384$). Without a volumetric decoder, peak activation memory remains manageable under AMP FP16/BF16. High token counts per batch ($N = B \times 4,096 = 65,536\text{ to }131,072$ tokens) maximize statistical precision for Sliced-Wasserstein projections and empirical covariance estimation in VisReg/SigReg.
-- **Downstream Segmentation ($B=2\text{--}4$)**: Reconstructs dense $128^3$ volumetric grids across 4 deep supervision heads. Peak memory reaches $\approx 7.4\,\text{GB}$ at $B=2$ and saturates 16 GB GPUs at $B=4$. Downstream VisReg and supervised baselines both use $B=2$ for strict hardware parity.
+- **Canonical Pre-Training ($B=16\text{--}32$, $8^3$ Patches)**: Operates in 1D sequence space with $N_{\text{tokens}} = 4,096$ per volume ($D=384$). Without a volumetric decoder, peak activation memory remains manageable under AMP FP16/BF16. High token counts per batch ($N = B \times 4,096 = 65,536\text{ to }131,072$ tokens) maximize statistical precision for Sliced-Wasserstein projections and empirical covariance estimation in VISReg/SigReg.
+- **Downstream Segmentation ($B=4$)**: Reconstructs dense $128^3$ volumetric grids across 4 deep supervision heads, using $B=4$ across all canonical Colab benchmark runs for strict hardware parity.
 
 ### 5.2 Deep Supervision Gradient Parity
 Deep supervision is enabled symmetrically across all models:
@@ -113,7 +113,6 @@ When scaling the Vision Transformer patch embedding from $16^3$ down to $8^3$ vo
    - Backward pass activation memory under multi-scale deep supervision expands from $\approx 7.4\,\text{GB}$ to $>30\,\text{GB}$, requiring A100-tier hardware or micro-batching ($B=1$) with gradient accumulation. Downstream inference latency also increases $\approx 4\text{--}8\times$.
 3. **Preserving Benchmark Fairness ([`AGENTS.md`](../AGENTS.md))**:
    - To isolate representation benefits from architectural capacity, the master benchmark evaluates all transformer models (both pre-trained VisReg JEPA and from-scratch controls) under the exact same $8^3$ patch embedding ($16^3 = 4,096$ tokens) on high-memory hardware.
-   - For resource-constrained hardware (e.g. single 16 GB Kaggle T4), a lightweight $16^3$ patch configuration ($8^3 = 512$ tokens) is provided in the Kaggle notebook suite.
    - Crucially, self-supervised JEPA is always compared directly against matched from-scratch ViT controls ($\Delta_{\text{JEPA}}$) at the same token resolution, guaranteeing that reported gains derive from SSL representations rather than transformer spatial resolution.
 
 ---
@@ -150,31 +149,23 @@ $$\Delta_{\text{JEPA}} = \text{Score}(\text{VisReg JEPA}) - \text{Score}(\text{V
 
 ---
 
-## 7. Rationale 6: Scanner Shift Robustness & Inverted Modality Dropout Scaling
+## 7. Rationale 6: Scanner Shift Robustness & Zero-Imputed Modality Dropout Parity
 
 ### 7.1 Synthetic Acquisition Artifacts (Rician Noise & $B_1$ Bias Field)
 To benchmark out-of-distribution clinical robustness across scanner vendors and field strengths, models were subjected to biophysical corruptions without retraining:
 1. **3D Rician Scanner Noise ($\sigma = 0.08$)**: Simulates thermal MR magnitude reconstruction noise via quadrature RF coil channels:
-   $$M = \sqrt{(X + \eta_1)^2 + \eta_2^2}, \quad \eta_1, \eta_2 \sim \mathcal{N}(0, \sigma^2)$$
+   $$M = \sqrt{(X_+ + \eta_1)^2 + \eta_2^2}, \quad \eta_1, \eta_2 \sim \mathcal{N}(0, \sigma^2)$$
    - *Result*: 3D nnU-Net maintains $77.99\%$ mean Dice, while 3D VisReg JEPA (FPN) achieves $74.93\%$ (a minor $-0.52\text{pp}$ drop vs. clean baseline $75.45\%$), confirming high noise resistance.
 2. **$B_1$ Radiofrequency Bias Field Inhomogeneity (Strength $0.35$)**: Multiplies tissue voxels by a smooth 2nd-order 3D spatial polynomial:
    $$X_{\text{corrupt}} = X \cdot \left(1 + \text{strength} \cdot \sum_{i+j+k \le 2} c_{ijk} x^i y^j z^k\right)$$
    - *Result*: 3D nnU-Net retains $78.25\%$, while VisReg JEPA (FPN) achieves $74.73\%$, proving robust tolerance to low-frequency RF coil drift.
 
-### 7.2 Missing Modality Triage & The Inverted Dropout Energy Mechanism
-When evaluating emergency incomplete MRI acquisitions (e.g., FLAIR-only or T1c-only), a critical architectural divergence emerges between CNNs and Vision Transformers:
-1. **The Training Contract (`RandomModalityDropout3D`)**:
-   During self-supervised pre-training and downstream training, active channels are dynamically scaled via inverted dropout:
-   $$\text{scale} = \frac{C}{\text{keep}} = \frac{4}{1} = 4.0$$
-   This scaling preserves expected total activation energy across the multi-channel input volume ($\mathbb{E}[\|X_{\text{drop}}\|^2] = \mathbb{E}[\|X\|^2]$).
-2. **The Unscaled Evaluation Confounder**:
-   In standard OOD evaluation where missing channels are zeroed without scaling ($1.0\times$), the surviving channel presents only $25\%$ of expected total signal energy.
-3. **Architectural Contrast (InstanceNorm vs. LayerNorm)**:
-   - **CNNs (`InstanceNorm3d`)**: Instance Normalization computes spatial mean and variance independently per channel:
-     $$\text{IN}(c \cdot X) = \frac{c \cdot X - c \cdot \mu}{\sqrt{c^2 \sigma^2 + \epsilon}} \approx \text{IN}(X)$$
-     CNNs are mathematically scale-invariant to scalar multipliers, allowing 3D nnU-Net to retain $82.06\%$ WT Dice on FLAIR-only scans.
-   - **Vision Transformers (`LayerNorm`)**: ViT linear patch projections sum across all $C=4$ channels into token embeddings before adding static sinusoidal positional embeddings:
-     $$\mathbf{z}_{0, i} = \mathbf{W}_{\text{patch}} X_i + \mathbf{pe}_i$$
-     When signal energy drops $4\times$, $\mathbf{pe}_i$ overwhelms the attenuated image token projection, causing downstream LayerNorm to normalize dominated positional coordinates rather than anatomical features, resulting in representation collapse ($10.91\%$ WT).
-4. **Tooling & Mitigation**:
-   [`scripts/evaluate_ood_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/scripts/evaluate_ood_3d.py) provides the `--rescale_missing_modalities` CLI flag to evaluate under matched inverted dropout scaling ($4.0\times$), restoring token energy balance for transformer architectures.
+### 7.2 Missing Modality Triage & Modality Dropout Alignment
+When evaluating emergency incomplete MRI acquisitions (e.g., FLAIR-only or T1c-only), an important interaction arises between channel dropout normalization and architecture:
+1. **Historical Inverted-Dropout Confounder**:
+   When training-time `RandomModalityDropout3D` rescaled surviving channels by $C / \text{keep} = 4.0$ while OOD evaluation zeroed missing channels without rescaling ($1.0\times$), the surviving channel presented only $25\%$ of expected signal amplitude at evaluation time.
+2. **Architectural Contrast (InstanceNorm vs. LayerNorm)**:
+   - **CNNs (`InstanceNorm3d`)**: Instance Normalization computes spatial mean and variance independently per channel ($\text{IN}(c \cdot X) \approx \text{IN}(X)$), rendering 3D nnU-Net invariant to channel-wise scalar multipliers ($82.06\%$ WT Dice on FLAIR-only scans).
+   - **Vision Transformers (`LayerNorm`)**: ViT linear patch projections sum across all $C=4$ channels into token embeddings before adding static sinusoidal positional embeddings ($\mathbf{z}_{0, i} = \mathbf{W}_{\text{patch}} X_i + \mathbf{pe}_i$). Under a $4\times$ train/test scale mismatch, $\mathbf{pe}_i$ dominates the attenuated patch projection ($10.91\%$ WT).
+3. **Zero-Imputed Training & Evaluation Parity (`rescale=False`)**:
+   In the current codebase, [`RandomModalityDropout3D`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/data/transforms.py) defaults to `rescale: bool = False` (pure zero-imputation), matching the zero-imputed missing-modality evaluation in [`scripts/evaluate_ood_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/scripts/evaluate_ood_3d.py).

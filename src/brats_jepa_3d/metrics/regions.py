@@ -1,19 +1,24 @@
-"""BraTS 2024 region evaluation (WT/TC/ET) derived from multi-class predictions.
+"""BraTS 2024 Post-Treatment Glioma (GLI) region evaluation (WT/TC/ET) derived from multi-class predictions.
 
-Label convention (verified on the raw pool): 0=background, 1=NCR, 2=ED, 3=NET,
-4=ET. Regions are overlapping unions evaluated with the exact same guarded
-binary machinery as the WT-only protocol — including NaN semantics on
-region-missing cohorts (e.g. ET-free volumes, ~15% of the pool).
+Official BraTS 2024 Post-Treatment GLI label convention (de Verdier et al., 2024, arXiv:2405.18368, Section 2.2):
+  0 = Background
+  1 = NETC (Non-Enhancing Tumor Core)
+  2 = SNFH (Surrounding Non-Enhancing FLAIR Hyperintensity)
+  3 = ET   (Enhancing Tissue)
+  4 = RC   (Resection Cavity — post-surgical fluid cavity, excluded from WT/TC/ET)
+
+Regions are overlapping unions evaluated with the guarded binary metric suite,
+including NaN semantics on region-missing cohorts (e.g. ET-free volumes).
 """
 import torch
 
 from .volumetric_metrics import compute_volumetric_metrics_3d
 
-#: BraTS 2024 region definitions as raw label sets.
+#: Official BraTS 2024 Post-Treatment GLI region definitions as raw label sets.
 BRATS_REGIONS: dict[str, tuple[int, ...]] = {
-    "WT": (1, 2, 3, 4),
-    "TC": (1, 3, 4),
-    "ET": (4,),
+    "WT": (1, 2, 3),
+    "TC": (1, 3),
+    "ET": (3,),
 }
 
 REGION_ORDER = ("WT", "TC", "ET")

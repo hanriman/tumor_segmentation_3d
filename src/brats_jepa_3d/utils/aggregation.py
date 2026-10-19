@@ -119,6 +119,13 @@ def aggregate_master_benchmarks(
         combined["Model Architecture"] = combined["Model Architecture"].fillna(combined["Model"])
         combined = combined.drop(columns=["Model"])
 
+    # Drop redundant unscaled 'HD95 (mm)' / 'HD95_tumor_only (mm)' columns when 'HD95 (voxels)' is present
+    # (128^3 tight-crop grids are anisotropically resampled per patient, so 1 voxel != 1 mm).
+    if "HD95 (voxels)" in combined.columns and "HD95 (mm)" in combined.columns:
+        combined = combined.drop(columns=["HD95 (mm)"])
+    if "HD95_tumor_only (voxels)" in combined.columns and "HD95_tumor_only (mm)" in combined.columns:
+        combined = combined.drop(columns=["HD95_tumor_only (mm)"])
+
     model_col = "Model Architecture" if "Model Architecture" in combined.columns else combined.columns[0]
     dice_col = next((c for c in combined.columns if "dice" in c.lower()), None)
 
@@ -399,4 +406,112 @@ def export_latex_tables(
             f.write(latex_content)
 
     return latex_content
+
+
+def compute_paired_significance_table(
+    experiment_dirs: list[Path],
+    output_dir: Path | str | None = None,
+    reference_model: str | None = None,
+    n_boot: int = 10000,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """Computes paired Wilcoxon signed-rank p-values and paired bootstrap 95% confidence intervals
+    from `<model>_per_case.csv` files across experiment directories.
+    """
+    import numpy as np
+    from scipy.stats import wilcoxon
+
+    per_case_by_model: dict[str, pd.DataFrame] = {}
+    for exp_dir in experiment_dirs:
+        for search_dir in (exp_dir / "metrics", exp_dir):
+            if not search_dir.is_dir():
+                continue
+            for csv_path in sorted(search_dir.glob("*_per_case.csv")):
+                try:
+                    df = pd.read_csv(csv_path)
+                    if "patient_id" not in df.columns or len(df) == 0:
+                        continue
+                    model_name = (
+                        str(df["model"].iloc[0])
+                        if "model" in df.columns and len(df["model"]) > 0
+                        else csv_path.stem.replace("_per_case", "")
+                    )
+                    per_case_by_model[model_name] = df
+                except Exception as e:
+                    logger.warning("Could not read per-case CSV %s: %s", csv_path, e)
+
+    if len(per_case_by_model) < 2:
+        return pd.DataFrame()
+
+    models = sorted(per_case_by_model.keys())
+    if reference_model is None or reference_model not in per_case_by_model:
+        # Prefer VisReg JEPA UNETR or FPN if present, otherwise first model
+        preferred = [
+            m for m in models
+            if "visreg" in m.lower() and "frozen" not in m.lower() and "scratch" not in m.lower()
+        ]
+        reference_model = preferred[0] if preferred else models[0]
+
+    ref_df = per_case_by_model[reference_model].set_index("patient_id")
+    rng = np.random.default_rng(seed)
+    rows: list[dict[str, Any]] = []
+
+    for comp_model in models:
+        if comp_model == reference_model:
+            continue
+        comp_df = per_case_by_model[comp_model].set_index("patient_id")
+        common_ids = ref_df.index.intersection(comp_df.index)
+        if len(common_ids) < 2:
+            continue
+
+        for metric_col in ("Dice_WT", "Dice_TC", "Dice_ET", "Dice_Mean"):
+            if metric_col not in ref_df.columns or metric_col not in comp_df.columns:
+                continue
+            a = ref_df.loc[common_ids, metric_col].to_numpy(dtype=float) * 100.0
+            b = comp_df.loc[common_ids, metric_col].to_numpy(dtype=float) * 100.0
+            valid = np.isfinite(a) & np.isfinite(b)
+            a, b = a[valid], b[valid]
+            n_pairs = int(len(a))
+            if n_pairs < 2:
+                continue
+
+            diff = a - b
+            mean_diff = float(np.mean(diff))
+            boot_idx = rng.integers(0, n_pairs, size=(n_boot, n_pairs))
+            boot_means = np.mean(diff[boot_idx], axis=1)
+            ci_low, ci_high = np.percentile(boot_means, [2.5, 97.5])
+
+            if np.allclose(diff, 0.0):
+                p_val = 1.0
+            else:
+                try:
+                    _, p_val = wilcoxon(diff, zero_method="wilcox", alternative="two-sided")
+                    p_val = float(p_val)
+                except ValueError:
+                    p_val = 1.0
+
+            rows.append(
+                {
+                    "Reference Model": reference_model,
+                    "Comparator Model": comp_model,
+                    "Metric": metric_col,
+                    "N_patients": n_pairs,
+                    "Mean Diff (pp)": f"{mean_diff:+.2f}",
+                    "95% Bootstrap CI (pp)": f"[{ci_low:+.2f}, {ci_high:+.2f}]",
+                    "Wilcoxon p-value": f"{p_val:.4g}",
+                }
+            )
+
+    sig_df = pd.DataFrame(rows)
+    if output_dir and not sig_df.empty:
+        out_path = Path(output_dir).resolve()
+        target = out_path / "reports" if out_path.name == "outputs" else out_path
+        target.mkdir(parents=True, exist_ok=True)
+        sig_df.to_csv(target / "paired_significance_3d.csv", index=False)
+        with open(target / "paired_significance_3d.md", "w", encoding="utf-8") as f:
+            f.write("# 3D Paired Statistical Significance (Wilcoxon & 10,000-Resample Bootstrap)\n\n")
+            f.write(sig_df.to_markdown(index=False))
+            f.write("\n")
+
+    return sig_df
 

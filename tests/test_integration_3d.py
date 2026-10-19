@@ -211,27 +211,22 @@ def test_evaluate_ood_from_scratch(ensure_scratch_checkpoint):
 
 
 def test_notebook_05_schema_and_uniformity():
-    """Verifies Notebook 05 (ViT From Scratch) keeps the shared train/eval/low-data/OOD cell layout."""
-    nb_path = Path("notebooks/kaggle/05_train_vit_from_scratch_ablation_3d.ipynb")
-    if not nb_path.exists():
-        nb_path = Path("notebooks/05_train_vit_from_scratch_ablation_3d.ipynb")
-    assert nb_path.exists()
-    with open(nb_path, "r", encoding="utf-8") as f:
-        nb = json.load(f)
+    """Verifies Colab ViT From Scratch notebooks (06 and 07) keep the shared train/eval/low-data/OOD cell layout."""
+    for nb_name in (
+        "06_colab_scratch_multiscale_3d.ipynb",
+        "07_colab_scratch_unetr_3d.ipynb",
+    ):
+        nb_path = Path("notebooks/colab") / nb_name
+        assert nb_path.exists()
+        with open(nb_path, "r", encoding="utf-8") as f:
+            nb = json.load(f)
 
-    assert nb["nbformat"] == 4
-    assert len(nb["cells"]) == 21
-
-    cell_eval = nb["cells"][13]
-    eval_code = "".join(cell_eval["source"])
-    assert "--checkpoint" not in eval_code
-    assert "--from_scratch" in eval_code
-
-    cell_low_data = nb["cells"][15]
-    assert "evaluate_low_data_3d.py" in "".join(cell_low_data["source"])
-
-    cell_ood = nb["cells"][17]
-    assert "evaluate_ood_3d.py" in "".join(cell_ood["source"])
+        assert nb["nbformat"] == 4
+        code = "\n".join("".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code")
+        assert "--from_scratch" in code
+        assert "evaluate_3d.py" in code
+        assert "evaluate_low_data_3d.py" in code
+        assert "evaluate_ood_3d.py" in code
 
 
 def test_notebooks_use_no_removed_cli_flags_or_methods():

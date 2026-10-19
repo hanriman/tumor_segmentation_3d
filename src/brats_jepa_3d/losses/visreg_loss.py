@@ -52,8 +52,8 @@ class VisRegLoss(nn.Module):
       Journal of Mathematical Imaging and Vision, 51(1), 22-45.
     - Villani, C. (2009). Optimal Transport: Old and New. Springer.
 
-    Calibration status (uncalibrated): `center/scale/swd_weight=1.0` defaults
-    are not tuned - sweep with EffRank / centered-cosim curves before citing.
+    Calibration status: `center_weight=1.0`, `scale_weight=1.0`, `swd_weight=4.0`, and
+    `num_projections=1024` follow Wu, Balestriero, & Levine (2026), Section 3.3 & Table 6d.
     """
 
     def __init__(
@@ -61,8 +61,8 @@ class VisRegLoss(nn.Module):
         loss_type: str = "smooth_l1",
         center_weight: float = 1.0,
         scale_weight: float = 1.0,
-        swd_weight: float = 1.0,
-        num_projections: int = 256,
+        swd_weight: float = 4.0,
+        num_projections: int = 1024,
         target_std: float = 1.0,
         swd_metric: str = "mse",
         scale_loss_type: str = "squared",
@@ -141,24 +141,14 @@ class VisRegLoss(nn.Module):
         targets: list[torch.Tensor],
         context_tokens: torch.Tensor | None = None,
         tokens: torch.Tensor | None = None,
-        projected_tokens: torch.Tensor | None = None,
         generator: torch.Generator | None = None,
         reg_scale: float = 1.0,
     ) -> dict[str, torch.Tensor]:
         j_loss = self.jepa_loss(predictions, targets)
 
-        if tokens is not None and projected_tokens is not None:
-            logger.warning(
-                "VisRegLoss: both `tokens` and `projected_tokens` given — "
-                "using `tokens` (encoder space). Prefer `projected_tokens` only."
-            )
-        reg_tokens = (
-            tokens
-            if tokens is not None
-            else (projected_tokens if projected_tokens is not None else context_tokens)
-        )
+        reg_tokens = tokens if tokens is not None else context_tokens
         if reg_tokens is None:
-            raise ValueError("VisRegLoss requires regularized token representations.")
+            raise ValueError("VisRegLoss requires regularized token representations (`tokens`).")
 
         # Flatten across batch and patch dimensions: [N, D]
         z_batch = reg_tokens.reshape(-1, reg_tokens.shape[-1])

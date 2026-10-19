@@ -22,30 +22,15 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from brats_jepa_3d.config import (
-    CHECKPOINTS_DIR,
-    CONFIGS_DIR,
-    OUTPUTS_DIR,
-    ensure_directories,
-    get_checkpoint_search_dirs,
-    get_dataset_dir,
-    load_yaml_config,
-)
+from brats_jepa_3d.config import OUTPUTS_DIR, ensure_directories
 from brats_jepa_3d.data import (
     BraTS3DDataset,
     apply_b1_bias_field_3d,
     apply_rician_noise_3d,
 )
 from brats_jepa_3d.metrics import compute_brats_regions_3d
-from brats_jepa_3d.models import (
-    BraTS3DnnUNet,
-    BraTS3DUNet,
-    JEPASegmentationModel3D,
-    load_downstream_state_dict,
-)
+from brats_jepa_3d.models import load_segmentation_model_for_eval, resolve_model_alias
 from brats_jepa_3d.utils import (
-    check_pool_match,
-    dataset_fingerprint,
     get_autocast_context,
     get_device,
     set_seed,
@@ -71,7 +56,7 @@ def parse_args():
         "--from_scratch",
         action="store_true",
         default=False,
-        help="Evaluate 3D ViT-FPN trained from random initialization (no pre-trained checkpoint)",
+        help="Evaluate 3D ViT trained from random initialization (no pre-trained checkpoint)",
     )
     parser.add_argument(
         "--freeze_encoder",
@@ -79,16 +64,12 @@ def parse_args():
         default=False,
         help="Evaluate 3D ViT model trained with a frozen encoder (probe)",
     )
-    parser.add_argument(
-        "--rescale_missing_modalities",
-        action="store_true",
-        default=False,
-        help="Apply inverted dropout scaling (C / keep = 4.0) to active channels during missing modality OOD evaluation, matching training energy distribution.",
-    )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     parser.add_argument(
-        "--decoder_type", type=str, default="multiscale",
-        choices=["multiscale", "bottleneck", "unetr_hybrid"],
+        "--decoder_type",
+        type=str,
+        default="multiscale",
+        choices=["multiscale", "unetr_hybrid"],
     )
     parser.add_argument(
         "--data_dir",
@@ -103,7 +84,9 @@ def parse_args():
         help="Output directory for checkpoints and metrics",
     )
     parser.add_argument(
-        "--tta", action="store_true", default=False,
+        "--tta",
+        action="store_true",
+        default=False,
         help="4-fold orthogonal-reflection test-time augmentation",
     )
     parser.add_argument(
@@ -111,13 +94,18 @@ def parse_args():
         type=int,
         nargs="+",
         default=None,
-        help="Voxel patch size (e.g. 8 8 8 or 16 16 16, default: from model config or 16 16 16)",
+        help="Voxel patch size (e.g. 8 8 8 or 16 16 16, default: from model config)",
     )
     return parser.parse_args()
 
 
 def evaluate_perturbation(
-    model, loader, device, perturb_fn, amp: bool = True, smoke_test: bool = False,
+    model,
+    loader,
+    device,
+    perturb_fn,
+    amp: bool = True,
+    smoke_test: bool = False,
     tta: bool = False,
 ) -> dict[str, float]:
     """Scores one perturbation regime.
@@ -151,8 +139,7 @@ def evaluate_perturbation(
                 break
 
     out_scores = {r: float(np.nanmean(v)) if v else 0.0 for r, v in region_dices.items()}
-    out_scores["mean"] = float(
-        sum(out_scores[r] for r in ("WT", "TC", "ET")) / 3.0)
+    out_scores["mean"] = float(sum(out_scores[r] for r in ("WT", "TC", "ET")) / 3.0)
     return out_scores
 
 
@@ -196,23 +183,7 @@ def main():
         ("3D UNet", "unet_3d"),
     ]
 
-    alias_map = {
-        "visreg": "visreg_jepa",
-        "visreg_jepa": "visreg_jepa",
-        "sigreg": "sigreg_jepa",
-        "sigreg_jepa": "sigreg_jepa",
-        "unet": "unet_3d",
-        "unet_3d": "unet_3d",
-        "nnunet": "nnunet_3d",
-        "nnunet_3d": "nnunet_3d",
-        "scratch": "vit_scratch",
-        "vit_scratch": "vit_scratch",
-        "frozen": "vit_frozen",
-        "vit_frozen": "vit_frozen",
-        "all": "all",
-    }
-
-    req_model = alias_map.get(args.model_type.lower(), args.model_type.lower())
+    req_model = resolve_model_alias(args.model_type)
     if args.from_scratch or req_model == "vit_scratch":
         scratch_label = (
             "3D ViT-UNETR (From Scratch)"
@@ -235,269 +206,23 @@ def main():
     else:
         selected_models = all_models
 
-    search_dirs = get_checkpoint_search_dirs(checkpoints_dir)
-
-    def get_model(name: str):
-        if "From Scratch" in name or name == "3D ViT-FPN (From Scratch)":
-            jepa_cfg_path = CONFIGS_DIR / "model" / "visreg_jepa_3d.yaml"
-            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
-
-            scratch_candidates = []
-            for sdir in search_dirs:
-                if sdir.exists():
-                    scratch_candidates.extend(
-                        sorted(sdir.glob(f"*{args.decoder_type}*scratch*best.pt"))
-                        or sorted(sdir.glob("*visreg*scratch*best.pt"))
-                        or sorted(sdir.glob("*scratch*best.pt"))
-                    )
-            ckpt = scratch_candidates[-1] if scratch_candidates else (checkpoints_dir / f"visreg_jepa_{args.decoder_type}_scratch_best.pt")
-
-            if not ckpt.exists():
-                logger.warning(f"Checkpoint for {name} not found at {ckpt}. Skipping OOD evaluation.")
-                return None
-
-            ds_flag = False
-            try:
-                sd_peek = torch.load(ckpt, map_location="cpu")
-                sd_peek = sd_peek.get("model_state_dict", sd_peek)
-                if any(k.startswith("decoder.ds") for k in sd_peek):
-                    ds_flag = True
-            except (KeyError, OSError, RuntimeError, AttributeError):
-                pass
-
-            raw_patch = getattr(args, "patch_size", None)
-            if raw_patch is not None:
-                if isinstance(raw_patch, int):
-                    patch_size = (raw_patch, raw_patch, raw_patch)
-                elif len(raw_patch) == 1:
-                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
-                else:
-                    patch_size = tuple(int(x) for x in raw_patch)
-            else:
-                patch_size = tuple(jepa_cfg.get("patch_size", (8, 8, 8)))
-
-            m = JEPASegmentationModel3D(
-                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
-                patch_size=patch_size,
-                in_channels=jepa_cfg.get("in_channels", 4),
-                embed_dim=jepa_cfg.get("embed_dim", 384),
-                encoder_depth=jepa_cfg.get("encoder_depth", 8),
-                num_heads=jepa_cfg.get("num_heads", 6),
-                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                decoder_type=args.decoder_type,
-                deep_supervision=ds_flag,
-                out_channels=jepa_cfg.get("out_channels", 5),
-            )
-            sd = torch.load(ckpt, map_location=device)
-            sd = sd.get("model_state_dict", sd)
-            missing, _unexpected = load_downstream_state_dict(m, sd, name)
-            matched = [k for k in m.state_dict() if k not in missing]
-            logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
-            return m.to(device)
-
-        if "Frozen" in name or name in ("3D ViT-FPN (Frozen)", "3D ViT-UNETR (Frozen)"):
-            jepa_cfg_path = CONFIGS_DIR / "model" / "visreg_jepa_3d.yaml"
-            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
-
-            frozen_candidates = []
-            for sdir in search_dirs:
-                if sdir.exists():
-                    frozen_candidates.extend(
-                        sorted(sdir.glob(f"*{args.decoder_type}*frozen*best.pt"))
-                        or sorted(sdir.glob("*visreg*frozen*best.pt"))
-                        or sorted(sdir.glob("*frozen*best.pt"))
-                    )
-            ckpt = frozen_candidates[-1] if frozen_candidates else (checkpoints_dir / f"visreg_jepa_{args.decoder_type}_frozen_best.pt")
-
-            if not ckpt.exists():
-                logger.warning(f"Checkpoint for {name} not found at {ckpt}. Skipping OOD evaluation.")
-                return None
-
-            ds_flag = False
-            try:
-                sd_peek = torch.load(ckpt, map_location="cpu")
-                sd_peek = sd_peek.get("model_state_dict", sd_peek)
-                if any(k.startswith("decoder.ds") for k in sd_peek):
-                    ds_flag = True
-            except (KeyError, OSError, RuntimeError, AttributeError):
-                pass
-
-            raw_patch = getattr(args, "patch_size", None)
-            if raw_patch is not None:
-                if isinstance(raw_patch, int):
-                    patch_size = (raw_patch, raw_patch, raw_patch)
-                elif len(raw_patch) == 1:
-                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
-                else:
-                    patch_size = tuple(int(x) for x in raw_patch)
-            else:
-                patch_size = tuple(jepa_cfg.get("patch_size", (8, 8, 8)))
-
-            m = JEPASegmentationModel3D(
-                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
-                patch_size=patch_size,
-                in_channels=jepa_cfg.get("in_channels", 4),
-                embed_dim=jepa_cfg.get("embed_dim", 384),
-                encoder_depth=jepa_cfg.get("encoder_depth", 8),
-                num_heads=jepa_cfg.get("num_heads", 6),
-                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                decoder_type=args.decoder_type,
-                deep_supervision=ds_flag,
-                out_channels=jepa_cfg.get("out_channels", 5),
-                freeze_encoder=True,
-            )
-            sd = torch.load(ckpt, map_location=device)
-            sd = sd.get("model_state_dict", sd)
-            missing, _unexpected = load_downstream_state_dict(m, sd, name)
-            matched = [k for k in m.state_dict() if k not in missing]
-            logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
-            return m.to(device)
-
-        jepa_prefixes = {
-            "3D VisReg JEPA (FPN)": "visreg_jepa",
-            "3D SigReg JEPA (FPN)": "sigreg_jepa",
-        }
-        if name in jepa_prefixes:
-            prefix = jepa_prefixes[name]
-            jepa_cfg_path = CONFIGS_DIR / "model" / f"{prefix}_3d.yaml"
-            jepa_cfg = load_yaml_config(jepa_cfg_path) if jepa_cfg_path.exists() else {}
-
-            ckpt = None
-            for sdir in search_dirs:
-                if sdir.exists():
-                    cands = (
-                        [p for p in sorted(sdir.glob(f"{prefix}*{args.decoder_type}*best.pt")) if not any(x in p.name.lower() for x in ("scratch", "frozen"))]
-                        or [p for p in sorted(sdir.glob(f"{prefix}*multiscale*best.pt")) if not any(x in p.name.lower() for x in ("scratch", "frozen"))]
-                    )
-                    if cands:
-                        ckpt = cands[-1]
-                        break
-            if ckpt is None:
-                ckpt = checkpoints_dir / f"{prefix}_{args.decoder_type}_best.pt"
-
-            ds_flag = False
-            if ckpt and ckpt.exists():
-                try:
-                    sd_peek = torch.load(ckpt, map_location="cpu")
-                    sd_peek = sd_peek.get("model_state_dict", sd_peek)
-                    if any(k.startswith("decoder.ds") for k in sd_peek):
-                        ds_flag = True
-                except (KeyError, OSError, RuntimeError, AttributeError):
-                    pass
-
-            raw_patch = getattr(args, "patch_size", None)
-            if raw_patch is not None:
-                if isinstance(raw_patch, int):
-                    patch_size = (raw_patch, raw_patch, raw_patch)
-                elif len(raw_patch) == 1:
-                    patch_size = (raw_patch[0], raw_patch[0], raw_patch[0])
-                else:
-                    patch_size = tuple(int(x) for x in raw_patch)
-            else:
-                patch_size = tuple(jepa_cfg.get("patch_size", (8, 8, 8)))
-
-            m = JEPASegmentationModel3D(
-                img_size=tuple(jepa_cfg.get("spatial_shape", (128, 128, 128))),
-                patch_size=patch_size,
-                in_channels=jepa_cfg.get("in_channels", 4),
-                embed_dim=jepa_cfg.get("embed_dim", 384),
-                encoder_depth=jepa_cfg.get("encoder_depth", 8),
-                num_heads=jepa_cfg.get("num_heads", 6),
-                mlp_ratio=jepa_cfg.get("mlp_ratio", 4.0),
-                decoder_type=args.decoder_type,
-                deep_supervision=ds_flag,
-                out_channels=jepa_cfg.get("out_channels", 5),
-            )
-            if ckpt and ckpt.exists():
-                ckpt_raw = torch.load(ckpt, map_location=device)
-                check_pool_match(
-                    ckpt_raw.get("pool_fingerprint"),
-                    dataset_fingerprint(resolved_data_dir or get_dataset_dir()),
-                    f"ood/{name}",
-                )
-                sd = ckpt_raw.get("model_state_dict", ckpt_raw)
-                has_downstream = any(k.startswith("encoder.") for k in sd) or any(k.startswith("decoder.") for k in sd)
-                has_pretrain = any(k.startswith("context_encoder.") for k in sd)
-                if has_downstream:
-                    missing, _unexpected = load_downstream_state_dict(m, sd, name)
-                    matched = [k for k in m.state_dict() if k not in missing]
-                    logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
-                elif has_pretrain:
-                    raise RuntimeError(
-                        f"{name}: Checkpoint {ckpt.name} contains only pre-trained encoder weights. "
-                        f"Evaluating a randomly initialized downstream decoder produces invalid benchmark numbers. "
-                        f"Train downstream model with train_downstream_3d.py first."
-                    )
-                else:
-                    missing, _unexpected = load_downstream_state_dict(m, sd, name)
-                    matched = [k for k in m.state_dict() if k not in missing]
-                    logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
-            else:
-                logger.warning(
-                    f"Downstream checkpoint for {name} not found. Skipping OOD evaluation."
-                )
-                return None
-            return m.to(device)
-
-        elif name == "3D nnU-Net":
-            nnunet_cfg_path = CONFIGS_DIR / "model" / "nnunet_3d.yaml"
-            nnunet_cfg = load_yaml_config(nnunet_cfg_path) if nnunet_cfg_path.exists() else {}
-            m = BraTS3DnnUNet(
-                in_channels=nnunet_cfg.get("in_channels", 4),
-                out_channels=nnunet_cfg.get("out_channels", 5),
-                deep_supervision=nnunet_cfg.get("deep_supervision", True),
-                deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
-                res_block=nnunet_cfg.get("res_block", True),
-            )
-            ckpt = next((d / "nnunet_3d_best.pt" for d in search_dirs if (d / "nnunet_3d_best.pt").exists()), checkpoints_dir / "nnunet_3d_best.pt")
-            if ckpt.exists():
-                sd = torch.load(ckpt, map_location=device)
-                sd = sd.get("model_state_dict", sd)
-                missing, _unexpected = m.load_state_dict(sd, strict=False)
-                matched = [k for k in m.state_dict() if k not in missing]
-                if len(matched) == 0:
-                    raise RuntimeError(f"Failed to load any weights for {name} from {ckpt}")
-                logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
-            else:
-                logger.warning(
-                    f"Checkpoint for {name} not found at {ckpt}. Skipping OOD evaluation."
-                )
-                return None
-            return m.to(device)
-
-        elif name == "3D UNet":
-            unet_cfg_path = CONFIGS_DIR / "model" / "unet_3d.yaml"
-            unet_cfg = load_yaml_config(unet_cfg_path) if unet_cfg_path.exists() else {}
-            m = BraTS3DUNet(
-                in_channels=unet_cfg.get("in_channels", 4),
-                out_channels=unet_cfg.get("out_channels", 5),
-                channels=tuple(unet_cfg.get("channels", (32, 64, 128, 256, 512))),
-                strides=tuple(unet_cfg.get("strides", (2, 2, 2, 2))),
-                num_res_units=unet_cfg.get("num_res_units", 2),
-                dropout=unet_cfg.get("dropout", 0.1),
-            )
-            ckpt = next((d / "unet_3d_best.pt" for d in search_dirs if (d / "unet_3d_best.pt").exists()), checkpoints_dir / "unet_3d_best.pt")
-            if ckpt.exists():
-                sd = torch.load(ckpt, map_location=device)
-                sd = sd.get("model_state_dict", sd)
-                missing, _unexpected = m.load_state_dict(sd, strict=False)
-                matched = [k for k in m.state_dict() if k not in missing]
-                if len(matched) == 0:
-                    raise RuntimeError(f"Failed to load any weights for {name} from {ckpt}")
-                logger.info(f"Loaded {name} weights from {ckpt.name} ({len(matched)} matched keys)")
-            else:
-                logger.warning(
-                    f"Checkpoint for {name} not found at {ckpt}. Skipping OOD evaluation."
-                )
-                return None
-            return m.to(device)
-        else:
-            raise ValueError(f"Unknown model name: {name}")
-
-    instantiated_models = [(m_name, get_model(m_name)) for m_name, _ in selected_models]
-
-    modality_scale = 4.0 if getattr(args, "rescale_missing_modalities", False) else 1.0
-    modality_suffix = " (4x Rescaled)" if modality_scale != 1.0 else ""
+    instantiated_models = []
+    for m_name, m_type in selected_models:
+        is_scratch = m_type == "vit_scratch" or args.from_scratch
+        is_frozen = m_type == "vit_frozen" or getattr(args, "freeze_encoder", False)
+        m = load_segmentation_model_for_eval(
+            model_type=m_type,
+            label=m_name,
+            device=device,
+            decoder_type=args.decoder_type,
+            is_scratch=is_scratch,
+            is_frozen=is_frozen,
+            patch_size=getattr(args, "patch_size", None),
+            checkpoints_dir=checkpoints_dir,
+            resolved_data_dir=resolved_data_dir,
+            logger=logger,
+        )
+        instantiated_models.append((m_name, m))
 
     perturbations = [
         ("Clean Baseline", None),
@@ -510,24 +235,26 @@ def main():
             lambda img, bm: apply_b1_bias_field_3d(img, strength=0.35, brain_mask=bm),
         ),
         (
-            f"Missing Modalities: T1c Only{modality_suffix}",
-            lambda img, bm: (img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(1, 4, 1, 1, 1)
-            if img.dim() == 5
-            else img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(4, 1, 1, 1)) * modality_scale,
+            "Missing Modalities: T1c Only",
+            lambda img, bm: (
+                img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(1, 4, 1, 1, 1)
+                if img.dim() == 5
+                else img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(4, 1, 1, 1)
+            ),
         ),
         (
-            f"Missing Modalities: FLAIR Only{modality_suffix}",
-            lambda img, bm: (img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(1, 4, 1, 1, 1)
-            if img.dim() == 5
-            else img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(4, 1, 1, 1)) * modality_scale,
+            "Missing Modalities: FLAIR Only",
+            lambda img, bm: (
+                img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(1, 4, 1, 1, 1)
+                if img.dim() == 5
+                else img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(4, 1, 1, 1)
+            ),
         ),
     ]
 
     records = []
 
     def _display_name(m_name: str) -> str:
-        # Decoder-aware column names so hybrid runs add columns instead of
-        # overwriting multiscale columns in the merged summary CSV.
         dec = getattr(args, "decoder_type", "multiscale")
         if dec != "multiscale" and ("JEPA" in m_name or "ViT-FPN" in m_name):
             return f"{m_name} [{dec}]"
@@ -548,7 +275,8 @@ def main():
             logger.info(
                 f"{m_name} -> WT {scores['WT'] * 100:.2f}% / "
                 f"TC {scores['TC'] * 100:.2f}% / ET {scores['ET'] * 100:.2f}% "
-                f"(mean {scores['mean'] * 100:.2f}%)")
+                f"(mean {scores['mean'] * 100:.2f}%)"
+            )
             row[dname] = f"{scores['mean'] * 100:.2f}%"
             for r in ("WT", "TC", "ET", "mean"):
                 row[f"{dname} [{r}]"] = f"{scores[r] * 100:.2f}%"

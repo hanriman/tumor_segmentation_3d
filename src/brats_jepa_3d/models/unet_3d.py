@@ -85,9 +85,11 @@ class BraTS3DUNet(nn.Module):
         # Buffer holds (module-type-name, tensor) pairs; drained in place every
         # forward (closures hold this exact list object — never rebind it).
         self._ds_captured: list[tuple[str, torch.Tensor]] = []
-        self._ds_hook_handles: list[torch.utils.hooks.RemovableHandle] = [
-            mod.register_forward_hook(self._make_hook()) for mod in self.unet.modules()
-        ]
+        self._ds_hook_handles: list[torch.utils.hooks.RemovableHandle] = (
+            [mod.register_forward_hook(self._make_hook()) for mod in self.unet.modules()]
+            if self.deep_supervision
+            else []
+        )
 
     def close_hooks(self) -> None:
         """Removes all tap hooks (e.g. before deepcopy/pickle or teardown)."""
@@ -99,6 +101,8 @@ class BraTS3DUNet(nn.Module):
         buf = self._ds_captured
 
         def _hook(mod: nn.Module, _inp: object, out: object) -> None:
+            if not self.training:
+                return
             # Skip cat-style modules (e.g. MONAI SkipConnection concatenates the
             # skip input with the sub-block output, doubling channels); the true
             # stage output is the up-path Sequential firing immediately before.
@@ -113,17 +117,17 @@ class BraTS3DUNet(nn.Module):
 
         out = self.unet(x)
 
+        if not (self.deep_supervision and self.training):
+            del self._ds_captured[:]
+            return out
+
         # Last recorded non-skip tensor per spatial resolution = stage output.
         # Drained in place (never rebound: hook closures hold this list object).
-        # Draining also frees eval-mode intermediates instead of pinning them.
         captured = list(self._ds_captured)
         del self._ds_captured[:]
         last_by_shape: dict[tuple[int, int, int], torch.Tensor] = {}
         for _modname, t in captured:
             last_by_shape[tuple(t.shape[2:])] = t
-
-        if not (self.deep_supervision and self.training):
-            return out
 
         D = x.shape[2]
         heads: list[torch.Tensor] = [out]
