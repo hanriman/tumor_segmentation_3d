@@ -249,26 +249,56 @@ def evaluate_representation(
 ) -> dict[str, float]:
     encoder.eval()
     all_tokens = []
+    all_tissue_tokens = []
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(loader):
             images = batch["image"].to(device)
-            tokens = encoder(images)  # [B, 512, D]
+            tokens = encoder(images)  # [B, N, D]
             all_tokens.append(tokens.cpu())
+
+            bm = batch.get("brain_mask")
+            if bm is not None:
+                bm = bm.to(device).float()
+                if bm.dim() == 4:
+                    bm = bm.unsqueeze(1)
+                N = tokens.shape[1]
+                grid_side = int(round(N ** (1.0 / 3.0)))
+                if grid_side ** 3 == N:
+                    grid_size = (grid_side, grid_side, grid_side)
+                    pooled_bm = torch.nn.functional.adaptive_avg_pool3d(bm, output_size=grid_size)
+                    pooled_bm = pooled_bm.reshape(tokens.shape[0], -1)  # [B, N]
+                    tissue_mask = pooled_bm >= 0.40  # 40% brain tissue occupancy
+                    for b in range(tokens.shape[0]):
+                        m_b = tissue_mask[b]
+                        if int(m_b.sum().item()) >= 4:
+                            all_tissue_tokens.append(tokens[b, m_b].cpu())
+
             if smoke_test and batch_idx >= 1:
                 break
 
     if not all_tokens:
-        return {"erank": 1.0, "centered_cossim": 0.0}
+        return {"erank": 1.0, "centered_cossim": 0.0, "erank_tissue": 1.0, "centered_cossim_tissue": 0.0}
 
-    cat_tokens = torch.cat(all_tokens, dim=0)  # [N_total, 512, D]
-    flat_tokens = cat_tokens.reshape(-1, cat_tokens.shape[-1])  # [N*512, D]
+    cat_tokens = torch.cat(all_tokens, dim=0)  # [N_total, N, D]
+    flat_tokens = cat_tokens.reshape(-1, cat_tokens.shape[-1])  # [N_total * N, D]
 
     collapse_metrics = compute_representation_collapse_metrics(flat_tokens)
-    return {
+    out = {
         "erank": collapse_metrics["effective_rank"],
         "centered_cossim": collapse_metrics["avg_cosine_sim_centered"],
     }
+
+    if all_tissue_tokens:
+        flat_tissue = torch.cat(all_tissue_tokens, dim=0)
+        collapse_tissue = compute_representation_collapse_metrics(flat_tissue)
+        out["erank_tissue"] = collapse_tissue["effective_rank"]
+        out["centered_cossim_tissue"] = collapse_tissue["avg_cosine_sim_centered"]
+    else:
+        out["erank_tissue"] = collapse_metrics["effective_rank"]
+        out["centered_cossim_tissue"] = collapse_metrics["avg_cosine_sim_centered"]
+
+    return out
 
 
 def main():
@@ -547,6 +577,13 @@ def main():
             embed_dim = getattr(model.encoder, "embed_dim", 384)
             erank = f"{erank_val:.2f} ({erank_val / embed_dim * 100:.1f}%)"
             cossim = f"{rep_stats['centered_cossim']:.4f}"
+            t_val = rep_stats.get("erank_tissue", erank_val)
+            t_cos = rep_stats.get("centered_cossim_tissue", rep_stats["centered_cossim"])
+            logger.info(
+                f"Representation: eRank(all)={erank_val:.2f} ({erank_val / embed_dim * 100:.1f}%), "
+                f"eRank(tissue)={t_val:.2f} ({t_val / embed_dim * 100:.1f}%), "
+                f"CosSim(all)={rep_stats['centered_cossim']:.4f}, CosSim(tissue)={t_cos:.4f}"
+            )
 
         seg_stats = benchmark_model(
             model, test_loader, device, amp=args.amp, smoke_test=args.smoke_test,

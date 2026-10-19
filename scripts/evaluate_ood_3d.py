@@ -79,6 +79,12 @@ def parse_args():
         default=False,
         help="Evaluate 3D ViT model trained with a frozen encoder (probe)",
     )
+    parser.add_argument(
+        "--rescale_missing_modalities",
+        action="store_true",
+        default=False,
+        help="Apply inverted dropout scaling (C / keep = 4.0) to active channels during missing modality OOD evaluation, matching training energy distribution.",
+    )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     parser.add_argument(
         "--decoder_type", type=str, default="multiscale",
@@ -490,6 +496,9 @@ def main():
 
     instantiated_models = [(m_name, get_model(m_name)) for m_name, _ in selected_models]
 
+    modality_scale = 4.0 if getattr(args, "rescale_missing_modalities", False) else 1.0
+    modality_suffix = " (4x Rescaled)" if modality_scale != 1.0 else ""
+
     perturbations = [
         ("Clean Baseline", None),
         (
@@ -501,16 +510,16 @@ def main():
             lambda img, bm: apply_b1_bias_field_3d(img, strength=0.35, brain_mask=bm),
         ),
         (
-            "Missing Modalities: T1c Only",
-            lambda img, bm: img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(1, 4, 1, 1, 1)
+            f"Missing Modalities: T1c Only{modality_suffix}",
+            lambda img, bm: (img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(1, 4, 1, 1, 1)
             if img.dim() == 5
-            else img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(4, 1, 1, 1),
+            else img * torch.tensor([0.0, 1.0, 0.0, 0.0], device=img.device).view(4, 1, 1, 1)) * modality_scale,
         ),
         (
-            "Missing Modalities: FLAIR Only",
-            lambda img, bm: img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(1, 4, 1, 1, 1)
+            f"Missing Modalities: FLAIR Only{modality_suffix}",
+            lambda img, bm: (img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(1, 4, 1, 1, 1)
             if img.dim() == 5
-            else img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(4, 1, 1, 1),
+            else img * torch.tensor([0.0, 0.0, 0.0, 1.0], device=img.device).view(4, 1, 1, 1)) * modality_scale,
         ),
     ]
 

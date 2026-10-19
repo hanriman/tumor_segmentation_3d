@@ -110,10 +110,9 @@ When scaling the Vision Transformer patch embedding from $16^3$ down to $8^3$ vo
    - If downstream segmentation adopts the fine-grained $8^3$ encoder, lateral skip feature maps are emitted at $16^3$ spatial resolution ($8\times$ more spatial tokens per intermediate layer).
    - Backward pass activation memory under multi-scale deep supervision expands from $\approx 7.4\,\text{GB}$ to $>30\,\text{GB}$, requiring A100-tier hardware or micro-batching ($B=1$) with gradient accumulation. Downstream inference latency also increases $\approx 4\text{--}8\times$.
 3. **Preserving Benchmark Fairness ([`AGENTS.md`](../AGENTS.md))**:
-   - Directly comparing an $8^3$-patch JEPA ($4,096$ tokens) against standard $16^3$-patch CNN/ViT baselines introduces a spatial resolution confounder: gains could stem from $8\times$ finer spatial token granularity rather than self-supervised representation quality.
-   - Therefore, benchmark fairness requires:
-     - The canonical benchmark strictly fixes patch size to $16^3$ across all models on Kaggle T4 ($B=2$ downstream).
-     - The $8^3$ patch configuration is classified as an **asymptotic capacity & resolution scaling ablation**, evaluated against matched from-scratch $8^3$ ViT controls to isolate true representation benefit.
+   - To isolate representation benefits from architectural capacity, the master benchmark evaluates all transformer models (both pre-trained VisReg JEPA and from-scratch controls) under the exact same $8^3$ patch embedding ($16^3 = 4,096$ tokens) on high-memory hardware.
+   - For resource-constrained hardware (e.g. single 16 GB Kaggle T4), a lightweight $16^3$ patch configuration ($8^3 = 512$ tokens) is provided in the Kaggle notebook suite.
+   - Crucially, self-supervised JEPA is always compared directly against matched from-scratch ViT controls ($\Delta_{\text{JEPA}}$) at the same token resolution, guaranteeing that reported gains derive from SSL representations rather than transformer spatial resolution.
 
 ---
 
