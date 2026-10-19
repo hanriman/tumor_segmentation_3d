@@ -67,15 +67,54 @@ def parse_args():
     return parser.parse_args()
 
 
+def unpack_downloaded_zips(outputs_root: Path, target_dir: Path) -> list[Path]:
+    """Scans outputs_root and target_dir for downloaded *.zip archives
+
+    (excluding 'paper_artifacts.zip') and automatically unpacks them into target_dir
+    if not already extracted.
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
+    candidate_zips = []
+    for search_dir in [outputs_root, target_dir]:
+        if search_dir.exists():
+            for zf in search_dir.glob("*.zip"):
+                if zf.name != "paper_artifacts.zip" and not zf.name.startswith((".", "_")):
+                    if zf not in candidate_zips:
+                        candidate_zips.append(zf)
+
+    extracted_dirs = []
+    for zip_path in candidate_zips:
+        dest_folder = target_dir / zip_path.stem
+        if not dest_folder.exists() or not any(dest_folder.iterdir()):
+            print(f"📦 Auto-extracting downloaded archive: {zip_path.name} -> {dest_folder.name}/")
+            dest_folder.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(zip_path, "r") as z:
+                z.extractall(dest_folder)
+            nested_subdirs = [p for p in dest_folder.iterdir() if p.is_dir() and not p.name.startswith(".")]
+            if len(nested_subdirs) == 1 and (nested_subdirs[0] / "metrics").exists():
+                nested = nested_subdirs[0]
+                for item in nested.iterdir():
+                    shutil.move(str(item), str(dest_folder / item.name))
+                nested.rmdir()
+        extracted_dirs.append(dest_folder)
+    return extracted_dirs
+
+
 def main():
     args = parse_args()
     outputs_root = Path(args.outputs_dir).resolve()
+    experiments_dir = outputs_root / "experiments"
+    reports_dir = outputs_root / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
 
     print("=" * 70)
     print("📊 BraTS 3D Multi-Experiment Aggregator & Paper Artifacts Generator")
     print("=" * 70)
     print(f"📁 Outputs Root: {outputs_root}")
+
+    # 0. Auto-extract any downloaded *.zip archives into experiments/
+    unpack_downloaded_zips(outputs_root, experiments_dir)
 
     # 1. Discover experiment directories
     if args.experiment_dirs:
@@ -129,7 +168,9 @@ def main():
         output_path=latex_path,
         test_n=args.test_n,
     )
-    print(f"✓ Saved LaTeX tables to: {latex_path}")
+    # Mirror to reports/
+    shutil.copy2(latex_path, reports_dir / "tables_latex.tex")
+    print(f"✓ Saved LaTeX tables to: {latex_path} and {reports_dir / 'tables_latex.tex'}")
 
     # 6. Generate Publication Figures
     if not args.no_figures:
@@ -194,6 +235,7 @@ def main():
 
         zip_mb = zip_path.stat().st_size / (1024 * 1024)
         print(f"✓ Archived {copied_count} files into {zip_path} ({zip_mb:.2f} MB)")
+        shutil.rmtree(staging_dir, ignore_errors=True)
 
     elapsed = time.time() - t0
     print("\n" + "=" * 70)

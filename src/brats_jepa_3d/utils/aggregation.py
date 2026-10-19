@@ -14,24 +14,50 @@ def discover_experiment_directories(base_dir: Path | str | None = None) -> list[
     """Discovers all experiment subdirectories under base_dir that contain a 'metrics' or 'checkpoints' folder.
 
     If base_dir itself directly contains metrics/checkpoints (and no experiment subdirs), returns [base_dir].
+    Searches both base_dir and base_dir / "experiments" or "runs" up to 2 levels deep.
     """
     root = Path(base_dir).resolve() if base_dir is not None else (PROJECT_ROOT / "outputs").resolve()
     if not root.exists():
         return []
 
+    ignore_names = {
+        "paper_artifacts", "figures", "legacy", "archive", "reports",
+        "multiregion", "checkpoints", "logs", "metrics", "data", "dist_kaggle",
+        ".git", ".venv", "__pycache__", "tables"
+    }
+
     discovered = []
-    # Check immediate subdirectories
+    seen = set()
+
+    def check_candidate(d: Path) -> bool:
+        if not d.is_dir() or d.name.startswith((".", "_")) or d.name in ignore_names:
+            return False
+        if (d / "metrics").exists() or (d / "checkpoints").exists() or (d / "logs").exists():
+            resolved = d.resolve()
+            if resolved not in seen and resolved != root:
+                discovered.append(d)
+                seen.add(resolved)
+                return True
+        return False
+
+    # 1. First priority: check designated experiments/ or runs/ subdirectories
+    for sub in ["experiments", "runs"]:
+        sub_path = root / sub
+        if sub_path.is_dir():
+            for item in sorted(sub_path.iterdir()):
+                check_candidate(item)
+
+    # 2. Check immediate and second-level subdirectories of root
     for item in sorted(root.iterdir()):
-        if item.is_dir() and not item.name.startswith((".", "_")):
-            if item.name in ["paper_artifacts", "figures", "legacy", "archive"]:
-                continue
-            if (item / "metrics").exists() or (item / "checkpoints").exists() or (item / "logs").exists():
-                discovered.append(item)
+        if not check_candidate(item) and item.is_dir() and item.name not in ignore_names and not item.name.startswith((".", "_")):
+            # Check 1 level deeper (e.g. outputs/experiments/my_exp or outputs/sweep_1/my_exp)
+            for sub_item in sorted(item.iterdir()):
+                check_candidate(sub_item)
 
     if not discovered and ((root / "metrics").exists() or (root / "checkpoints").exists()):
         discovered.append(root)
 
-    return discovered
+    return sorted(discovered, key=lambda p: p.name)
 
 
 def parse_dice_value(val: Any) -> float:
@@ -125,18 +151,16 @@ def aggregate_master_benchmarks(
     # Save to output_dir if provided
     if output_dir:
         out_path = Path(output_dir).resolve()
-        out_path.mkdir(parents=True, exist_ok=True)
-        combined.to_csv(out_path / "master_3d_benchmark.csv", index=False)
-        with open(out_path / "master_3d_benchmark.md", "w", encoding="utf-8") as f:
-            f.write("# 3D Volumetric BraTS 2024 GLI Master Benchmark Results\n\n")
-            f.write(combined.to_markdown(index=False))
-            f.write("\n")
-
+        targets = [out_path]
         if out_path.name == "outputs":
-            mr_path = out_path / "multiregion"
-            mr_path.mkdir(parents=True, exist_ok=True)
-            combined.to_csv(mr_path / "master_3d_benchmark.csv", index=False)
-            with open(mr_path / "master_3d_benchmark.md", "w", encoding="utf-8") as f:
+            targets.extend([out_path / "reports", out_path / "multiregion"])
+        elif out_path.name in ["reports", "multiregion"]:
+            targets.extend([out_path.parent / "reports", out_path.parent / "multiregion", out_path.parent])
+
+        for target in set(targets):
+            target.mkdir(parents=True, exist_ok=True)
+            combined.to_csv(target / "master_3d_benchmark.csv", index=False)
+            with open(target / "master_3d_benchmark.md", "w", encoding="utf-8") as f:
                 f.write("# 3D Volumetric BraTS 2024 GLI Master Benchmark Results\n\n")
                 f.write(combined.to_markdown(index=False))
                 f.write("\n")
@@ -209,19 +233,16 @@ def aggregate_low_data_summaries(
 
     if output_dir:
         out_path = Path(output_dir).resolve()
-        out_path.mkdir(parents=True, exist_ok=True)
-        merged_df.to_csv(out_path / "low_data_3d_summary.csv", index=False)
-        with open(out_path / "low_data_3d_summary.md", "w", encoding="utf-8") as f:
-            f.write("# 3D Low-Data Label Efficiency Benchmark Results\n\n")
-            f.write(merged_df.to_markdown(index=False))
-            f.write("\n")
-
-        # Mirror to multiregion/ subfolder if out_path is outputs/
+        targets = [out_path]
         if out_path.name == "outputs":
-            mr_path = out_path / "multiregion"
-            mr_path.mkdir(parents=True, exist_ok=True)
-            merged_df.to_csv(mr_path / "low_data_3d_summary.csv", index=False)
-            with open(mr_path / "low_data_3d_summary.md", "w", encoding="utf-8") as f:
+            targets.extend([out_path / "reports", out_path / "multiregion"])
+        elif out_path.name in ["reports", "multiregion"]:
+            targets.extend([out_path.parent / "reports", out_path.parent / "multiregion", out_path.parent])
+
+        for target in set(targets):
+            target.mkdir(parents=True, exist_ok=True)
+            merged_df.to_csv(target / "low_data_3d_summary.csv", index=False)
+            with open(target / "low_data_3d_summary.md", "w", encoding="utf-8") as f:
                 f.write("# 3D Low-Data Label Efficiency Benchmark Results\n\n")
                 f.write(merged_df.to_markdown(index=False))
                 f.write("\n")
@@ -277,18 +298,16 @@ def aggregate_ood_summaries(
 
     if output_dir:
         out_path = Path(output_dir).resolve()
-        out_path.mkdir(parents=True, exist_ok=True)
-        merged_df.to_csv(out_path / "ood_3d_summary.csv", index=False)
-        with open(out_path / "ood_3d_summary.md", "w", encoding="utf-8") as f:
-            f.write("# 3D Out-of-Distribution (OOD) Scanner Shift Results\n\n")
-            f.write(merged_df.to_markdown(index=False))
-            f.write("\n")
-
+        targets = [out_path]
         if out_path.name == "outputs":
-            mr_path = out_path / "multiregion"
-            mr_path.mkdir(parents=True, exist_ok=True)
-            merged_df.to_csv(mr_path / "ood_3d_summary.csv", index=False)
-            with open(mr_path / "ood_3d_summary.md", "w", encoding="utf-8") as f:
+            targets.extend([out_path / "reports", out_path / "multiregion"])
+        elif out_path.name in ["reports", "multiregion"]:
+            targets.extend([out_path.parent / "reports", out_path.parent / "multiregion", out_path.parent])
+
+        for target in set(targets):
+            target.mkdir(parents=True, exist_ok=True)
+            merged_df.to_csv(target / "ood_3d_summary.csv", index=False)
+            with open(target / "ood_3d_summary.md", "w", encoding="utf-8") as f:
                 f.write("# 3D Out-of-Distribution (OOD) Scanner Shift Results\n\n")
                 f.write(merged_df.to_markdown(index=False))
                 f.write("\n")
