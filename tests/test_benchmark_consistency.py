@@ -14,9 +14,10 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CSV_PATH = REPO_ROOT / "outputs" / "multiregion" / "low_data_3d_summary.csv"
-MASTER_CSV_PATH = REPO_ROOT / "outputs" / "multiregion" / "master_3d_benchmark.csv"
-OOD_CSV_PATH = REPO_ROOT / "outputs" / "multiregion" / "ood_3d_summary.csv"
+REPORTS_DIR = REPO_ROOT / "outputs" / "reports"
+CSV_PATH = REPORTS_DIR / "low_data_3d_summary.csv" if (REPORTS_DIR / "low_data_3d_summary.csv").exists() else REPO_ROOT / "outputs" / "multiregion" / "low_data_3d_summary.csv"
+MASTER_CSV_PATH = REPORTS_DIR / "master_3d_benchmark.csv" if (REPORTS_DIR / "master_3d_benchmark.csv").exists() else REPO_ROOT / "outputs" / "multiregion" / "master_3d_benchmark.csv"
+OOD_CSV_PATH = REPORTS_DIR / "ood_3d_summary.csv" if (REPORTS_DIR / "ood_3d_summary.csv").exists() else REPO_ROOT / "outputs" / "multiregion" / "ood_3d_summary.csv"
 TEX_PATH = REPO_ROOT / "paper" / "latex" / "main.tex"
 DOCS_PATH = REPO_ROOT / "docs" / "03_scientific_rationales_and_benchmarks.md"
 

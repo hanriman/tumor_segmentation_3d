@@ -56,10 +56,11 @@ PROJECT_ROOT = FIG_DIR.resolve().parent.parent.parent
 
 # Check candidate output directories
 CANDIDATE_OUTPUTS = [
+    PROJECT_ROOT / "outputs" / "reports",
     PROJECT_ROOT / "outputs" / "multiregion",
     PROJECT_ROOT / "outputs",
 ]
-OUTPUTS_DIR = next((d for d in CANDIDATE_OUTPUTS if (d / "low_data_3d_summary.csv").exists()), PROJECT_ROOT / "outputs")
+OUTPUTS_DIR = next((d for d in CANDIDATE_OUTPUTS if (d / "low_data_3d_summary.csv").exists()), PROJECT_ROOT / "outputs" / "reports")
 
 
 def safe_float(v, default: float = 0.0) -> float:

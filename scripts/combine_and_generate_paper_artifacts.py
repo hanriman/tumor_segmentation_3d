@@ -160,7 +160,7 @@ def main():
     # 5. Export LaTeX Tables
     print("\n" + "-" * 50)
     print("4️⃣ Compiling Publication LaTeX Tables...")
-    latex_path = outputs_root / "tables_latex.tex"
+    latex_path = reports_dir / "tables_latex.tex"
     export_latex_tables(
         master_df=master_df if not master_df.empty else None,
         low_data_df=low_data_df if not low_data_df.empty else None,
@@ -168,9 +168,7 @@ def main():
         output_path=latex_path,
         test_n=args.test_n,
     )
-    # Mirror to reports/
-    shutil.copy2(latex_path, reports_dir / "tables_latex.tex")
-    print(f"✓ Saved LaTeX tables to: {latex_path} and {reports_dir / 'tables_latex.tex'}")
+    print(f"✓ Saved LaTeX tables to: {latex_path}")
 
     # 6. Generate Publication Figures
     if not args.no_figures:
@@ -184,7 +182,7 @@ def main():
         gen_figures_3d_py = PROJECT_ROOT / "scripts" / "generate_figures_3d.py"
         if gen_figures_3d_py.exists():
             print("  🎨 Running scripts/generate_figures_3d.py ...")
-            subprocess.run([sys.executable, str(gen_figures_3d_py), "--output_dir", str(outputs_root / "figures"), "--metrics_dir", str(outputs_root)], check=False)
+            subprocess.run([sys.executable, str(gen_figures_3d_py), "--output_dir", str(reports_dir / "figures"), "--metrics_dir", str(reports_dir)], check=False)
 
     # 7. Package Paper Artifacts
     if not args.no_zip:
@@ -205,18 +203,18 @@ def main():
                     shutil.copy2(f, staging_dir / "figures" / f.name)
                     copied_count += 1
 
-        out_figs = outputs_root / "figures"
+        out_figs = reports_dir / "figures"
         if out_figs.exists():
             for f in out_figs.glob("*.*"):
                 if f.suffix.lower() in [".pdf", ".png"]:
                     shutil.copy2(f, staging_dir / "figures" / f.name)
                     copied_count += 1
 
-        # Copy aggregated metrics & LaTeX tables
-        for f in outputs_root.glob("*.csv"):
+        # Copy aggregated metrics & LaTeX tables strictly from reports/
+        for f in reports_dir.glob("*.csv"):
             shutil.copy2(f, staging_dir / "metrics" / f.name)
             copied_count += 1
-        for f in outputs_root.glob("*.md"):
+        for f in reports_dir.glob("*.md"):
             shutil.copy2(f, staging_dir / "metrics" / f.name)
             copied_count += 1
         if latex_path.exists():
@@ -240,8 +238,8 @@ def main():
     elapsed = time.time() - t0
     print("\n" + "=" * 70)
     print(f"⏱️ Master Aggregation Completed in {elapsed:.2f} seconds!")
-    print(f"📄 Summary Markdown: {outputs_root / 'master_3d_benchmark.md'}")
-    print(f"📈 Low-Data Markdown: {outputs_root / 'low_data_3d_summary.md'}")
+    print(f"📄 Summary Markdown: {reports_dir / 'master_3d_benchmark.md'}")
+    print(f"📈 Low-Data Markdown: {reports_dir / 'low_data_3d_summary.md'}")
     print(f"📦 Archive Download: {outputs_root / 'paper_artifacts.zip'}")
     print("=" * 70)
 

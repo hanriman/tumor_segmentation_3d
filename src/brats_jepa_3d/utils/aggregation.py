@@ -151,19 +151,13 @@ def aggregate_master_benchmarks(
     # Save to output_dir if provided
     if output_dir:
         out_path = Path(output_dir).resolve()
-        targets = [out_path]
-        if out_path.name == "outputs":
-            targets.extend([out_path / "reports", out_path / "multiregion"])
-        elif out_path.name in ["reports", "multiregion"]:
-            targets.extend([out_path.parent / "reports", out_path.parent / "multiregion", out_path.parent])
-
-        for target in set(targets):
-            target.mkdir(parents=True, exist_ok=True)
-            combined.to_csv(target / "master_3d_benchmark.csv", index=False)
-            with open(target / "master_3d_benchmark.md", "w", encoding="utf-8") as f:
-                f.write("# 3D Volumetric BraTS 2024 GLI Master Benchmark Results\n\n")
-                f.write(combined.to_markdown(index=False))
-                f.write("\n")
+        target = out_path / "reports" if out_path.name == "outputs" else out_path
+        target.mkdir(parents=True, exist_ok=True)
+        combined.to_csv(target / "master_3d_benchmark.csv", index=False)
+        with open(target / "master_3d_benchmark.md", "w", encoding="utf-8") as f:
+            f.write("# 3D Volumetric BraTS 2024 GLI Master Benchmark Results\n\n")
+            f.write(combined.to_markdown(index=False))
+            f.write("\n")
 
     return combined
 
@@ -233,19 +227,13 @@ def aggregate_low_data_summaries(
 
     if output_dir:
         out_path = Path(output_dir).resolve()
-        targets = [out_path]
-        if out_path.name == "outputs":
-            targets.extend([out_path / "reports", out_path / "multiregion"])
-        elif out_path.name in ["reports", "multiregion"]:
-            targets.extend([out_path.parent / "reports", out_path.parent / "multiregion", out_path.parent])
-
-        for target in set(targets):
-            target.mkdir(parents=True, exist_ok=True)
-            merged_df.to_csv(target / "low_data_3d_summary.csv", index=False)
-            with open(target / "low_data_3d_summary.md", "w", encoding="utf-8") as f:
-                f.write("# 3D Low-Data Label Efficiency Benchmark Results\n\n")
-                f.write(merged_df.to_markdown(index=False))
-                f.write("\n")
+        target = out_path / "reports" if out_path.name == "outputs" else out_path
+        target.mkdir(parents=True, exist_ok=True)
+        merged_df.to_csv(target / "low_data_3d_summary.csv", index=False)
+        with open(target / "low_data_3d_summary.md", "w", encoding="utf-8") as f:
+            f.write("# 3D Low-Data Label Efficiency Benchmark Results\n\n")
+            f.write(merged_df.to_markdown(index=False))
+            f.write("\n")
 
     return merged_df
 
@@ -298,19 +286,13 @@ def aggregate_ood_summaries(
 
     if output_dir:
         out_path = Path(output_dir).resolve()
-        targets = [out_path]
-        if out_path.name == "outputs":
-            targets.extend([out_path / "reports", out_path / "multiregion"])
-        elif out_path.name in ["reports", "multiregion"]:
-            targets.extend([out_path.parent / "reports", out_path.parent / "multiregion", out_path.parent])
-
-        for target in set(targets):
-            target.mkdir(parents=True, exist_ok=True)
-            merged_df.to_csv(target / "ood_3d_summary.csv", index=False)
-            with open(target / "ood_3d_summary.md", "w", encoding="utf-8") as f:
-                f.write("# 3D Out-of-Distribution (OOD) Scanner Shift Results\n\n")
-                f.write(merged_df.to_markdown(index=False))
-                f.write("\n")
+        target = out_path / "reports" if out_path.name == "outputs" else out_path
+        target.mkdir(parents=True, exist_ok=True)
+        merged_df.to_csv(target / "ood_3d_summary.csv", index=False)
+        with open(target / "ood_3d_summary.md", "w", encoding="utf-8") as f:
+            f.write("# 3D Out-of-Distribution (OOD) Scanner Shift Results\n\n")
+            f.write(merged_df.to_markdown(index=False))
+            f.write("\n")
 
     return merged_df
 
