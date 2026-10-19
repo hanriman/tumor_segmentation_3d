@@ -103,11 +103,12 @@ def test_docs03_matches_benchmark():
     assert "5.12% *(Collapse)*" not in docs_content, "Old 5.12% scratch score still present in docs/03"
     assert "+25.21" not in docs_content, "Old +25.21pp delta claim still present in docs/03"
 
-    # Assert correct numbers are present
-    assert "29.61%" in docs_content, "ViT-UNETR Scratch score 29.61% missing from docs/03"
-    assert "32.09%" in docs_content, "VisReg UNETR score 32.09% missing from docs/03"
-    assert "7.03% *(Collapse)*" in docs_content, "ResUNet collapse 7.03% missing from docs/03"
-    assert "+2.48" in docs_content, "+2.48pp JEPA gain missing from docs/03"
+    # Assert correct canonical numbers are present
+    assert "63.65%" in docs_content, "VisReg UNETR 5% score 63.65% missing from docs/03"
+    assert "56.57%" in docs_content, "ViT-UNETR Scratch 5% score 56.57% missing from docs/03"
+    assert "+7.08" in docs_content, "+7.08pp JEPA gain missing from docs/03"
+    assert "75.13%" in docs_content, "Frozen UNETR score 75.13% missing from docs/03"
+    assert "79.50%" in docs_content, "3D nnU-Net score 79.50% missing from docs/03"
 
 
 def test_low_data_volume_counts_consistent():

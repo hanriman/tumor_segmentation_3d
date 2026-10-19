@@ -96,13 +96,14 @@ When pre-training completes, the JEPA predictor and projector are **discarded**.
    - Scale-adaptive hierarchical decoding:
      - On canonical $8^3$ grids (patch size $16^3$): 4 progressive $2\times$ transposed 3D convolution stages with `GroupNorm` ($8^3 \to 16^3 \to 32^3 \to 64^3 \to 128^3$).
      - On high-resolution $16^3$ grids (patch size $8^3$): Stage 1 operates at native token resolution ($16^3 \to 16^3$), followed by 3 progressive $2\times$ upsampling stages ($16^3 \to 32^3 \to 64^3 \to 128^3$), preserving output dimensionality.
-   - Total model size: ~23.2M parameters.
+    - Total model size: **~29.43M** parameters.
 
 2. **Hybrid 3D UNETR (`vit_unetr`)**:
    - Replaces pure transposed convolutions with a dual-stream architecture: pre-trained ViT lateral representations fused with a lightweight native convolutional stem (`stem_128` at $128^3$, `stem_64` at $64^3$).
    - High-frequency edge maps from the stem are concatenated into decoder stages 3 and 4 ($64^3$ and $128^3$).
    - Dynamically supports both $8^3$ and $16^3$ token grids, maintaining channel and spatial compatibility.
-   - Delivers $+5.44\text{pp}$ higher mean Dice over pure ViT-FPN by resolving the coarse token boundary bottleneck.
+   - Total model size: **~29.52M** parameters.
+   - Delivers superior performance at low data fractions (e.g. $+7.08\text{pp}$ over from-scratch UNETR at $5\%$ data) by resolving the coarse token boundary bottleneck.
 
 ---
 
@@ -128,9 +129,11 @@ $$\mathcal{L}_{\text{VisReg}} = \lambda_{\text{c}} \frac{\|\mu\|_2^2}{D_{\text{p
 
 ### 5.4 Regularizer Schedule Annealing ($\lambda_{\text{reg}}(t)$)
 $$\lambda_{\text{reg}}(t) = \begin{cases} 1.0 & t \le T_{\text{warmup}} \\ 0.10 + 0.90 \times \frac{1}{2} \left(1 + \cos\left(\frac{t - T_{\text{warmup}}}{T_{\text{max}} - T_{\text{warmup}}} \pi\right)\right) & t > T_{\text{warmup}} \end{cases}$$
-With $T_{\text{warmup}} = 15$ epochs. Allows strong anti-collapse forces early, relaxing them late so the predictor focuses on anatomical prediction.
+
+In canonical 200-epoch pre-training on Google Colab A100 ($T_{\text{max}} = 200$), $T_{\text{warmup}} = 30$ epochs (defaulting to $15$ epochs for 100-epoch runs). Clamping $\lambda_{\text{reg}} = 1.0$ during the initial 30 epochs creates strong anti-collapse forces while latent representations are established; subsequent cosine decay down to $0.10$ across epochs 31–200 allows the predictor to refine subtle anatomical predictions without regularizer over-penalization.
 
 ### 5.5 Learning Rate Schedule ($\eta(t)$)
 $$\eta(t) = \begin{cases} \eta_{\text{base}} \times \frac{t}{T_{\text{lr\_warmup}}} & t \le T_{\text{lr\_warmup}} \\ \eta_{\text{min}} + \frac{1}{2}(\eta_{\text{base}} - \eta_{\text{min}})\left(1 + \cos\left(\frac{t - T_{\text{lr\_warmup}}}{T_{\text{max}} - T_{\text{lr\_warmup}}} \pi\right)\right) & t > T_{\text{lr\_warmup}} \end{cases}$$
-With $\eta_{\text{base}} = 5 \times 10^{-4}$, $\eta_{\text{min}} = 1 \times 10^{-5}$, and $T_{\text{lr\_warmup}} = 10$ epochs. Linearly warms up across the first 10 epochs to prevent early attention divergence, followed by cosine annealing decay down to $\eta_{\text{min}}$ over the remaining 90 epochs.
+
+With $\eta_{\text{base}} = 5 \times 10^{-4}$, $\eta_{\text{min}} = 1 \times 10^{-5}$, and $T_{\text{lr\_warmup}} = 20$ epochs for $T_{\text{max}} = 200$ ($T_{\text{lr\_warmup}} = 10$ for 100-epoch runs). A linear warmup over the first 20 epochs prevents early self-attention gradient divergence, followed by cosine annealing decay down to $\eta_{\text{min}}$ over the remaining 180 epochs.
 

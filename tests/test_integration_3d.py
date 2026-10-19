@@ -199,7 +199,9 @@ def test_evaluate_ood_from_scratch(ensure_scratch_checkpoint):
 
 def test_notebook_05_schema_and_uniformity():
     """Verifies Notebook 05 (ViT From Scratch) keeps the shared train/eval/low-data/OOD cell layout."""
-    nb_path = Path("notebooks/05_train_vit_from_scratch_ablation_3d.ipynb")
+    nb_path = Path("notebooks/kaggle/05_train_vit_from_scratch_ablation_3d.ipynb")
+    if not nb_path.exists():
+        nb_path = Path("notebooks/05_train_vit_from_scratch_ablation_3d.ipynb")
     assert nb_path.exists()
     with open(nb_path, "r", encoding="utf-8") as f:
         nb = json.load(f)

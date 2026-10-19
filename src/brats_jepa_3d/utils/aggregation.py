@@ -132,6 +132,15 @@ def aggregate_master_benchmarks(
             f.write(combined.to_markdown(index=False))
             f.write("\n")
 
+        if out_path.name == "outputs":
+            mr_path = out_path / "multiregion"
+            mr_path.mkdir(parents=True, exist_ok=True)
+            combined.to_csv(mr_path / "master_3d_benchmark.csv", index=False)
+            with open(mr_path / "master_3d_benchmark.md", "w", encoding="utf-8") as f:
+                f.write("# 3D Volumetric BraTS 2024 GLI Master Benchmark Results\n\n")
+                f.write(combined.to_markdown(index=False))
+                f.write("\n")
+
     return combined
 
 
@@ -192,6 +201,12 @@ def aggregate_low_data_summaries(
     merged_df = merged_df.sort_values(by="_sort_frac").drop(columns=["_sort_frac"]).reset_index(drop=True)
     merged_df = merged_df.fillna("N/A")
 
+    # Ensure standard aliases for UNETR Scratch
+    if "3D ViT-UNETR (From Scratch) [mean]" in merged_df.columns and "3D ViT-FPN (From Scratch) [unetr_hybrid] [mean]" not in merged_df.columns:
+        merged_df["3D ViT-FPN (From Scratch) [unetr_hybrid] [mean]"] = merged_df["3D ViT-UNETR (From Scratch) [mean]"]
+    elif "3D ViT-FPN (From Scratch) [unetr_hybrid] [mean]" in merged_df.columns and "3D ViT-UNETR (From Scratch) [mean]" not in merged_df.columns:
+        merged_df["3D ViT-UNETR (From Scratch) [mean]"] = merged_df["3D ViT-FPN (From Scratch) [unetr_hybrid] [mean]"]
+
     if output_dir:
         out_path = Path(output_dir).resolve()
         out_path.mkdir(parents=True, exist_ok=True)
@@ -200,6 +215,16 @@ def aggregate_low_data_summaries(
             f.write("# 3D Low-Data Label Efficiency Benchmark Results\n\n")
             f.write(merged_df.to_markdown(index=False))
             f.write("\n")
+
+        # Mirror to multiregion/ subfolder if out_path is outputs/
+        if out_path.name == "outputs":
+            mr_path = out_path / "multiregion"
+            mr_path.mkdir(parents=True, exist_ok=True)
+            merged_df.to_csv(mr_path / "low_data_3d_summary.csv", index=False)
+            with open(mr_path / "low_data_3d_summary.md", "w", encoding="utf-8") as f:
+                f.write("# 3D Low-Data Label Efficiency Benchmark Results\n\n")
+                f.write(merged_df.to_markdown(index=False))
+                f.write("\n")
 
     return merged_df
 
@@ -258,6 +283,15 @@ def aggregate_ood_summaries(
             f.write("# 3D Out-of-Distribution (OOD) Scanner Shift Results\n\n")
             f.write(merged_df.to_markdown(index=False))
             f.write("\n")
+
+        if out_path.name == "outputs":
+            mr_path = out_path / "multiregion"
+            mr_path.mkdir(parents=True, exist_ok=True)
+            merged_df.to_csv(mr_path / "ood_3d_summary.csv", index=False)
+            with open(mr_path / "ood_3d_summary.md", "w", encoding="utf-8") as f:
+                f.write("# 3D Out-of-Distribution (OOD) Scanner Shift Results\n\n")
+                f.write(merged_df.to_markdown(index=False))
+                f.write("\n")
 
     return merged_df
 

@@ -19,18 +19,26 @@
 The repository organizes workflows into self-contained Jupyter notebooks with unified CLI runner compatibility and explicit top-level configuration blocks:
 
 ```text
-notebooks/                                    # BraTS 2024 WT/TC/ET (5-class, v2 dataset)
-├── 01_train_visreg_3d.ipynb               # 3D VisReg JEPA SSL pre-training (exports encoder checkpoint)
-├── 02_diagnose_visreg_3d.ipynb            # Label-free pre-training masking diagnostics (D1–D3)
-├── 03_train_nnunet_3d.ipynb               # 3D nnU-Net baseline (DynUNet with deep supervision)
-├── 04_train_unet_3d.ipynb                 # 3D Residual UNet baseline
-├── 05_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT-FPN ablation (random initialization)
-├── 06_vit_unetr_hybrid_ablation_3d.ipynb  # From-scratch ViT-UNETR hybrid ablation (convolutional stem)
-├── 07_finetune_visreg_multiscale_3d.ipynb # VisReg + multiscale FPN downstream fine-tuning (Kaggle T4)
-├── 08_finetune_visreg_unetr_3d.ipynb      # VisReg + hybrid UNETR downstream fine-tuning (Kaggle T4)
-├── colab_a100_visreg_pretrain.ipynb       # Dedicated NVIDIA A100 SSL pre-training (Google Colab)
-├── colab_a100_finetune_visreg_multiscale.ipynb # Dedicated NVIDIA A100 VisReg + multiscale FPN downstream
-└── colab_a100_finetune_visreg_unetr.ipynb      # Dedicated NVIDIA A100 VisReg + hybrid UNETR downstream
+notebooks/
+├── colab/                                          # Google Colab GPU Suite (A100/L4/T4, 8³ patch / 4,096 tokens)
+│   ├── 01_colab_visreg_pretrain_3d.ipynb           # 3D VisReg JEPA SSL pre-training (200 epochs)
+│   ├── 02_colab_finetune_visreg_multiscale_3d.ipynb # VisReg + Multi-Scale FPN downstream (60 epochs)
+│   ├── 03_colab_finetune_visreg_unetr_3d.ipynb      # VisReg + Hybrid UNETR downstream (60 epochs)
+│   ├── 04_colab_nnunet_3d.ipynb                    # 3D nnU-Net baseline (DynUNet with deep supervision)
+│   ├── 05_colab_unet_3d.ipynb                      # 3D Residual UNet baseline
+│   ├── 06_colab_scratch_multiscale_3d.ipynb        # From-scratch ViT-FPN ablation (zero pre-training)
+│   ├── 07_colab_scratch_unetr_3d.ipynb             # From-scratch ViT-UNETR hybrid ablation (zero pre-training)
+│   ├── 08_colab_frozen_visreg_multiscale_3d.ipynb   # VisReg + FPN frozen encoder probe
+│   └── 09_colab_frozen_visreg_unetr_3d.ipynb       # VisReg + UNETR frozen encoder probe
+└── kaggle/                                         # Kaggle T4 Benchmark Suite (16³ patch / 512 tokens)
+    ├── 01_train_visreg_3d.ipynb                    # 3D VisReg JEPA SSL pre-training
+    ├── 02_diagnose_visreg_3d.ipynb                 # Label-free pre-training masking diagnostics
+    ├── 03_train_nnunet_3d.ipynb                    # 3D nnU-Net baseline
+    ├── 04_train_unet_3d.ipynb                      # 3D Residual UNet baseline
+    ├── 05_train_vit_from_scratch_ablation_3d.ipynb # From-scratch ViT-FPN ablation
+    ├── 06_vit_unetr_hybrid_ablation_3d.ipynb       # From-scratch ViT-UNETR hybrid ablation
+    ├── 07_finetune_visreg_multiscale_3d.ipynb       # VisReg + FPN downstream fine-tuning
+    └── 08_finetune_visreg_unetr_3d.ipynb           # VisReg + UNETR downstream fine-tuning
 ```
 
 All Kaggle downstream notebooks (`03`–`08`) share a standardized reproducibility configuration cell (`SEED = 42`, `NUM_WORKERS = 4`, `PATCH_SIZE = 16`, `BATCH_SIZE = 2`). The Colab A100 suite utilizes high-throughput batching (`BATCH_SIZE = 4` downstream, `BATCH_SIZE = 32` pretrain) and supports high-resolution `PATCH_SIZE = 8` (4,096 tokens) or canonical `PATCH_SIZE = 16`.
@@ -82,9 +90,10 @@ Outputs are exported as self-contained zip archives:
 ## 5. Execution on Google Colab (NVIDIA A100 SXM4)
 
 For high-resolution self-supervised pre-training ($8^3$ voxel patch size $\to$ $16^3 = 4,096$ token grid) and downstream fine-tuning with full batch capacity ($B=32$ pretrain, $B=4$ downstream) and regularizer schedule annealing, use the dedicated Colab suite:
-* `notebooks/colab_a100_visreg_pretrain.ipynb`: 200-epoch SSL pre-training with Anisotropic 3D Target Jitter.
-* `notebooks/colab_a100_finetune_visreg_multiscale.ipynb`: Downstream fine-tuning with Multi-Scale 3D FPN decoder.
-* `notebooks/colab_a100_finetune_visreg_unetr.ipynb`: Downstream fine-tuning with Hybrid UNETR decoder.
+* `notebooks/colab/01_colab_visreg_pretrain_3d.ipynb`: 200-epoch SSL pre-training with Anisotropic 3D Target Jitter.
+* `notebooks/colab/02_colab_finetune_visreg_multiscale_3d.ipynb`: Downstream fine-tuning with Multi-Scale 3D FPN decoder (60 epochs).
+* `notebooks/colab/03_colab_finetune_visreg_unetr_3d.ipynb`: Downstream fine-tuning with Hybrid UNETR decoder (60 epochs).
+* Plus baseline and ablation notebooks (`04_colab_nnunet_3d.ipynb` through `09_colab_frozen_visreg_unetr_3d.ipynb`).
 
 ### 5.1 Google Drive `thesis/` Hierarchy
 All Colab notebooks operate on a standardized, organized Google Drive directory layout:
@@ -96,12 +105,16 @@ My Drive/
     │   └── brats-3d-v2.zip              <-- Upload your dataset .zip here
     ├── pretrain model/                  <-- Pre-training checkpoints and exported zip
     │   ├── visreg_jepa_3d_best.pt
-    │   └── visreg_pretrain_outputs_a100.zip
+    │   └── visreg_pretrain_outputs.zip
     └── downstream/                      <-- Fine-tuning checkpoints and evaluation archives
-        ├── multiscale/
-        │   └── visreg_multiscale_outputs_a100.zip
-        └── unetr/
-            └── visreg_unetr_outputs_a100.zip
+        ├── visreg_multiscale/
+        │   └── visreg_multiscale_outputs.zip
+        ├── visreg_unetr/
+        │   └── visreg_unetr_outputs.zip
+        ├── nnunet/
+        │   └── nnunet_outputs.zip
+        └── unet/
+            └── unet_outputs.zip
 ```
 
 ### 5.2 Step-by-Step Launch Procedure
@@ -109,7 +122,7 @@ My Drive/
    - In Google Drive, create the folder `thesis/` with subfolders `data/` and `pretrain model/`.
    - Upload your `brats-3d-v2.zip` (or `brats_3d_full.zip`) into `My Drive/thesis/data/`.
 2. **Open Notebook in Colab**:
-   - Open `notebooks/colab_a100_visreg_pretrain.ipynb` from GitHub (`hanriman/tumor_segmentation_3d`).
+   - Open `notebooks/colab/01_colab_visreg_pretrain_3d.ipynb` from GitHub (`hanriman/tumor_segmentation_3d`).
 3. **Select A100 GPU**:
    - Menu $\to$ **Runtime** $\to$ **Change runtime type**.
    - Hardware accelerator: **A100 GPU**, Runtime shape: **High-RAM**.
@@ -120,8 +133,8 @@ My Drive/
    - Runs pre-training with explicit parameters (`--patch_size 8 8 8`, `--batch_size 32`, `--epochs 200`, `--reg_warmup_epochs 30`, `--reg_min_scale 0.10`, `--amp`).
    - Exports weights directly to `My Drive/thesis/pretrain model/`.
 6. **Execute Downstream Fine-Tuning**:
-   - Open `notebooks/colab_a100_finetune_visreg_multiscale.ipynb` or `notebooks/colab_a100_finetune_visreg_unetr.ipynb`.
-   - Both notebooks automatically detect the pre-trained weights in `My Drive/thesis/pretrain model/`, run 30-epoch fine-tuning, execute full test + low-data ($1\%$–$100\%$) + OOD evaluations, and package reports directly into `My Drive/thesis/downstream/`.
+   - Open `notebooks/colab/02_colab_finetune_visreg_multiscale_3d.ipynb` or `notebooks/colab/03_colab_finetune_visreg_unetr_3d.ipynb`.
+   - Both notebooks automatically detect the pre-trained weights in `My Drive/thesis/pretrain model/`, run 60-epoch fine-tuning, execute full test + low-data ($1\%$–$100\%$, 25 epochs) + OOD evaluations, and package reports directly into `My Drive/thesis/downstream/`.
 
 ---
 

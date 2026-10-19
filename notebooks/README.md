@@ -23,6 +23,8 @@ Numbered sequentially for structured execution. Each notebook streams directly t
 | **`05_colab_unet_3d.ipynb`** | 3D Residual U-Net Supervised Baseline | Dense | 4 | `thesis/downstream/unet/` | `unet_outputs.zip` |
 | **`06_colab_scratch_multiscale_3d.ipynb`** | 3D ViT + Multi-Scale FPN From Scratch (Zero Pre-training) | $8^3$ | 4 | `thesis/downstream/scratch_multiscale/` | `scratch_multiscale_outputs.zip` |
 | **`07_colab_scratch_unetr_3d.ipynb`** | 3D ViT + Hybrid UNETR From Scratch (Zero Pre-training) | $8^3$ | 4 | `thesis/downstream/scratch_unetr/` | `scratch_unetr_outputs.zip` |
+| **`08_colab_frozen_visreg_multiscale_3d.ipynb`** | VisReg + Multi-Scale FPN Frozen Encoder Probe | $8^3$ | 4 | `thesis/downstream/frozen_visreg_multiscale/` | `frozen_visreg_multiscale_outputs.zip` |
+| **`09_colab_frozen_visreg_unetr_3d.ipynb`** | VisReg + Hybrid UNETR Frozen Encoder Probe | $8^3$ | 4 | `thesis/downstream/frozen_visreg_unetr/` | `frozen_visreg_unetr_outputs.zip` |
 
 > **Parallel Execution**: Because each Colab notebook writes exclusively to its own directory, you can launch multiple Colab instances simultaneously in parallel without any file collision.
 
@@ -54,8 +56,8 @@ SEED = 42                 # Deterministic seed for weight init, augmentations, a
 NUM_WORKERS = 4          # Parallel CPU data loading workers (Kaggle T4 / Colab GPU)
 PATCH_SIZE = 8           # 8³ voxel patch (4,096 tokens) on Colab GPU; 16³ voxel patch (512 tokens) on Kaggle T4
 BATCH_SIZE = 4           # Volumetric downstream batch size (nnU-Net: B=2)
-EPOCHS = 30              # Supervised training / fine-tuning epochs (pre-training: 200)
-LOW_DATA_EPOCHS = 15     # Low-data label efficiency evaluation epochs
+EPOCHS = 60              # Supervised training / fine-tuning epochs (pre-training: 200)
+LOW_DATA_EPOCHS = 25     # Low-data label efficiency evaluation epochs
 LEARNING_RATE = 3e-4     # Base AdamW learning rate (pre-training: 5e-4 with cosine schedule)
 WEIGHT_DECAY = 1e-4      # AdamW weight decay (pre-training: 0.05)
 ```
@@ -82,6 +84,6 @@ CLI execution cells uniformly interpolate these parameters:
 
 Every downstream notebook runs the three-tier empirical evaluation battery:
 1. **Full-Data Held-Out Test Evaluation ($N=242$ volumes, TTA)**: Patient-level Dice (WT, TC, ET), 95% Hausdorff Distance (HD95), and volumetric IoU.
-2. **Low-Data Label Efficiency Benchmark**: Measures performance across annotation fractions ($1\%, 5\%, 10\%, 25\%, 50\%, 100\%$) across 15 epochs.
+2. **Low-Data Label Efficiency Benchmark**: Measures performance across annotation fractions ($1\%, 5\%, 10\%, 25\%, 50\%, 100\%$) across 25 epochs.
 3. **Out-of-Distribution (OOD) Scanner Shift Robustness**: Evaluates resilience under physical 3D Rician scanner noise ($\sigma=0.08$), quadratic RF $B_1$ field bias, and missing sequence triage (T1c-only, FLAIR-only).
 4. **1-Click Packaging**: Automatically runs `export_artifacts` to zip all checkpoints, logs, and evaluation reports into `<model>_outputs.zip` in Google Drive.
