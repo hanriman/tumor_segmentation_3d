@@ -71,14 +71,33 @@ def normalize_patch_size(
     return (int(raw_patch[0]), int(raw_patch[1]), int(raw_patch[2]))
 
 
+def _safe_torch_load(path: Path | str, map_location: Any = "cpu") -> Any:
+    """Loads a PyTorch checkpoint safely across PyTorch versions (preventing PyTorch 2.6+ unpickling errors)."""
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=map_location)
+
+
 def find_ssl_checkpoint(
     model_type: str,
     checkpoints_dir: Path = CHECKPOINTS_DIR,
     explicit_path: str | Path | None = None,
 ) -> Path | None:
     """Locates the best pre-trained SSL encoder checkpoint for `model_type`."""
-    if explicit_path is not None:
-        return Path(explicit_path)
+    if explicit_path:
+        p = Path(explicit_path)
+        if p.is_file():
+            return p
+        if p.is_dir():
+            for pat in (f"{model_type}*_3d_best.pt", f"{model_type}*_epoch_*.pt", f"{model_type}*.pt", "*.pt"):
+                sub_files = [
+                    x for x in sorted(p.glob(pat))
+                    if x.is_file() and not any(tag in x.name.lower() for tag in ("scratch", "frozen"))
+                ]
+                if sub_files:
+                    return sub_files[-1]
+        # If explicit path does not exist on disk, fall through to auto-search search_dirs
 
     search_dirs = get_checkpoint_search_dirs(checkpoints_dir)
     excluded_tags = ("multiscale", "unetr_hybrid", "hybrid", "downstream", "scratch", "frozen")
@@ -89,7 +108,7 @@ def find_ssl_checkpoint(
         ssl_best = [
             p
             for p in sorted(sdir.glob(f"{model_type}*_3d_best.pt"))
-            if not any(tag in p.name.lower() for tag in ("scratch", "frozen"))
+            if p.is_file() and not any(tag in p.name.lower() for tag in ("scratch", "frozen"))
         ]
         if ssl_best:
             return ssl_best[-1]
@@ -99,7 +118,7 @@ def find_ssl_checkpoint(
             continue
         ssl_epochs = [
             p
-            for p in sort_checkpoints_by_epoch(list(sdir.glob(f"{model_type}*_epoch_*.pt")))
+            for p in sort_checkpoints_by_epoch([x for x in sdir.glob(f"{model_type}*_epoch_*.pt") if x.is_file()])
             if not any(tag in p.name.lower() for tag in ("scratch", "frozen"))
         ]
         if ssl_epochs:
@@ -111,7 +130,7 @@ def find_ssl_checkpoint(
         candidates = [
             p
             for p in sorted(sdir.glob(f"{model_type}*.pt"))
-            if not any(tag in p.name.lower() for tag in excluded_tags)
+            if p.is_file() and not any(tag in p.name.lower() for tag in excluded_tags)
         ]
         if candidates:
             return candidates[-1]
@@ -129,17 +148,25 @@ def find_downstream_checkpoint(
 ) -> Path:
     """Locates the best downstream segmentation checkpoint for evaluation."""
     if explicit_path is not None:
-        return Path(explicit_path)
+        p = Path(explicit_path)
+        if p.is_file():
+            return p
+        if p.is_dir():
+            for pat in (f"*{decoder_type}*best.pt", f"*{model_type}*best.pt", "*best.pt", "*.pt"):
+                sub_files = [x for x in sorted(p.glob(pat)) if x.is_file()]
+                if sub_files:
+                    return sub_files[-1]
+        return p
 
     search_dirs = get_checkpoint_search_dirs(checkpoints_dir)
     if model_type == "unet_3d":
         return next(
-            (d / "unet_3d_best.pt" for d in search_dirs if (d / "unet_3d_best.pt").exists()),
+            (d / "unet_3d_best.pt" for d in search_dirs if (d / "unet_3d_best.pt").is_file()),
             checkpoints_dir / "unet_3d_best.pt",
         )
     if model_type == "nnunet_3d":
         return next(
-            (d / "nnunet_3d_best.pt" for d in search_dirs if (d / "nnunet_3d_best.pt").exists()),
+            (d / "nnunet_3d_best.pt" for d in search_dirs if (d / "nnunet_3d_best.pt").is_file()),
             checkpoints_dir / "nnunet_3d_best.pt",
         )
 
@@ -154,7 +181,7 @@ def find_downstream_checkpoint(
         for pat in patterns:
             for d in search_dirs:
                 if d.exists():
-                    cands = sorted(d.glob(pat))
+                    cands = [p for p in sorted(d.glob(pat)) if p.is_file()]
                     if cands:
                         return cands[-1]
         return checkpoints_dir / f"{model_type}_{decoder_type}_scratch_best.pt"
@@ -170,7 +197,7 @@ def find_downstream_checkpoint(
         for pat in patterns:
             for d in search_dirs:
                 if d.exists():
-                    cands = sorted(d.glob(pat))
+                    cands = [p for p in sorted(d.glob(pat)) if p.is_file()]
                     if cands:
                         return cands[-1]
         return checkpoints_dir / f"{model_type}_{decoder_type}_frozen_best.pt"
@@ -187,7 +214,7 @@ def find_downstream_checkpoint(
                 cands = [
                     p
                     for p in sorted(d.glob(pat))
-                    if not any(x in p.name.lower() for x in ("scratch", "frozen"))
+                    if p.is_file() and not any(x in p.name.lower() for x in ("scratch", "frozen"))
                 ]
                 if cands:
                     return cands[-1]
@@ -196,10 +223,10 @@ def find_downstream_checkpoint(
 
 def _peek_deep_supervision(ckpt_file: Path, default: bool = False) -> bool:
     """Detects whether a saved JEPA segmentation checkpoint contains deep supervision heads."""
-    if not ckpt_file.exists():
+    if not ckpt_file.is_file():
         return default
     try:
-        sd_peek = torch.load(ckpt_file, map_location="cpu")
+        sd_peek = _safe_torch_load(ckpt_file, map_location="cpu")
         sd_peek = sd_peek.get("model_state_dict", sd_peek)
         if isinstance(sd_peek, dict) and any(k.startswith("decoder.ds") for k in sd_peek):
             return True
@@ -303,7 +330,7 @@ def build_segmentation_model_for_training(
     ).to(device)
 
     if not from_scratch and ckpt_path and ckpt_path.exists():
-        ckpt = torch.load(ckpt_path, map_location=device)
+        ckpt = _safe_torch_load(ckpt_path, map_location=device)
         check_pool_match(
             ckpt.get("pool_fingerprint"),
             dataset_fingerprint(resolved_data_dir or get_dataset_dir()),
@@ -368,7 +395,7 @@ def load_segmentation_model_for_eval(
             num_res_units=unet_cfg.get("num_res_units", 2),
             dropout=unet_cfg.get("dropout", 0.1),
         ).to(device)
-        sd = torch.load(ckpt_file, map_location=device)
+        sd = _safe_torch_load(ckpt_file, map_location=device)
         sd = sd.get("model_state_dict", sd)
         missing, _unexpected = model.load_state_dict(sd, strict=False)
         matched = [k for k in model.state_dict() if k not in missing]
@@ -388,7 +415,7 @@ def load_segmentation_model_for_eval(
             deep_supr_num=nnunet_cfg.get("deep_supr_num", 3),
             res_block=nnunet_cfg.get("res_block", True),
         ).to(device)
-        sd = torch.load(ckpt_file, map_location=device)
+        sd = _safe_torch_load(ckpt_file, map_location=device)
         sd = sd.get("model_state_dict", sd)
         missing, _unexpected = model.load_state_dict(sd, strict=False)
         matched = [k for k in model.state_dict() if k not in missing]
@@ -418,7 +445,7 @@ def load_segmentation_model_for_eval(
         freeze_encoder=is_frozen,
     ).to(device)
 
-    ckpt_raw = torch.load(ckpt_file, map_location=device)
+    ckpt_raw = _safe_torch_load(ckpt_file, map_location=device)
     if isinstance(ckpt_raw, dict) and "pool_fingerprint" in ckpt_raw:
         check_pool_match(
             ckpt_raw.get("pool_fingerprint"),

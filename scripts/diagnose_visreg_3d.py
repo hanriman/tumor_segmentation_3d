@@ -68,7 +68,7 @@ def main() -> None:
         f"all-air tgt blocks={air_blocks}/{n_blocks}={air_blocks/max(1,n_blocks):.3f}"
     )
 
-    if args.checkpoint:
+    if args.checkpoint and Path(args.checkpoint).is_file():
         ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
         model = SingleEncoderJEPA3D(patch_size=(ps, ps, ps))
         sd = ckpt.get("model_state_dict", ckpt)

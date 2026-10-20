@@ -48,6 +48,7 @@ def get_dataset_dir(dataset_name: str = "brats_gli_3d") -> Path:
             Path("/content") / "data" / "processed" / "brats_gli_3d_v2",
             Path("/content") / dataset_name,
             Path("/content") / "brats_3d_datasets" / dataset_name,
+            Path("/content/drive/MyDrive/thesis/data/processed") / dataset_name,
             Path("/content/drive/MyDrive") / "thesis_3d" / "data" / "processed" / dataset_name,
             Path("/content/drive/MyDrive") / dataset_name,
         ]
@@ -75,7 +76,7 @@ def get_metadata_path(dataset_name: str = "brats_gli_3d") -> Path:
 
 # Output directory resolution
 if IN_COLAB:
-    drive_out = Path("/content/drive/MyDrive/thesis_3d_outputs")
+    drive_out = Path("/content/drive/MyDrive/thesis")
     OUTPUTS_DIR = drive_out if Path("/content/drive/MyDrive").exists() else Path("/content/outputs")
 else:
     OUTPUTS_DIR = PROJECT_ROOT / "outputs"
@@ -163,11 +164,9 @@ def get_checkpoint_search_dirs(primary_dir: Path | str | None = None) -> list[Pa
     if IN_COLAB:
         search_roots = [
             Path("/content/drive/MyDrive/thesis/pretrain model"),
-            Path("/content/drive/MyDrive/thesis/visreg_pretrain_outputs"),
             Path("/content/drive/MyDrive/thesis/downstream"),
             Path("/content/drive/MyDrive/thesis"),
             Path("/content/outputs"),
-            Path("/content/drive/MyDrive/thesis_3d_outputs"),
         ] + search_roots
 
     for root in search_roots:
@@ -175,6 +174,10 @@ def get_checkpoint_search_dirs(primary_dir: Path | str | None = None) -> list[Pa
             if (root / "checkpoints").is_dir():
                 candidates.append((root / "checkpoints").resolve())
             candidates.append(root.resolve())
+            # Search subdirectories (e.g. thesis/downstream/<experiment>/checkpoints)
+            for sub in sorted(root.glob("*/checkpoints")):
+                if sub.is_dir():
+                    candidates.append(sub.resolve())
             exp_dir = root / "experiments"
             if exp_dir.exists():
                 for sub in sorted(exp_dir.glob("*/checkpoints")):

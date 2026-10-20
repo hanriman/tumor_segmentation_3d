@@ -418,13 +418,14 @@ def main():
             or canonical_req == "vit_frozen"
         )
         if is_scratch and "JEPA" in orig_label:
-            label = "3D ViT-FPN (From Scratch)"
+            label = "3D ViT-UNETR (From Scratch)" if decoder_type in ("unetr_hybrid", "unetr") else "3D ViT-FPN (From Scratch)"
         elif is_frozen and "JEPA" in orig_label:
-            label = f"{orig_label} [frozen]"
+            base = orig_label.replace("(FPN)", "(UNETR)") if decoder_type in ("unetr_hybrid", "unetr") else orig_label
+            label = f"{base} [frozen]"
         else:
-            label = orig_label
+            label = orig_label.replace("(FPN)", "(UNETR)") if decoder_type in ("unetr_hybrid", "unetr") else orig_label
 
-        if decoder_type and decoder_type != "multiscale" and "JEPA" in orig_label:
+        if decoder_type and decoder_type not in ("multiscale", "unetr_hybrid", "unetr") and "JEPA" in orig_label:
             if "[frozen]" in label:
                 label = label.replace(" [frozen]", f" [{decoder_type}, frozen]")
             else:

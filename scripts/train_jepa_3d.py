@@ -579,6 +579,7 @@ def main():
         if val_score < best_val_loss:
             best_val_loss = val_score
             best_ckpt_path = checkpoints_dir / f"{args.model_type}_3d_best.pt"
+            best_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(
                 {
                     "epoch": epoch,
@@ -600,6 +601,7 @@ def main():
         save_freq = getattr(args, "save_freq", 10)
         if epoch % save_freq == 0 or epoch == epochs or args.smoke_test:
             ckpt_path = checkpoints_dir / f"{args.model_type}_3d_epoch_{epoch}.pt"
+            ckpt_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(
                 {
                     "epoch": epoch,

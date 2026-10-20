@@ -223,6 +223,11 @@ def main():
     else:
         selected_models = all_models
 
+    if args.decoder_type in ("unetr_hybrid", "unetr"):
+        selected_models = [
+            (name.replace("(FPN)", "(UNETR)"), m_type) for name, m_type in selected_models
+        ]
+
     instantiated_models = []
     for m_name, m_type in selected_models:
         is_scratch = m_type == "vit_scratch" or args.from_scratch

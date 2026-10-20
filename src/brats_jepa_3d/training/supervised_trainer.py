@@ -312,7 +312,10 @@ def run_supervised_training(
                 raise FileNotFoundError(f"Checkpoint file not found for --resume: {resume_path}")
         else:
             logger.info(f"Resuming training from checkpoint: {resume_path}")
-            resume_ckpt = torch.load(resume_path, map_location=device)
+            try:
+                resume_ckpt = torch.load(resume_path, map_location=device, weights_only=False)
+            except TypeError:
+                resume_ckpt = torch.load(resume_path, map_location=device)
             if "model_state_dict" in resume_ckpt:
                 model.load_state_dict(resume_ckpt["model_state_dict"])
             if "optimizer_state_dict" in resume_ckpt and resume_ckpt["optimizer_state_dict"]:
@@ -402,6 +405,7 @@ def run_supervised_training(
             best_val_dice = val_metrics["val_dice"]
             state_dict_to_save["best_val_dice"] = best_val_dice
             best_ckpt_path = checkpoints_dir / f"{ckpt_prefix}_best.pt"
+            best_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(state_dict_to_save, best_ckpt_path)
             logger.info(f"New best model saved: {best_ckpt_path} (Val Dice: {best_val_dice:.4f})")
 
@@ -411,6 +415,7 @@ def run_supervised_training(
         is_final_epoch = epoch == epochs or args.smoke_test
         if is_periodic or is_final_epoch:
             periodic_ckpt_path = checkpoints_dir / f"{ckpt_prefix}_epoch_{epoch}.pt"
+            periodic_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(state_dict_to_save, periodic_ckpt_path)
             logger.info(f"Checkpoint saved: {periodic_ckpt_path}")
 
