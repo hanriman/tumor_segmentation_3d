@@ -54,36 +54,42 @@ This produces `data/processed/brats_gli_3d_v2/` containing `metadata.csv` (with 
 ## 4. Execution on Google Colab
 
 ### 4.1 Google Drive `thesis/` Hierarchy
-All Colab notebooks read the dataset and pre-trained checkpoint from `/content/drive/MyDrive/thesis/` and write their experiment outputs back to Google Drive:
+All Colab notebooks read the dataset from `My Drive/thesis/data/`, resolve pre-trained weights from `My Drive/thesis/pretrain model/`, and stream downstream outputs to `My Drive/thesis/downstream/<experiment>/`:
 
 ```text
 My Drive/
 └── thesis/
     ├── data/
-    │   └── brats_gli_3d_v2.zip                     <-- Upload preprocessed dataset archive here
-    ├── visreg_pretrain_outputs/                    <-- Produced by Notebook 01
-    │   ├── checkpoints/visreg_jepa_3d_best.pt
+    │   └── brats_gli_3d_v2.zip                     <-- Preprocessed dataset archive
+    ├── pretrain model/                             <-- Produced by Notebook 01 (Pre-training)
+    │   ├── checkpoints/
+    │   │   ├── visreg_jepa_3d_best.pt              <-- Authoritative SSL Pre-trained Weights
+    │   │   └── visreg_jepa_3d_epoch_*.pt
+    │   ├── logs/
+    │   ├── metrics/
     │   └── visreg_pretrain_outputs.zip
-    ├── visreg_multiscale_outputs/                  <-- Produced by Notebook 02
-    ├── visreg_unetr_outputs/                       <-- Produced by Notebook 03
-    ├── nnunet_outputs/                             <-- Produced by Notebook 04
-    ├── unet_outputs/                               <-- Produced by Notebook 05
-    ├── scratch_multiscale_outputs/                 <-- Produced by Notebook 06
-    ├── scratch_unetr_outputs/                      <-- Produced by Notebook 07
-    ├── frozen_visreg_multiscale_outputs/           <-- Produced by Notebook 08
-    └── frozen_visreg_unetr_outputs/                <-- Produced by Notebook 09
+    └── downstream/                                 <-- Produced by Downstream Notebooks 02..09
+        ├── visreg_multiscale/                      (Notebook 02: ViT + FPN Finetune)
+        ├── visreg_unetr/                           (Notebook 03: ViT + UNETR Finetune)
+        ├── nnunet/                                 (Notebook 04: DynUNet CNN Baseline)
+        ├── unet/                                   (Notebook 05: Residual UNet Baseline)
+        ├── scratch_multiscale/                     (Notebook 06: ViT + FPN Scratch Baseline)
+        ├── scratch_unetr/                          (Notebook 07: ViT + UNETR Scratch Baseline)
+        ├── frozen_visreg_multiscale/               (Notebook 08: Frozen FPN Linear Probe)
+        └── frozen_visreg_unetr/                    (Notebook 09: Frozen UNETR Hybrid Probe)
 ```
 
 ### 4.2 Step-by-Step Launch Procedure
 1. **Upload Dataset Archive**:
    - Place `brats_gli_3d_v2.zip` into `My Drive/thesis/data/`.
-2. **Run Notebook 01 (`01_colab_visreg_pretrain_3d.ipynb`)**:
-   - Mounts Google Drive, clones the repository, and extracts `brats_gli_3d_v2.zip` onto Colab's fast local NVMe SSD (`/content/data/brats_gli_3d_v2`).
-   - Runs 200-epoch self-supervised 3D VISReg JEPA pre-training (`--patch_size 8 8 8`, `--batch_size 32`, `--epochs 200`, `--reg_warmup_epochs 30`, `--reg_min_scale 0.10`, `--amp`).
-   - Runs `scripts/diagnose_visreg_3d.py` and packages `visreg_pretrain_outputs.zip` to `My Drive/thesis/visreg_pretrain_outputs/`.
+2. **Pre-training (`01_colab_visreg_pretrain_3d.ipynb`)**:
+   - Pre-training runs 200 epochs of self-supervised 3D VISReg JEPA (`--patch_size 8 8 8`, `--batch_size 32`, `--epochs 200`, `--reg_warmup_epochs 30`, `--reg_min_scale 0.10`, `--amp`).
+   - Checkpoints stream directly to `My Drive/thesis/pretrain model/checkpoints/visreg_jepa_3d_best.pt`.
+   - **Zero Compute Waste**: Once `visreg_jepa_3d_best.pt` is generated, **Notebook 01 does not need to be re-run**. Downstream notebooks directly consume these weights.
 3. **Run Downstream & Baseline Notebooks (`02` through `09`)**:
-   - Notebooks `02`, `03`, `08`, and `09` automatically resolve `visreg_jepa_3d_best.pt` from `My Drive/thesis/visreg_pretrain_outputs/`.
-   - Notebooks `04` (nnU-Net), `05` (ResUNet), `06` (Scratch ViT-FPN), and `07` (Scratch ViT-UNETR) require no pre-trained checkpoint and can be launched immediately in parallel with Notebook `01`.
+   - Notebooks `02`, `03`, `08`, and `09` automatically intake `visreg_jepa_3d_best.pt` directly from `My Drive/thesis/pretrain model/`.
+   - Notebooks `04` (nnU-Net), `05` (ResUNet), `06` (Scratch ViT-FPN), and `07` (Scratch ViT-UNETR) train from scratch and require no pre-trained weights.
+   - You only need to run the specific downstream experiments you need results from. Completed runs never need to be re-executed.
 
 ---
 

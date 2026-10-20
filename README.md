@@ -274,8 +274,8 @@ python tests/smoke_test_pipeline.py --model_type all
 
 1. **Google Colab Suite (`notebooks/colab/01..09_*.ipynb`)**:
    - Place `brats_gli_3d_v2.zip` in Google Drive under `My Drive/thesis/data/`.
-   - Run `notebooks/colab/01_colab_visreg_pretrain_3d.ipynb` first to pre-train the 3D VISReg JEPA encoder ($8^3$ patches, $4,096$ tokens, 200 epochs) and export `visreg_pretrain_outputs.zip` to `My Drive/thesis/visreg_pretrain_outputs/`.
-   - Run downstream and baseline notebooks (`02` through `09`) in parallel or sequence; each notebook extracts the dataset to fast local NVMe (`/content/data/`), runs training + test evaluation + low-data evaluation + OOD evaluation, and mirrors outputs to `My Drive/thesis/<experiment_name>/`.
+   - Run `notebooks/colab/01_colab_visreg_pretrain_3d.ipynb` to pre-train the 3D VISReg JEPA encoder ($8^3$ patches, $4,096$ tokens, 200 epochs). Checkpoints are saved directly to `My Drive/thesis/pretrain model/checkpoints/visreg_jepa_3d_best.pt`.
+   - Run downstream and baseline notebooks (`02` through `09`) as needed; downstream notebooks automatically resolve pre-trained weights from `My Drive/thesis/pretrain model/` (no re-running of pre-training required!), stream training + test + low-data + OOD metrics to `My Drive/thesis/downstream/<experiment>/`, and package verified zip archives.
 2. **1-Click Local Aggregation**:
    - Place downloaded experiment folders under `outputs/experiments/<experiment_name>/` and run:
      ```bash

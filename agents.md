@@ -1661,4 +1661,32 @@ The ultimate objective is not to make a paper sound impressive.
 
 The objective is to make the scientific argument **clear, rigorous, reproducible, appropriately scoped, and useful to future researchers.**
 
+---
+
+# 55. Codebase Directory Integrity, Single Source of Truth & Zero-Compute-Waste Rules
+
+To prevent compute waste, broken training runs, and lost checkpoints, the research agent must adhere to the following rules across all scripts, tools, and notebooks:
+
+## 55.1 Single Source of Truth for Checkpoints
+* **Pre-trained SSL Weights**: The authoritative pre-trained SSL encoder checkpoint is stored **strictly** in:
+  ```text
+  /content/drive/MyDrive/thesis/pretrain model/checkpoints/visreg_jepa_3d_best.pt
+  ```
+  (or `visreg_jepa_3d_epoch_*.pt` in the same folder).
+* **Never Invent Phantom Directories**: The agent must never introduce or search in legacy or non-existent paths (such as `thesis_3d_outputs`, `visreg_pretrain_outputs`, or `tumor_segmentation_3d/outputs`).
+* **Downstream Directory Structure**: All downstream models must stream directly into:
+  ```text
+  /content/drive/MyDrive/thesis/downstream/<model_or_experiment_name>/
+  ```
+
+## 55.2 Zero Compute Waste on Pre-training
+* **Never Force Re-running Pre-training**: Pre-training a 3D ViT on volumetric MRIs requires substantial compute (200 epochs). Downstream fine-tuning (`02`, `03`) and linear probing (`08`, `09`) must directly consume the existing checkpoint from `thesis/pretrain model/`.
+* **No Blind Re-runs of Completed Baselines**: Updating codebase utilities or notebook headers must not trigger re-running completed baselines (`04` nnU-Net, `05` UNet, `06` Scratch FPN, `07` Scratch UNETR). The user only executes the specific notebook currently under study.
+
+## 55.3 Strict File vs. Directory Defensive Verification
+* **Immunization Against `IsADirectoryError`**: Never rely on raw `Path.exists()` when loading checkpoints or files with `.pt` extensions. A rogue or created directory can match `.exists()`, crashing `torch.load` with `IsADirectoryError: [Errno 21] Is a directory`. Always verify `p.is_file()` or inspect inside directories.
+* **PyTorch 2.6+ Compatibility**: Always use `_safe_torch_load` or pass `weights_only=False` to `torch.load` when loading model checkpoints that store metadata (e.g. `pool_fingerprint`, `best_val_dice`).
+* **Defensive Parent Directory Creation**: In all training and evaluation scripts, always invoke `dest_path.parent.mkdir(parents=True, exist_ok=True)` immediately before `torch.save()`, `to_csv()`, or file export.
+
+
 

@@ -25,7 +25,7 @@ Numbered sequentially for structured execution. Each notebook streams directly t
 | **`08_colab_frozen_visreg_multiscale_3d.ipynb`** | VisReg + Multi-Scale FPN Frozen Encoder Probe | $8^3$ | 4 | `thesis/downstream/frozen_visreg_multiscale/` | `frozen_visreg_multiscale_outputs.zip` |
 | **`09_colab_frozen_visreg_unetr_3d.ipynb`** | VisReg + Hybrid UNETR Frozen Encoder Probe | $8^3$ | 4 | `thesis/downstream/frozen_visreg_unetr/` | `frozen_visreg_unetr_outputs.zip` |
 
-> **Parallel Execution**: Because each Colab notebook writes exclusively to its own directory, you can launch multiple Colab instances simultaneously in parallel without any file collision.
+> **Parallel Execution & Zero Compute Waste**: Because each Colab notebook writes exclusively to its own directory, you can launch multiple Colab instances simultaneously in parallel without any file collision. Notebooks `02`, `03`, `08`, and `09` automatically consume `visreg_jepa_3d_best.pt` directly from `thesis/pretrain model/`; pre-training (`01`) never needs to be re-run once the checkpoint exists. You only need to run the specific downstream notebooks you wish to evaluate.
 
 ---
 
