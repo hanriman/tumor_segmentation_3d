@@ -161,13 +161,20 @@ def get_checkpoint_search_dirs(primary_dir: Path | str | None = None) -> list[Pa
         Path("outputs").resolve(),
     ]
     if IN_COLAB:
-        search_roots.extend([
-            Path("/content/drive/MyDrive/thesis_3d_outputs"),
+        search_roots = [
+            Path("/content/drive/MyDrive/thesis/pretrain model"),
+            Path("/content/drive/MyDrive/thesis/visreg_pretrain_outputs"),
+            Path("/content/drive/MyDrive/thesis/downstream"),
+            Path("/content/drive/MyDrive/thesis"),
             Path("/content/outputs"),
-        ])
+            Path("/content/drive/MyDrive/thesis_3d_outputs"),
+        ] + search_roots
 
     for root in search_roots:
         if root.exists():
+            if (root / "checkpoints").is_dir():
+                candidates.append((root / "checkpoints").resolve())
+            candidates.append(root.resolve())
             exp_dir = root / "experiments"
             if exp_dir.exists():
                 for sub in sorted(exp_dir.glob("*/checkpoints")):

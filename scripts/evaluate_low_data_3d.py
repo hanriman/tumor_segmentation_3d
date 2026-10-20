@@ -129,6 +129,12 @@ def parse_args():
     )
     parser.add_argument("--smoke_test", action="store_true", help="Run fast verification")
     parser.add_argument(
+        "--pretrained_checkpoint",
+        type=str,
+        default=None,
+        help="Explicit path to pre-trained SSL encoder checkpoint (e.g. visreg_jepa_3d_best.pt)",
+    )
+    parser.add_argument(
         "--patch_size",
         type=int,
         nargs="+",
@@ -360,6 +366,8 @@ def main():
 
     def _display_name(name: str) -> str:
         dec = getattr(args, "decoder_type", "multiscale")
+        if dec == "unetr_hybrid":
+            return name.replace("(FPN)", "(UNETR)").replace("ViT-FPN", "ViT-UNETR")
         if dec != "multiscale" and ("JEPA" in name or "ViT-FPN" in name):
             return f"{name} [{dec}]"
         return name
@@ -406,6 +414,7 @@ def main():
                 deep_supervision=args.deep_supervision,
                 patch_size=getattr(args, "patch_size", None),
                 checkpoints_dir=checkpoints_dir,
+                pretrained_checkpoint=getattr(args, "pretrained_checkpoint", None),
                 resolved_data_dir=resolved_data_dir,
                 logger=logger,
                 require_ssl_for_pretrain=not is_scratch,
