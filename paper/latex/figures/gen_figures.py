@@ -73,50 +73,75 @@ def safe_float(v, default: float = 0.0) -> float:
         return default
 
 
+def find_col(df, *keywords, exclude=None):
+    """Finds a column in df that contains all keywords and none of the exclude keywords."""
+    for c in df.columns:
+        cl = c.lower()
+        if all(kw.lower() in cl for kw in keywords):
+            if exclude:
+                if any(ex.lower() in cl for ex in exclude):
+                    continue
+            return c
+    return None
+
+
 # -------------------------------------------------------------
 # Figure 1: Low-Data 3D Label Efficiency Curves (1% to 100%)
 # -------------------------------------------------------------
 def plot_low_data_efficiency():
     fractions = [1, 5, 10, 25, 50, 100]
-    volume_counts = [12, 58, 115, 286, 572, 1144]
+    volume_counts = [11, 58, 115, 286, 572, 1144]
     x = np.arange(len(fractions))
 
-    # Empirical ground truth defaults from latest Colab runs
-    nnunet = np.array([28.05, 59.86, 65.03, 71.68, 73.63, 76.31])
-    unet = np.array([5.86, 52.65, 60.46, 68.13, 72.21, 74.74])
-    unetr_scratch = np.array([3.17, 56.57, 61.40, 70.07, 73.55, 73.90])
-    unetr_visreg = np.array([2.91, 63.65, 66.16, 71.57, 74.61, 75.85])
-    fpn_scratch = np.array([16.70, 50.87, 57.14, 67.08, 70.80, 71.61])
-    fpn_visreg = np.array([22.45, 61.45, 63.43, 68.96, 72.66, 74.22])
-    unetr_frozen = np.array([2.71, 61.12, 63.85, 69.01, 72.44, 73.85])
-    fpn_frozen = np.array([20.74, 57.22, 59.25, 67.35, 71.01, 71.38])
+    # Empirical ground truth defaults from latest validated runs
+    nnunet = np.array([20.69, 47.06, 50.66, 58.18, 61.30, 65.90])
+    unet = np.array([4.29, 43.92, 49.21, 53.88, 61.19, 62.54])
+    unetr_scratch = np.array([32.70, 49.79, 52.60, 55.83, 60.64, 65.41])
+    unetr_visreg = np.array([32.69, 54.45, 57.68, 61.76, 63.92, 66.16])
+    fpn_scratch = np.array([23.11, 41.53, 47.14, 53.16, 56.88, 60.00])
+    fpn_visreg = np.array([25.99, 51.67, 53.48, 57.66, 60.77, 62.36])
+    unetr_frozen = np.array([34.32, 50.75, 54.00, 59.73, 63.94, 64.27])
+    fpn_frozen = np.array([22.43, 50.58, 50.33, 55.42, 57.68, 60.45])
 
     low_data_csv = OUTPUTS_DIR / "low_data_3d_summary.csv"
     if low_data_csv.exists():
         try:
             df = pd.read_csv(low_data_csv)
-            for c in df.columns:
-                cl = c.lower()
-                if "nn" in cl and "mean" in cl:
-                    nnunet = np.array([safe_float(v) for v in df[c]])
-                elif "unet [" in cl and "mean" in cl and "nn" not in cl and "unetr" not in cl:
-                    unet = np.array([safe_float(v) for v in df[c]])
-                elif "scratch" in cl and "unetr" in cl and "mean" in cl:
-                    unetr_scratch = np.array([safe_float(v) for v in df[c]])
-                elif "visreg" in cl and "unetr" in cl and "mean" in cl and "frozen" not in cl:
-                    unetr_visreg = np.array([safe_float(v) for v in df[c]])
-                elif "scratch" in cl and "fpn" in cl and "mean" in cl:
-                    fpn_scratch = np.array([safe_float(v) for v in df[c]])
-                elif "visreg" in cl and "fpn" in cl and "unetr" not in cl and "frozen" not in cl and "mean" in cl:
-                    fpn_visreg = np.array([safe_float(v) for v in df[c]])
-                elif "frozen" in cl and "unetr" in cl and "mean" in cl:
-                    unetr_frozen = np.array([safe_float(v) for v in df[c]])
-                elif "frozen" in cl and "fpn" in cl and "mean" in cl:
-                    fpn_frozen = np.array([safe_float(v) for v in df[c]])
+            c_nn = find_col(df, "nn", "mean") or find_col(df, "nnunet")
+            if c_nn:
+                nnunet = np.array([safe_float(v) for v in df[c_nn]])
+
+            c_u = find_col(df, "unet", "mean", exclude=["nn", "unetr"]) or find_col(df, "unet", exclude=["nn", "unetr", "[wt", "[tc", "[et"])
+            if c_u:
+                unet = np.array([safe_float(v) for v in df[c_u]])
+
+            c_us = find_col(df, "scratch", "unetr", "mean") or find_col(df, "scratch", "unetr") or find_col(df, "from scratch", "unetr_hybrid")
+            if c_us:
+                unetr_scratch = np.array([safe_float(v) for v in df[c_us]])
+
+            c_uv = find_col(df, "visreg", "unetr", "mean", exclude=["frozen"]) or find_col(df, "visreg", "unetr", exclude=["frozen", "[wt", "[tc", "[et"])
+            if c_uv:
+                unetr_visreg = np.array([safe_float(v) for v in df[c_uv]])
+
+            c_fs = find_col(df, "scratch", "fpn", "mean", exclude=["unetr"]) or find_col(df, "scratch", "fpn", exclude=["unetr", "[wt", "[tc", "[et"])
+            if c_fs:
+                fpn_scratch = np.array([safe_float(v) for v in df[c_fs]])
+
+            c_fv = find_col(df, "visreg", "fpn", "mean", exclude=["unetr", "frozen"]) or find_col(df, "visreg", "fpn", exclude=["unetr", "frozen", "[wt", "[tc", "[et"])
+            if c_fv:
+                fpn_visreg = np.array([safe_float(v) for v in df[c_fv]])
+
+            c_uf = find_col(df, "frozen", "unetr", "mean") or find_col(df, "frozen", "unetr", exclude=["[wt", "[tc", "[et"])
+            if c_uf:
+                unetr_frozen = np.array([safe_float(v) for v in df[c_uf]])
+
+            c_ff = find_col(df, "frozen", "fpn", "mean") or find_col(df, "frozen", "fpn", exclude=["[wt", "[tc", "[et"])
+            if c_ff:
+                fpn_frozen = np.array([safe_float(v) for v in df[c_ff]])
         except Exception as e:
             print(f"Notice: using stored values for low-data ({e})")
 
-    _fig, ax = plt.subplots(figsize=(8.8, 5.2))
+    _fig, ax = plt.subplots(figsize=(9.2, 5.4))
     ax.grid(True, linestyle="--", color="gray", alpha=0.3, zorder=0)
 
     # Plot lines
@@ -126,15 +151,32 @@ def plot_low_data_efficiency():
     ax.plot(x, unetr_scratch, marker="d", color=COLOR_UNETR_SCRATCH, label="3D ViT-UNETR (Scratch)", linestyle="--", zorder=3)
     ax.plot(x, fpn_visreg, marker="o", color=COLOR_FPN_VISREG, label="3D VisReg JEPA (FPN)", linewidth=2.2, zorder=5)
     ax.plot(x, fpn_scratch, marker="x", color=COLOR_FPN_SCRATCH, label="3D ViT-FPN (Scratch)", linestyle="--", zorder=2)
-    ax.plot(x, unetr_frozen, marker="*", color=COLOR_UNETR_FROZEN, label="3D VisReg UNETR (Frozen Probe)", linestyle=":", linewidth=1.8, zorder=4)
+    ax.plot(x, unetr_frozen, marker="*", color=COLOR_UNETR_FROZEN, label="3D VisReg UNETR (Frozen Probe)", linestyle=":", linewidth=2.0, zorder=4)
     ax.plot(x, fpn_frozen, marker="P", color=COLOR_FPN_FROZEN, label="3D VisReg FPN (Frozen Probe)", linestyle=":", linewidth=1.8, zorder=3)
 
-    # Callout annotation at 5% data (Index 1)
-    v5_visreg = unetr_visreg[1]
+    # Callout annotation at 1% data (Index 0) - Frozen Probe Leading
+    v1_frozen = unetr_frozen[0]
     ax.annotate(
-        f"VisReg UNETR: {v5_visreg:.1f}%\n(+7.1pp vs Scratch, +3.8pp vs nnU-Net)",
+        f"Frozen UNETR: {v1_frozen:.1f}%\n(+13.6pp vs nnU-Net)",
+        xy=(0, v1_frozen),
+        xytext=(0.05, 42.0),
+        arrowprops={"facecolor": COLOR_UNETR_FROZEN, "shrink": 0.08, "width": 1.2, "headwidth": 5},
+        fontsize=9.0,
+        fontweight="bold",
+        color=COLOR_UNETR_FROZEN,
+        bbox={"boxstyle": "round,pad=0.25", "facecolor": "#f0ffff", "edgecolor": COLOR_UNETR_FROZEN, "alpha": 0.95},
+    )
+
+    # Callout annotation at 5% data (Index 1) - VisReg Pretraining Peak Advantage
+    v5_visreg = unetr_visreg[1]
+    v5_scratch = unetr_scratch[1]
+    v5_nnunet = nnunet[1]
+    diff_scratch = v5_visreg - v5_scratch
+    diff_nnunet = v5_visreg - v5_nnunet
+    ax.annotate(
+        f"VisReg UNETR: {v5_visreg:.1f}%\n(+{diff_scratch:.1f}pp vs Scratch, +{diff_nnunet:.1f}pp vs nnU-Net)",
         xy=(1, v5_visreg),
-        xytext=(0.4, 73.0),
+        xytext=(0.4, 68.0),
         arrowprops={"facecolor": COLOR_UNETR_VISREG, "shrink": 0.08, "width": 1.4, "headwidth": 6},
         fontsize=9.5,
         fontweight="bold",
@@ -147,7 +189,7 @@ def plot_low_data_efficiency():
     ax.annotate(
         f"VisReg UNETR: {v10_visreg:.1f}%\n(#1 Overall at 10%)",
         xy=(2, v10_visreg),
-        xytext=(2.1, 54.0),
+        xytext=(2.1, 62.0),
         arrowprops={"facecolor": COLOR_UNETR_VISREG, "shrink": 0.08, "width": 1.2, "headwidth": 5},
         fontsize=9.0,
         fontweight="bold",
@@ -159,8 +201,8 @@ def plot_low_data_efficiency():
     ax.set_xticklabels([f"{f}%\n({v} vols)" for f, v in zip(fractions, volume_counts)])
     ax.set_xlabel("Annotated Training Volume Fraction (BraTS 2024 GLI Patient Scans)")
     ax.set_ylabel("Macro-Average 3D Test Dice Score (%) [WT/TC/ET]")
-    ax.set_ylim(0.0, 85.0)
-    ax.set_title("Low-Data Volumetric Label Efficiency (BraTS 2024 GLI Three-Region Protocol)")
+    ax.set_ylim(0.0, 75.0)
+    ax.set_title("Low-Data Volumetric Label Efficiency (BraTS 2024 GLI Protocol)")
     ax.legend(loc="lower right", frameon=True, framealpha=0.95, edgecolor="#cccccc", ncol=2)
 
     out_png = FIG_DIR / "low_data_label_efficiency.png"
@@ -178,12 +220,12 @@ def plot_scanner_shift_robustness():
     conditions = ["Clean\nBaseline", "3D Rician Noise\n" + r"($\sigma=0.08$)", r"3D $B_1$ Inhomogeneity" + "\n(quadratic)"]
 
     models_data = {
-        "3D nnU-Net": [78.23, 77.99, 78.25],
-        "3D Residual UNet": [75.15, 74.81, 74.49],
-        "3D VisReg UNETR (JEPA)": [74.46, 74.34, 73.32],
-        "3D ViT-UNETR (Scratch)": [73.84, 73.53, 72.99],
-        "3D VisReg JEPA (FPN)": [75.45, 74.93, 74.73],
-        "3D ViT-FPN (Scratch)": [73.91, 73.47, 73.17],
+        "3D nnU-Net": [69.04, 69.25, 68.62],
+        "3D Residual UNet": [65.03, 64.58, 64.02],
+        "3D VisReg UNETR (JEPA)": [68.56, 68.35, 67.95],
+        "3D ViT-UNETR (Scratch)": [67.30, 67.10, 67.48],
+        "3D VisReg JEPA (FPN)": [66.40, 66.40, 66.47],
+        "3D ViT-FPN (Scratch)": [65.37, 65.06, 65.98],
     }
 
     ood_csv = OUTPUTS_DIR / "ood_3d_summary.csv"
@@ -195,12 +237,29 @@ def plot_scanner_shift_robustness():
             b1_r = "B1 Bias Field Inhomogeneity"
 
             if clean_r in df.index and rician_r in df.index and b1_r in df.index:
-                models_data["3D nnU-Net"] = [safe_float(df.loc[r, "3D nnU-Net [mean]"]) for r in [clean_r, rician_r, b1_r]]
-                models_data["3D Residual UNet"] = [safe_float(df.loc[r, "3D UNet [mean]"]) for r in [clean_r, rician_r, b1_r]]
-                models_data["3D VisReg UNETR (JEPA)"] = [safe_float(df.loc[r, "3D VisReg JEPA (FPN) [unetr_hybrid] [mean]"]) for r in [clean_r, rician_r, b1_r]]
-                models_data["3D ViT-UNETR (Scratch)"] = [safe_float(df.loc[r, "3D ViT-UNETR (From Scratch) [mean]"]) for r in [clean_r, rician_r, b1_r]]
-                models_data["3D VisReg JEPA (FPN)"] = [safe_float(df.loc[r, "3D VisReg JEPA (FPN) [mean]"]) for r in [clean_r, rician_r, b1_r]]
-                models_data["3D ViT-FPN (Scratch)"] = [safe_float(df.loc[r, "3D ViT-FPN (From Scratch) [mean]"]) for r in [clean_r, rician_r, b1_r]]
+                col_nn = find_col(df, "nn", "mean") or find_col(df, "nnunet")
+                if col_nn:
+                    models_data["3D nnU-Net"] = [safe_float(df.loc[r, col_nn]) for r in [clean_r, rician_r, b1_r]]
+
+                col_u = find_col(df, "unet", "mean", exclude=["nn", "unetr"])
+                if col_u:
+                    models_data["3D Residual UNet"] = [safe_float(df.loc[r, col_u]) for r in [clean_r, rician_r, b1_r]]
+
+                col_uv = find_col(df, "visreg", "unetr", "mean", exclude=["frozen"]) or find_col(df, "visreg", "unetr", exclude=["frozen", "[wt", "[tc", "[et"])
+                if col_uv:
+                    models_data["3D VisReg UNETR (JEPA)"] = [safe_float(df.loc[r, col_uv]) for r in [clean_r, rician_r, b1_r]]
+
+                col_us = find_col(df, "scratch", "unetr", "mean") or find_col(df, "scratch", "unetr", exclude=["[wt", "[tc", "[et"]) or find_col(df, "from scratch", "unetr_hybrid")
+                if col_us:
+                    models_data["3D ViT-UNETR (Scratch)"] = [safe_float(df.loc[r, col_us]) for r in [clean_r, rician_r, b1_r]]
+
+                col_fv = find_col(df, "visreg", "fpn", "mean", exclude=["unetr", "frozen"])
+                if col_fv:
+                    models_data["3D VisReg JEPA (FPN)"] = [safe_float(df.loc[r, col_fv]) for r in [clean_r, rician_r, b1_r]]
+
+                col_fs = find_col(df, "scratch", "fpn", "mean", exclude=["unetr"])
+                if col_fs:
+                    models_data["3D ViT-FPN (Scratch)"] = [safe_float(df.loc[r, col_fs]) for r in [clean_r, rician_r, b1_r]]
         except Exception as e:
             print(f"Notice: using stored values for scanner shifts ({e})")
 
@@ -229,7 +288,7 @@ def plot_scanner_shift_robustness():
     ax.set_title("Volumetric Robustness Across Synthetic Scanner Shifts")
     ax.set_xticks(x)
     ax.set_xticklabels(conditions)
-    ax.set_ylim(50.0, 85.0)
+    ax.set_ylim(50.0, 75.0)
     ax.legend(loc="lower left", framealpha=0.95, ncol=2)
 
     plt.tight_layout()
@@ -252,12 +311,12 @@ def plot_missing_modality():
     ]
 
     models_data = {
-        "3D nnU-Net": [78.23, 56.25, 60.75],
-        "3D Residual UNet": [75.15, 46.74, 42.30],
-        "3D VisReg UNETR (JEPA)": [74.46, 9.67, 8.16],
-        "3D ViT-UNETR (Scratch)": [73.84, 5.86, 12.88],
-        "3D VisReg JEPA (FPN)": [75.45, 10.91, 7.88],
-        "3D ViT-FPN (Scratch)": [73.91, 8.16, 7.52],
+        "3D nnU-Net": [69.04, 39.79, 53.70],
+        "3D Residual UNet": [65.03, 37.80, 43.66],
+        "3D VisReg UNETR (JEPA)": [68.56, 44.61, 49.22],
+        "3D ViT-UNETR (Scratch)": [67.30, 40.32, 36.55],
+        "3D VisReg JEPA (FPN)": [66.40, 41.30, 42.45],
+        "3D ViT-FPN (Scratch)": [65.37, 39.16, 42.02],
     }
 
     ood_csv = OUTPUTS_DIR / "ood_3d_summary.csv"
@@ -269,12 +328,29 @@ def plot_missing_modality():
             t1c_r = "Missing Modalities: T1c Only"
 
             if clean_r in df.index and flair_r in df.index and t1c_r in df.index:
-                models_data["3D nnU-Net"] = [safe_float(df.loc[r, "3D nnU-Net [mean]"]) for r in [clean_r, flair_r, t1c_r]]
-                models_data["3D Residual UNet"] = [safe_float(df.loc[r, "3D UNet [mean]"]) for r in [clean_r, flair_r, t1c_r]]
-                models_data["3D VisReg UNETR (JEPA)"] = [safe_float(df.loc[r, "3D VisReg JEPA (FPN) [unetr_hybrid] [mean]"]) for r in [clean_r, flair_r, t1c_r]]
-                models_data["3D ViT-UNETR (Scratch)"] = [safe_float(df.loc[r, "3D ViT-UNETR (From Scratch) [mean]"]) for r in [clean_r, flair_r, t1c_r]]
-                models_data["3D VisReg JEPA (FPN)"] = [safe_float(df.loc[r, "3D VisReg JEPA (FPN) [mean]"]) for r in [clean_r, flair_r, t1c_r]]
-                models_data["3D ViT-FPN (Scratch)"] = [safe_float(df.loc[r, "3D ViT-FPN (From Scratch) [mean]"]) for r in [clean_r, flair_r, t1c_r]]
+                col_nn = find_col(df, "nn", "mean") or find_col(df, "nnunet")
+                if col_nn:
+                    models_data["3D nnU-Net"] = [safe_float(df.loc[r, col_nn]) for r in [clean_r, flair_r, t1c_r]]
+
+                col_u = find_col(df, "unet", "mean", exclude=["nn", "unetr"])
+                if col_u:
+                    models_data["3D Residual UNet"] = [safe_float(df.loc[r, col_u]) for r in [clean_r, flair_r, t1c_r]]
+
+                col_uv = find_col(df, "visreg", "unetr", "mean", exclude=["frozen"]) or find_col(df, "visreg", "unetr", exclude=["frozen", "[wt", "[tc", "[et"])
+                if col_uv:
+                    models_data["3D VisReg UNETR (JEPA)"] = [safe_float(df.loc[r, col_uv]) for r in [clean_r, flair_r, t1c_r]]
+
+                col_us = find_col(df, "scratch", "unetr", "mean") or find_col(df, "scratch", "unetr", exclude=["[wt", "[tc", "[et"]) or find_col(df, "from scratch", "unetr_hybrid")
+                if col_us:
+                    models_data["3D ViT-UNETR (Scratch)"] = [safe_float(df.loc[r, col_us]) for r in [clean_r, flair_r, t1c_r]]
+
+                col_fv = find_col(df, "visreg", "fpn", "mean", exclude=["unetr", "frozen"])
+                if col_fv:
+                    models_data["3D VisReg JEPA (FPN)"] = [safe_float(df.loc[r, col_fv]) for r in [clean_r, flair_r, t1c_r]]
+
+                col_fs = find_col(df, "scratch", "fpn", "mean", exclude=["unetr"])
+                if col_fs:
+                    models_data["3D ViT-FPN (Scratch)"] = [safe_float(df.loc[r, col_fs]) for r in [clean_r, flair_r, t1c_r]]
         except Exception as e:
             print(f"Notice: using stored values for missing modalities ({e})")
 
@@ -303,7 +379,7 @@ def plot_missing_modality():
     ax.set_title("Emergency Triage Under Missing MRI Pulse Sequences")
     ax.set_xticks(x)
     ax.set_xticklabels(scenarios)
-    ax.set_ylim(0.0, 85.0)
+    ax.set_ylim(0.0, 75.0)
     ax.legend(loc="upper right", framealpha=0.95, ncol=2)
 
     plt.tight_layout()
@@ -326,7 +402,7 @@ def plot_latent_geometry_and_probing():
     (A) Effective Rank (S^2) across encoders (dimensional non-collapse verification)
     (B) Full Fine-Tuning vs. Frozen Decoder Probing Test Dice (%)
     """
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10.5, 4.2))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10.8, 4.4))
 
     # Panel A: Effective Rank
     archs_erank = [
@@ -336,25 +412,25 @@ def plot_latent_geometry_and_probing():
         "VisReg\nFPN",
         "Pre-trained\nJEPA (Frozen)",
     ]
-    eranks = [27.51, 41.37, 46.20, 44.24, 45.08]
+    eranks = [30.95, 69.13, 46.38, 81.78, 67.71]
     erank_colors = [COLOR_UNETR_SCRATCH, COLOR_UNETR_VISREG, COLOR_FPN_SCRATCH, COLOR_FPN_VISREG, "#2b5c8f"]
 
     ax1.grid(True, linestyle="--", color="gray", alpha=0.3, zorder=0, axis="y")
     bars1 = ax1.bar(archs_erank, eranks, color=erank_colors, width=0.6, alpha=0.9, zorder=3)
     ax1.set_ylabel("Effective Spectral Rank ($S^2$)")
-    ax1.set_ylim(0, 60)
+    ax1.set_ylim(0, 100)
     ax1.set_title("(A) Latent Representation Capacity\n(Non-Collapse Verification, $D=384$)", fontsize=11, fontweight="bold")
 
     for bar in bars1:
         yval = bar.get_height()
         pct = (yval / 384.0) * 100
-        ax1.text(bar.get_x() + bar.get_width() / 2, yval + 1.2, f"{yval:.1f}\n({pct:.1f}%)", ha="center", va="bottom", fontsize=8.5)
+        ax1.text(bar.get_x() + bar.get_width() / 2, yval + 1.5, f"{yval:.1f}\n({pct:.1f}%)", ha="center", va="bottom", fontsize=8.5)
 
-    # Panel B: Full vs Frozen Probe Test Dice (60-epoch canonical benchmark with TTA, Table 1)
+    # Panel B: Full vs Frozen Probe Test Dice (60-epoch canonical benchmark, Table 1)
     probe_models = ["UNETR Hybrid", "MultiScale FPN"]
-    full_dice = [75.61, 76.58]
-    frozen_dice = [75.13, 72.31]
-    scratch_dice = [74.80, 75.15]
+    full_dice = [69.66, 67.05]
+    frozen_dice = [69.34, 63.18]
+    scratch_dice = [68.19, 66.13]
 
     xp = np.arange(len(probe_models))
     w = 0.24
@@ -367,14 +443,14 @@ def plot_latent_geometry_and_probing():
     ax2.set_ylabel("Macro-Average 3D Test Dice (%)")
     ax2.set_xticks(xp)
     ax2.set_xticklabels(probe_models, fontweight="bold")
-    ax2.set_ylim(60.0, 82.0)
+    ax2.set_ylim(55.0, 75.0)
     ax2.set_title("(B) Full Fine-Tuning vs. Frozen Probing\n(Representation Decodability without Updates)", fontsize=11, fontweight="bold")
     ax2.legend(loc="lower right", framealpha=0.95, fontsize=8.5)
 
     for i in range(len(probe_models)):
-        ax2.text(xp[i] - w, scratch_dice[i] + 0.6, f"{scratch_dice[i]:.1f}%", ha="center", fontsize=8.5)
-        ax2.text(xp[i], full_dice[i] + 0.6, f"{full_dice[i]:.1f}%", ha="center", fontsize=8.5, fontweight="bold")
-        ax2.text(xp[i] + w, frozen_dice[i] + 0.6, f"{frozen_dice[i]:.1f}%", ha="center", fontsize=8.5)
+        ax2.text(xp[i] - w, scratch_dice[i] + 0.5, f"{scratch_dice[i]:.1f}%", ha="center", fontsize=8.5)
+        ax2.text(xp[i], full_dice[i] + 0.5, f"{full_dice[i]:.1f}%", ha="center", fontsize=8.5, fontweight="bold")
+        ax2.text(xp[i] + w, frozen_dice[i] + 0.5, f"{frozen_dice[i]:.1f}%", ha="center", fontsize=8.5)
 
     plt.tight_layout()
     out_pdf = FIG_DIR / "latent_geometry_and_probing.pdf"
