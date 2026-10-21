@@ -145,14 +145,14 @@ def plot_low_data_efficiency():
     ax.grid(True, linestyle="--", color="gray", alpha=0.3, zorder=0)
 
     # Plot lines
-    ax.plot(x, nnunet, marker="s", color=COLOR_NNUNET, label="3D nnU-Net (DynUNet)", linewidth=2.2, zorder=5)
+    ax.plot(x, nnunet, marker="s", color=COLOR_NNUNET, label="3D nnU-Net", linewidth=2.2, zorder=5)
     ax.plot(x, unet, marker="^", color=COLOR_UNET, label="3D Residual UNet", linestyle="--", zorder=3)
-    ax.plot(x, unetr_visreg, marker="D", color=COLOR_UNETR_VISREG, label="3D VisReg JEPA (UNETR Hybrid)", linewidth=2.4, zorder=6)
-    ax.plot(x, unetr_scratch, marker="d", color=COLOR_UNETR_SCRATCH, label="3D ViT-UNETR (Scratch)", linestyle="--", zorder=3)
-    ax.plot(x, fpn_visreg, marker="o", color=COLOR_FPN_VISREG, label="3D VisReg JEPA (FPN)", linewidth=2.2, zorder=5)
-    ax.plot(x, fpn_scratch, marker="x", color=COLOR_FPN_SCRATCH, label="3D ViT-FPN (Scratch)", linestyle="--", zorder=2)
-    ax.plot(x, unetr_frozen, marker="*", color=COLOR_UNETR_FROZEN, label="3D VisReg UNETR (Frozen Probe)", linestyle=":", linewidth=2.0, zorder=4)
-    ax.plot(x, fpn_frozen, marker="P", color=COLOR_FPN_FROZEN, label="3D VisReg FPN (Frozen Probe)", linestyle=":", linewidth=1.8, zorder=3)
+    ax.plot(x, unetr_visreg, marker="D", color=COLOR_UNETR_VISREG, label="VisReg UNETR (Fine-tuned)", linewidth=2.4, zorder=6)
+    ax.plot(x, unetr_scratch, marker="d", color=COLOR_UNETR_SCRATCH, label="Scratch UNETR", linestyle="--", zorder=3)
+    ax.plot(x, fpn_visreg, marker="o", color=COLOR_FPN_VISREG, label="VisReg FPN (Fine-tuned)", linewidth=2.2, zorder=5)
+    ax.plot(x, fpn_scratch, marker="x", color=COLOR_FPN_SCRATCH, label="Scratch FPN", linestyle="--", zorder=2)
+    ax.plot(x, unetr_frozen, marker="*", color=COLOR_UNETR_FROZEN, label="Frozen UNETR", linestyle=":", linewidth=2.0, zorder=4)
+    ax.plot(x, fpn_frozen, marker="P", color=COLOR_FPN_FROZEN, label="Frozen FPN", linestyle=":", linewidth=1.8, zorder=3)
 
     # Callout annotation at 1% data (Index 0) - Frozen Probe Leading
     v1_frozen = unetr_frozen[0]
@@ -222,10 +222,10 @@ def plot_scanner_shift_robustness():
     models_data = {
         "3D nnU-Net": [69.04, 69.25, 68.62],
         "3D Residual UNet": [65.03, 64.58, 64.02],
-        "3D VisReg UNETR (JEPA)": [68.56, 68.35, 67.95],
-        "3D ViT-UNETR (Scratch)": [67.30, 67.10, 67.48],
-        "3D VisReg JEPA (FPN)": [66.40, 66.40, 66.47],
-        "3D ViT-FPN (Scratch)": [65.37, 65.06, 65.98],
+        "VisReg UNETR (Fine-tuned)": [68.56, 68.35, 67.95],
+        "Scratch UNETR": [67.30, 67.10, 67.48],
+        "VisReg FPN (Fine-tuned)": [66.40, 66.40, 66.47],
+        "Scratch FPN": [65.37, 65.06, 65.98],
     }
 
     ood_csv = OUTPUTS_DIR / "ood_3d_summary.csv"
@@ -247,19 +247,19 @@ def plot_scanner_shift_robustness():
 
                 col_uv = find_col(df, "visreg", "unetr", "mean", exclude=["frozen"]) or find_col(df, "visreg", "unetr", exclude=["frozen", "[wt", "[tc", "[et"])
                 if col_uv:
-                    models_data["3D VisReg UNETR (JEPA)"] = [safe_float(df.loc[r, col_uv]) for r in [clean_r, rician_r, b1_r]]
+                    models_data["VisReg UNETR (Fine-tuned)"] = [safe_float(df.loc[r, col_uv]) for r in [clean_r, rician_r, b1_r]]
 
                 col_us = find_col(df, "scratch", "unetr", "mean") or find_col(df, "scratch", "unetr", exclude=["[wt", "[tc", "[et"]) or find_col(df, "from scratch", "unetr_hybrid")
                 if col_us:
-                    models_data["3D ViT-UNETR (Scratch)"] = [safe_float(df.loc[r, col_us]) for r in [clean_r, rician_r, b1_r]]
+                    models_data["Scratch UNETR"] = [safe_float(df.loc[r, col_us]) for r in [clean_r, rician_r, b1_r]]
 
                 col_fv = find_col(df, "visreg", "fpn", "mean", exclude=["unetr", "frozen"])
                 if col_fv:
-                    models_data["3D VisReg JEPA (FPN)"] = [safe_float(df.loc[r, col_fv]) for r in [clean_r, rician_r, b1_r]]
+                    models_data["VisReg FPN (Fine-tuned)"] = [safe_float(df.loc[r, col_fv]) for r in [clean_r, rician_r, b1_r]]
 
                 col_fs = find_col(df, "scratch", "fpn", "mean", exclude=["unetr"])
                 if col_fs:
-                    models_data["3D ViT-FPN (Scratch)"] = [safe_float(df.loc[r, col_fs]) for r in [clean_r, rician_r, b1_r]]
+                    models_data["Scratch FPN"] = [safe_float(df.loc[r, col_fs]) for r in [clean_r, rician_r, b1_r]]
         except Exception as e:
             print(f"Notice: using stored values for scanner shifts ({e})")
 
@@ -313,10 +313,10 @@ def plot_missing_modality():
     models_data = {
         "3D nnU-Net": [69.04, 39.79, 53.70],
         "3D Residual UNet": [65.03, 37.80, 43.66],
-        "3D VisReg UNETR (JEPA)": [68.56, 44.61, 49.22],
-        "3D ViT-UNETR (Scratch)": [67.30, 40.32, 36.55],
-        "3D VisReg JEPA (FPN)": [66.40, 41.30, 42.45],
-        "3D ViT-FPN (Scratch)": [65.37, 39.16, 42.02],
+        "VisReg UNETR (Fine-tuned)": [68.56, 44.61, 49.22],
+        "Scratch UNETR": [67.30, 40.32, 36.55],
+        "VisReg FPN (Fine-tuned)": [66.40, 41.30, 42.45],
+        "Scratch FPN": [65.37, 39.16, 42.02],
     }
 
     ood_csv = OUTPUTS_DIR / "ood_3d_summary.csv"
@@ -338,19 +338,19 @@ def plot_missing_modality():
 
                 col_uv = find_col(df, "visreg", "unetr", "mean", exclude=["frozen"]) or find_col(df, "visreg", "unetr", exclude=["frozen", "[wt", "[tc", "[et"])
                 if col_uv:
-                    models_data["3D VisReg UNETR (JEPA)"] = [safe_float(df.loc[r, col_uv]) for r in [clean_r, flair_r, t1c_r]]
+                    models_data["VisReg UNETR (Fine-tuned)"] = [safe_float(df.loc[r, col_uv]) for r in [clean_r, flair_r, t1c_r]]
 
                 col_us = find_col(df, "scratch", "unetr", "mean") or find_col(df, "scratch", "unetr", exclude=["[wt", "[tc", "[et"]) or find_col(df, "from scratch", "unetr_hybrid")
                 if col_us:
-                    models_data["3D ViT-UNETR (Scratch)"] = [safe_float(df.loc[r, col_us]) for r in [clean_r, flair_r, t1c_r]]
+                    models_data["Scratch UNETR"] = [safe_float(df.loc[r, col_us]) for r in [clean_r, flair_r, t1c_r]]
 
                 col_fv = find_col(df, "visreg", "fpn", "mean", exclude=["unetr", "frozen"])
                 if col_fv:
-                    models_data["3D VisReg JEPA (FPN)"] = [safe_float(df.loc[r, col_fv]) for r in [clean_r, flair_r, t1c_r]]
+                    models_data["VisReg FPN (Fine-tuned)"] = [safe_float(df.loc[r, col_fv]) for r in [clean_r, flair_r, t1c_r]]
 
                 col_fs = find_col(df, "scratch", "fpn", "mean", exclude=["unetr"])
                 if col_fs:
-                    models_data["3D ViT-FPN (Scratch)"] = [safe_float(df.loc[r, col_fs]) for r in [clean_r, flair_r, t1c_r]]
+                    models_data["Scratch FPN"] = [safe_float(df.loc[r, col_fs]) for r in [clean_r, flair_r, t1c_r]]
         except Exception as e:
             print(f"Notice: using stored values for missing modalities ({e})")
 
@@ -427,7 +427,7 @@ def plot_latent_geometry_and_probing():
         ax1.text(bar.get_x() + bar.get_width() / 2, yval + 1.5, f"{yval:.1f}\n({pct:.1f}%)", ha="center", va="bottom", fontsize=8.5)
 
     # Panel B: Full vs Frozen Probe Test Dice (60-epoch canonical benchmark, Table 1)
-    probe_models = ["UNETR Hybrid", "MultiScale FPN"]
+    probe_models = ["UNETR", "FPN"]
     full_dice = [69.66, 67.05]
     frozen_dice = [69.34, 63.18]
     scratch_dice = [68.19, 66.13]

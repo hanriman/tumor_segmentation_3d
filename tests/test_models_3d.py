@@ -84,6 +84,7 @@ def test_jepa_predictor_3d():
 
 def test_sigreg_jepa_3d():
     assert SigRegJEPA3D is SingleEncoderJEPA3D
+    # Default mode uses auxiliary projector matching 200-epoch checkpoint
     model = SigRegJEPA3D(
         img_size=(128, 128, 128),
         patch_size=(16, 16, 16),
@@ -93,7 +94,7 @@ def test_sigreg_jepa_3d():
         predictor_depth=2,
         num_heads=6,
     )
-    assert not hasattr(model, "projector")
+    assert hasattr(model, "projector") and model.projector is not None
     images = torch.randn(2, 4, 128, 128, 128)
     context_indices = torch.randint(0, 512, (2, 192))
     target_indices_list = [
@@ -106,12 +107,28 @@ def test_sigreg_jepa_3d():
     assert "targets" in out
     assert len(out["predictions"]) == 2
     assert out["predictions"][0].shape == (2, 27, 384)
-    assert out["tissue_tokens"].shape == (2, 192, 384)
-    assert "projected_tokens" not in out
+    assert out["tissue_tokens"].shape == (2, 192, 128)
+    assert "projected_tokens" in out
+
+    # Explicit direct mode (without projector)
+    model_direct = SigRegJEPA3D(
+        img_size=(128, 128, 128),
+        patch_size=(16, 16, 16),
+        in_channels=4,
+        embed_dim=384,
+        encoder_depth=2,
+        predictor_depth=2,
+        num_heads=6,
+        use_projector=False,
+    )
+    assert model_direct.projector is None
+    out_dir = model_direct(images, context_indices, target_indices_list)
+    assert out_dir["tissue_tokens"].shape == (2, 192, 384)
 
 
 def test_visreg_jepa_3d():
     assert VisRegJEPA3D is SingleEncoderJEPA3D
+    # Default mode uses auxiliary projector matching 200-epoch checkpoint
     model = VisRegJEPA3D(
         img_size=(128, 128, 128),
         patch_size=(16, 16, 16),
@@ -121,7 +138,7 @@ def test_visreg_jepa_3d():
         predictor_depth=2,
         num_heads=6,
     )
-    assert not hasattr(model, "projector")
+    assert hasattr(model, "projector") and model.projector is not None
     images = torch.randn(2, 4, 128, 128, 128)
     context_indices = torch.randint(0, 512, (2, 192))
     target_indices_list = [
@@ -134,8 +151,8 @@ def test_visreg_jepa_3d():
     assert "targets" in out
     assert len(out["predictions"]) == 2
     assert out["predictions"][0].shape == (2, 27, 384)
-    assert out["tissue_tokens"].shape == (2, 192, 384)
-    assert "projected_tokens" not in out
+    assert out["tissue_tokens"].shape == (2, 192, 128)
+    assert "projected_tokens" in out
 
 
 def test_jepa_predictor_forward_multi_targets():
@@ -169,7 +186,8 @@ def test_jepa_predictor_forward_multi_targets():
 
 
 def test_single_encoder_jepa_3d():
-    """Verify SingleEncoderJEPA3D architecture and forward pass in encoder space."""
+    """Verify SingleEncoderJEPA3D architecture and forward pass in both projector and direct modes."""
+    # 1. Projector mode (default, matching 200-epoch checkpoint)
     model = SingleEncoderJEPA3D(
         img_size=(64, 64, 64),
         patch_size=(16, 16, 16),
@@ -179,8 +197,9 @@ def test_single_encoder_jepa_3d():
         predictor_depth=2,
         predictor_embed_dim=32,
         num_heads=2,
+        proj_dim=128,
     )
-    assert not hasattr(model, "projector")
+    assert hasattr(model, "projector") and model.projector is not None
     images = torch.randn(2, 4, 64, 64, 64)
     context_indices = torch.randint(0, 64, (2, 24))
     target_indices_list = [torch.randint(0, 64, (2, 8)), torch.randint(0, 64, (2, 4))]
@@ -188,10 +207,26 @@ def test_single_encoder_jepa_3d():
     out = model(images, context_indices, target_indices_list)
     assert len(out["predictions"]) == 2
     assert len(out["targets"]) == 2
-    assert out["tissue_tokens"].shape == (2, 24, 64)
-    assert "projected_tokens" not in out
+    assert out["tissue_tokens"].shape == (2, 24, 128)
+    assert "projected_tokens" in out
     assert out["predictions"][0].shape == (2, 8, 64)
     assert out["predictions"][1].shape == (2, 4, 64)
+
+    # 2. Direct mode (without projector)
+    model_direct = SingleEncoderJEPA3D(
+        img_size=(64, 64, 64),
+        patch_size=(16, 16, 16),
+        in_channels=4,
+        embed_dim=64,
+        encoder_depth=2,
+        predictor_depth=2,
+        predictor_embed_dim=32,
+        num_heads=2,
+        use_projector=False,
+    )
+    assert model_direct.projector is None
+    out_dir = model_direct(images, context_indices, target_indices_list)
+    assert out_dir["tissue_tokens"].shape == (2, 24, 64)
 
 
 def test_ema_cosine_momentum_schedule_and_smoke_test():

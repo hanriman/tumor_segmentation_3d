@@ -77,7 +77,7 @@ def test_low_data_flags():
     a = m.parse_args()
     assert a.decoder_type == "multiscale" and a.loss_type == "dice_bce" and a.tta is False
     assert a.deep_supervision is True
-    assert a.min_steps == 250
+    assert a.min_steps == 0
     sys.argv = ["x", "--decoder_type", "unetr_hybrid", "--loss_type", "tversky", "--tta", "--no_deep_supervision", "--min_steps", "500"]
     a = m.parse_args()
     assert a.decoder_type == "unetr_hybrid" and a.loss_type == "tversky" and a.tta is True

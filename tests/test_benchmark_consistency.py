@@ -37,9 +37,9 @@ def test_low_data_csv_exists_and_valid():
         "3D nnU-Net [mean]",
         "3D UNet [mean]",
         "3D VisReg JEPA (FPN) [mean]",
-        "3D VisReg JEPA (FPN) [unetr_hybrid] [mean]",
+        "3D VisReg JEPA (UNETR) [mean]",
         "3D ViT-FPN (From Scratch) [mean]",
-        "3D ViT-FPN (From Scratch) [unetr_hybrid] [mean]",
+        "3D ViT-UNETR (From Scratch) [mean]",
     ]
     for col in critical_cols:
         assert col in df.columns, f"Missing critical column {col}"
@@ -63,12 +63,12 @@ def test_latex_table2_matches_csv():
 
     # Map LaTeX table model rows to CSV column names
     model_mapping = {
-        "3D nnU-Net Baseline (DynUNet)": "3D nnU-Net [mean]",
-        "3D Residual UNet Baseline": "3D UNet [mean]",
-        "3D ViT-UNETR Hybrid (Scratch)": "3D ViT-FPN (From Scratch) [unetr_hybrid] [mean]",
-        "3D VisReg JEPA (UNETR Hybrid)": "3D VisReg JEPA (FPN) [unetr_hybrid] [mean]",
-        "3D ViT-FPN (From Scratch)": "3D ViT-FPN (From Scratch) [mean]",
-        "3D VisReg JEPA (Multiscale FPN)": "3D VisReg JEPA (FPN) [mean]",
+        "3D nnU-Net": "3D nnU-Net [mean]",
+        "3D Residual UNet": "3D UNet [mean]",
+        "Scratch UNETR": "3D ViT-UNETR (From Scratch) [mean]",
+        "VisReg UNETR": "3D VisReg JEPA (UNETR) [mean]",
+        "Scratch FPN": "3D ViT-FPN (From Scratch) [mean]",
+        "VisReg FPN": "3D VisReg JEPA (FPN) [mean]",
     }
 
     fractions = ["1.0%", "5.0%", "10.0%", "25.0%", "50.0%", "100.0%"]
@@ -105,11 +105,11 @@ def test_docs03_matches_benchmark():
     assert "+25.21" not in docs_content, "Old +25.21pp delta claim still present in docs/03"
 
     # Assert correct canonical numbers are present
-    assert "63.65%" in docs_content, "VisReg UNETR 5% score 63.65% missing from docs/03"
-    assert "56.57%" in docs_content, "ViT-UNETR Scratch 5% score 56.57% missing from docs/03"
-    assert "+7.08" in docs_content, "+7.08pp JEPA gain missing from docs/03"
-    assert "75.13%" in docs_content, "Frozen UNETR score 75.13% missing from docs/03"
-    assert "79.50%" in docs_content, "3D nnU-Net score 79.50% missing from docs/03"
+    assert "54.45%" in docs_content, "VisReg UNETR 5% score 54.45% missing from docs/03"
+    assert "49.79%" in docs_content, "ViT-UNETR Scratch 5% score 49.79% missing from docs/03"
+    assert "+4.66" in docs_content, "+4.66pp JEPA gain missing from docs/03"
+    assert "69.34%" in docs_content, "Frozen UNETR score 69.34% missing from docs/03"
+    assert "70.86%" in docs_content, "3D nnU-Net score 70.86% missing from docs/03"
 
 
 def test_low_data_volume_counts_consistent():
@@ -140,12 +140,12 @@ def test_latex_table1_matches_master_csv():
     table_text = table_match.group(1)
 
     models = [
-        ("3D nnU-Net (DynUNet)", "3D nnU-Net (DynUNet)"),
+        ("3D nnU-Net", "3D nnU-Net (DynUNet)"),
         ("3D Residual UNet", "3D Residual UNet"),
-        ("3D ViT-UNETR Hybrid (Scratch)", "3D ViT-FPN (From Scratch) [unetr_hybrid]"),
-        ("3D VisReg JEPA (UNETR Hybrid)", "3D VisReg JEPA (FPN) [unetr_hybrid]"),
-        ("3D ViT-FPN (From Scratch)", "3D ViT-FPN (From Scratch)"),
-        ("3D VisReg JEPA (Multiscale FPN)", "3D VisReg JEPA (FPN)"),
+        ("Scratch UNETR", "3D ViT-FPN (From Scratch) [unetr_hybrid]"),
+        ("VisReg UNETR", "3D VisReg JEPA (UNETR)"),
+        ("Scratch FPN", "3D ViT-FPN (From Scratch)"),
+        ("VisReg FPN", "3D VisReg JEPA (FPN)"),
     ]
 
     for tex_name, csv_prefix in models:
@@ -192,7 +192,7 @@ def test_latex_table3_and_4_match_ood_csv():
     table3_text = table3_match.group(1)
 
     # Clean Baseline nnU-Net
-    match3 = re.search(r"Clean Baseline\s*&\s*3D nnU-Net Baseline\s*&(.*?)\\\\\s*$", table3_text, re.MULTILINE)
+    match3 = re.search(r"Clean Baseline\s*&\s*3D nnU-Net\s*&(.*?)\\\\\s*$", table3_text, re.MULTILINE)
     assert match3 is not None
     cells3 = match3.group(1).split("&")
     mean_val = float(re.search(r"(\d+\.\d+)", cells3[3]).group(1))
@@ -209,7 +209,7 @@ def test_latex_table3_and_4_match_ood_csv():
     table4_text = table4_match.group(1)
 
     # FLAIR Only nnU-Net
-    match4 = re.search(r"FLAIR Only.*?&\s*3D nnU-Net Baseline\s*&(.*?)\\\\\s*$", table4_text, re.MULTILINE)
+    match4 = re.search(r"FLAIR Only.*?&\s*3D nnU-Net\s*&(.*?)\\\\\s*$", table4_text, re.MULTILINE)
     assert match4 is not None
     cells4 = match4.group(1).split("&")
     flair_wt = float(re.search(r"(\d+\.\d+)", cells4[0]).group(1))
@@ -224,9 +224,9 @@ def test_readme_tables_match_csvs():
     readme_text = readme_path.read_text(encoding="utf-8")
 
     # 1. Verify README §6.1 reports regional HD95 (voxels) from master_3d_benchmark.csv
-    assert "5.63 / 4.64 / 10.34" in readme_text, "README §6.1 missing nnU-Net WT/TC/ET HD95 (voxels)"
-    assert "6.58 / 7.54 / 14.72" in readme_text, "README §6.1 missing VisReg FPN WT/TC/ET HD95 (voxels)"
-    assert "5.71 / 7.13 / 22.05" in readme_text, "README §6.1 missing VisReg UNETR WT/TC/ET HD95 (voxels)"
+    assert "5.28 / 11.66 / 11.12" in readme_text, "README §6.1 missing nnU-Net WT/TC/ET HD95 (voxels)"
+    assert "6.07 / 44.43 / 44.10" in readme_text, "README §6.1 missing VisReg FPN WT/TC/ET HD95 (voxels)"
+    assert "5.70 / 39.29 / 38.82" in readme_text, "README §6.1 missing VisReg UNETR WT/TC/ET HD95 (voxels)"
     assert "6.88 ± 6.42" not in readme_text, "Fabricated HD95 '6.88 ± 6.42' still present in README.md"
 
     # 2. Verify README §6.2 low-data table matches low_data_3d_summary.csv
@@ -249,7 +249,7 @@ def test_paper_hyperparameters_consistent():
     assert "10-epoch linear warmup" in tex_content, "Paper should report 10-epoch linear warmup"
     assert r"\max(2, \lfloor 0.25 \times \text{vol} \rfloor)" in tex_content, "Paper §3.2 should report 0.25 tissue occupancy threshold"
     assert "merely $75$ total gradient updates" in tex_content, "Paper §5.2 should report 75 gradient updates at 1% (batch_size=4)"
-    assert r"Scratch FPN: $\text{erank}=46.20$ [$12.0\%$]" in tex_content, "Paper should report Scratch FPN Effective Rank 46.20 (12.0%)"
+    assert r"Scratch FPN: $\text{erank}=46.38$ [$12.1\%$]" in tex_content, "Paper should report Scratch FPN Effective Rank 46.38 (12.1%)"
 
 
 

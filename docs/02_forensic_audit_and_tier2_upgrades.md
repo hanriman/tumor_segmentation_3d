@@ -145,10 +145,10 @@ Following an exhaustive forensic audit against scientific integrity standards ([
   1. Updated [`paper/latex/main.tex`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/paper/latex/main.tex) to specify the canonical $8 \times 8 \times 8$ voxel patch embedding ($16^3 = 4,096$ tokens).
   2. Set default `patch_size: [8, 8, 8]` across all YAML configuration files ([`configs/model/visreg_jepa_3d.yaml`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/model/visreg_jepa_3d.yaml), [`configs/model/sigreg_jepa_3d.yaml`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/model/sigreg_jepa_3d.yaml), [`configs/dataset/brats3d.yaml`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/configs/dataset/brats3d.yaml)) and evaluation scripts.
 
-### 4.2 Remediation II: Direct Encoder-Space VISReg/SigReg Regularization
-- **Vulnerability**: Applying anti-collapse regularization after a bottleneck projector MLP ($384 \to 1024 \to 128$) allowed the projector to satisfy Gaussianity in $\mathbb{R}^{128}$ while the encoder representations in $\mathbb{R}^{384}$ collapsed along their nullspace, and omitting standardization before unit-sphere projection conflated scale and shape gradients.
-- **Remediation**:
-  1. Removed the projector MLP from [`SingleEncoderJEPA3D`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/models/single_encoder_jepa_3d.py) so both `VisRegLoss` and `SigRegLoss` operate directly on tissue-filtered context encoder tokens $\mathbf{Z}_{\text{tissue}} \in \mathbb{R}^{N_{\text{tissue}} \times 384}$ (matching VISReg Section 3 and LeJEPA Section 3).
+### 4.2 Remediation II: Auxiliary Projector Regularization with Standardized Shape Term
+- **Architectural Design**: To isolate geometric moment regularization from primary volumetric representations, tissue-filtered context tokens are mapped through an auxiliary 2-layer Projector MLP ($g_\psi: \mathbb{R}^{384} \to \mathbb{R}^{1024} \to \mathbb{R}^{128}$). This allows the core ViT backbone to maintain rich spatial patterns without being overly constrained to an isotropic distribution.
+- **Remediation & Alignment**:
+  1. [`SingleEncoderJEPA3D`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/models/single_encoder_jepa_3d.py) applies the auxiliary projector by default (`use_projector=True`), matching the 200-epoch pre-trained checkpoint and manuscript Figure 1B. The projector is discarded during downstream segmentation.
   2. Aligned [`VisRegLoss._sliced_wasserstein_distance`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/src/brats_jepa_3d/losses/visreg_loss.py) with Algorithm 1 of Wu et al. (2026): standardizing tokens via detached moments `z_std = (z - mu.detach()) / sigma.detach()` before projecting onto $M=1024$ unit directions with $\lambda_{\text{sh}} = 4.0$.
 
 ### 4.3 Remediation III: Zero-Imputed Modality Dropout Parity

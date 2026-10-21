@@ -10,22 +10,22 @@ On the **BraTS 2024 GLI** benchmark under the official three-region protocol (**
 
 | Model Architecture | Encoder Backbone | Decoder Type | Mean Dice (WT/TC/ET) | WT Dice | TC Dice | ET Dice | 5% Low-Data Mean Dice | 1% Low-Data Mean Dice | Latency (128³) |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **3D nnU-Net** | DynUNet CNN | Deep Supervised | **79.50%** | **88.38%** | **82.20%** | **67.92%** | 59.86% | **28.05%** | 1066.39 ms |
-| **3D Residual UNet** | ResUNet CNN | Residual 3D | 76.67% | 86.45% | 79.13% | 64.42% | 52.65% | 5.86% | **546.94 ms** |
-| **3D VisReg JEPA (FPN)** | 3D ViT (JEPA Pretrained) | Multi-Scale FPN | 76.58% | 86.13% | 77.62% | 65.99% | 61.45% | 22.45% | 1373.54 ms |
-| **3D VisReg UNETR** | 3D ViT (JEPA Pretrained) | UNETR Hybrid | 75.61% | 87.19% | 77.79% | 61.84% | **63.65%** *(Top Result)* | 2.91% | 1331.60 ms |
-| **3D ViT-FPN (Scratch)** | 3D ViT (From Scratch) | Multi-Scale FPN | 75.15% | 86.07% | 76.77% | 62.62% | 50.87% | 16.70% | 1274.80 ms |
-| **3D ViT-UNETR (Scratch)** | 3D ViT (From Scratch) | UNETR Hybrid | 74.80% | 86.62% | 76.88% | 60.90% | 56.57% | 3.17% | 1340.05 ms |
-| **3D VisReg UNETR (Frozen)** | 3D ViT (JEPA Pretrained & Frozen) | UNETR Hybrid | 75.13% | 85.72% | 77.09% | 62.59% | 61.12% | 2.71% | 1354.73 ms |
-| **3D VisReg FPN (Frozen)** | 3D ViT (JEPA Pretrained & Frozen) | Multi-Scale FPN | 72.31% | 84.79% | 71.97% | 60.18% | 57.22% | 20.74% | 1187.20 ms |
+| **3D nnU-Net** | DynUNet CNN | Deep Supervised | **70.86%** | **84.47%** | **64.35%** | **63.76%** | 47.06% | 20.69% | 1089.66 ms |
+| **3D Residual UNet** | ResUNet CNN | Residual 3D | 65.83% | 81.99% | 57.87% | 57.64% | 43.92% | 4.29% | **488.82 ms** |
+| **3D VisReg JEPA (FPN)** | 3D ViT (JEPA Pretrained) | Multi-Scale FPN | 67.05% | 82.38% | 59.63% | 59.15% | 51.67% | 25.99% | 1274.80 ms |
+| **3D VisReg UNETR** | 3D ViT (JEPA Pretrained) | UNETR Hybrid | 69.66% | 84.11% | 62.56% | 62.30% | **54.45%** *(Top Result)* | 32.69% | 1347.52 ms |
+| **3D ViT-FPN (Scratch)** | 3D ViT (From Scratch) | Multi-Scale FPN | 66.13% | 81.27% | 58.84% | 58.29% | 41.53% | 23.11% | 1181.68 ms |
+| **3D ViT-UNETR (Scratch)** | 3D ViT (From Scratch) | UNETR Hybrid | 68.19% | 82.66% | 61.10% | 60.80% | 49.79% | 32.70% | 1343.26 ms |
+| **3D VisReg UNETR (Frozen)** | 3D ViT (JEPA Pretrained & Frozen) | UNETR Hybrid | 69.34% | 83.29% | 62.38% | 62.35% | 50.75% | **34.32%** | 1446.23 ms |
+| **3D VisReg FPN (Frozen)** | 3D ViT (JEPA Pretrained & Frozen) | Multi-Scale FPN | 63.18% | 80.39% | 54.84% | 54.31% | 50.58% | 22.43% | 1629.77 ms |
 
 ### Key Scientific Takeaways ([`AGENTS.md`](../AGENTS.md)):
-1. **Full Data Regime**: Supervised 3D CNNs achieve the highest overall Dice (nnU-Net: $79.50\%$, ResUNet: $76.67\%$), followed closely by VisReg FPN ($76.58\%$) and VisReg UNETR ($75.61\%$), confirming that localized 3D convolutional inductive biases remain superior for volumetric dense prediction when annotations are abundant.
-2. **Decisive Low-Data Pre-Training Advantage ($5\%$ & $10\%$ Data)**: At $5\%$ data ($58$ volumes), 3D VisReg UNETR achieves the top performance across the entire benchmark ($\mathbf{63.65\%}$ mean Dice), outperforming matched from-scratch ViT-UNETR ($56.57\%$, $\mathbf{+7.08\text{pp}}$ JEPA gain), deeply supervised 3D nnU-Net ($59.86\%$, $\mathbf{+3.79\text{pp}}$), and 3D Residual UNet ($52.65\%$, $\mathbf{+11.00\text{pp}}$). VisReg FPN similarly achieves $\mathbf{61.45\%}$ ($\mathbf{+10.58\text{pp}}$ over Scratch FPN $50.87\%$). At $10\%$ data ($115$ volumes), VisReg UNETR retains the top rank overall ($\mathbf{66.16\%}$ vs. nnU-Net $65.03\%$).
+1. **Full Data Regime**: Supervised 3D CNNs achieve the highest overall Dice (nnU-Net: $70.86\%$), followed closely by VisReg UNETR ($69.66\%$) and Scratch UNETR ($68.19\%$), while ResUNet achieves $65.83\%$.
+2. **Decisive Low-Data Pre-Training Advantage ($5\%$ & $10\%$ Data)**: At $5\%$ data ($58$ volumes), 3D VisReg UNETR achieves the top performance across the entire benchmark ($\mathbf{54.45\%}$ mean Dice), outperforming matched from-scratch ViT-UNETR ($49.79\%$, $\mathbf{+4.66\text{pp}}$ JEPA gain), deeply supervised 3D nnU-Net ($47.06\%$, $\mathbf{+7.39\text{pp}}$), and 3D Residual UNet ($43.92\%$, $\mathbf{+10.53\text{pp}}$). VisReg FPN similarly achieves $\mathbf{51.67\%}$ ($\mathbf{+10.14\text{pp}}$ over Scratch FPN $41.53\%$). At $10\%$ data ($115$ volumes), VisReg UNETR retains the top rank overall ($\mathbf{57.68\%}$ vs. nnU-Net $50.66\%$ and Scratch UNETR $52.60\%$).
 3. **Decodability of Frozen Representations (Pure Latent vs. Hybrid Probing)**: Completely freezing the ViT backbone (`freeze_encoder=True`) demonstrates that 3D VisReg JEPA pre-training discovers spatially organized anatomical representations without backpropagation into the transformer:
-   - **Pure Latent Probe (ViT-FPN: $72.31\%$ Mean Dice)**: Decodes solely from extracted transformer latents without any raw-image bypass, establishing multi-scale spatial decodability of the frozen self-supervised manifold.
-   - **Frozen Hybrid Probe (ViT-UNETR: $75.13\%$ Mean Dice)**: Combines frozen transformer latents with a lightweight trainable convolutional stem operating on raw inputs, reaching within $0.48\text{pp}$ of full fine-tuning ($75.61\%$) and exceeding fully trained from-scratch ViT-UNETR ($74.80\%$), highlighting architectural complementarity.
-4. **Extreme Scarcity Bifurcation ($1\%$ Data / 12 Volumes)**: The lightweight MultiScale FPN decoder retains $22.45\%$ mean Dice ($20.74\%$ frozen) outperforming from-scratch FPN ($16.70\%$) and standard Residual UNet ($5.86\%$), while high-capacity UNETR without deep supervision struggles ($2.7\text{--}3.2\%$). Deeply supervised nnU-Net maintains $28.05\%$ due to multi-scale auxiliary gradient injection.
+   - **Pure Latent Probe (ViT-FPN: $63.18\%$ Mean Dice)**: Decodes solely from extracted transformer latents without any raw-image bypass ($80.39\%$ WT), establishing multi-scale spatial decodability of the frozen self-supervised manifold.
+   - **Frozen Hybrid Probe (ViT-UNETR: $69.34\%$ Mean Dice)**: Combines frozen transformer latents with a lightweight trainable convolutional stem operating on raw inputs, reaching within $0.32\text{pp}$ of full fine-tuning ($69.66\%$) and exceeding fully trained from-scratch ViT-UNETR ($68.19\%$), highlighting architectural synergy between global latents and local edge priors.
+4. **Extreme Scarcity Bifurcation ($1\%$ Data / 12 Volumes)**: The frozen UNETR probe retains $34.32\%$ mean Dice outperforming deeply supervised nnU-Net ($20.69\%$) and standard Residual UNet ($4.29\%$), while fine-tuned UNETRs achieve $32.69\%\text{--}32.70\%$. Residual UNet collapses to $4.29\%$ due to gradient starvation under the 25-epoch budget ($75\text{--}150$ updates).
 
 ---
 
