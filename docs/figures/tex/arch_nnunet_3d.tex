@@ -1,0 +1,342 @@
+
+\documentclass[border=15pt, multi, tikz]{standalone} 
+\usepackage{import}
+\subimport{/Users/hanriman/Documents/master/thesis/thesis_3d/tools/PlotNeuralNet/layers/}{init}
+\usetikzlibrary{positioning}
+\usetikzlibrary{3d}
+\usetikzlibrary{arrows.meta}
+\usetikzlibrary{decorations.pathreplacing}
+\usetikzlibrary{calc}
+
+% Authentic PlotNeuralNet Palette - Simple, Cohesive, Publication-Standard
+\def\ConvColor{rgb:yellow,5;red,2.5;white,5}           % Warm Cream/Ochre for Convolutions
+\def\ConvReluColor{rgb:yellow,5;red,5;white,5}         % Deeper Ochre for Conv+Norm+GELU band
+\def\PoolColor{rgb:red,1;black,0.3}                    % Dark Wine/Brick Red for Downsampling/Stem
+\def\UnpoolColor{rgb:blue,5;green,2.5;white,5}         % Soft Sky Blue for Transposed Convolutions
+\def\DcnvColor{rgb:blue,5;green,2.5;white,5}           % Soft Sky Blue alias
+\def\SoftmaxColor{rgb:magenta,5;black,7}               % Deep Plum/Purple for Output Heads
+\def\SumColor{rgb:blue,5;green,15}                     % Soft Sage/Teal for Fusion & Skips
+\def\ViTColor{rgb:yellow,6;red,2;white,3}              % Soft Amber for Vision Transformer Blocks
+\def\PredColor{rgb:red,4;yellow,4;white,3}             % Harmonized Coral/Sand for JEPA Predictor
+\def\ProjColor{rgb:green,4;blue,3;white,2}             % Harmonized Sage for Auxiliary Projector
+\def\DsColor{rgb:magenta,5;black,7}                    % Matching Plum for Deep Supervision Heads
+\def\StemColor{rgb:red,1;black,0.3}                    % Matching Wine Red for Native Stem
+\def\InputColor{rgb:cyan,1;white,9}                    % Very Pale Subtle Ice Blue for Input Volume
+\def\LossColor{rgb:red,4;black,2}                      % Subtle Crimson Red for Loss Terms
+\def\MaskColor{rgb:gray,4;black,4}                     % Dark Gray for Mask Tokens
+
+\newcommand{\copymidarrow}{\tikz \draw[-Stealth,line width=0.8mm,draw={rgb:blue,4;red,1;green,1;black,3}] (-0.3,0) -- ++(0.3,0);}
+\newcommand{\dsmidarrow}{\tikz \draw[-Stealth,line width=0.8mm,draw={rgb:magenta,5;black,7}] (-0.3,0) -- ++(0.3,0);}
+
+\begin{document}
+\begin{tikzpicture}
+\tikzstyle{connection}=[ultra thick,every node/.style={sloped,allow upside down},draw=\edgecolor,opacity=0.7]
+\tikzstyle{copyconnection}=[ultra thick,every node/.style={sloped,allow upside down},draw={rgb:blue,4;red,1;green,1;black,3},opacity=0.75]
+\tikzstyle{dsconnection}=[ultra thick,dashed,every node/.style={sloped,allow upside down},draw={rgb:magenta,5;black,7},opacity=0.85]
+
+\pic[shift={(0,0,0)}] at (0,0,0) 
+    {Box={
+        name=input_vol,
+        caption={Input MRI (4x128)},
+        xlabel={{4, }},
+        zlabel=128,
+        fill=\InputColor,
+        opacity=0.85,
+        height=36,
+        width=2.0,
+        depth=36
+        }
+    };
+
+\pic[shift={(2.0, 0, 0)}] at (input_vol-east) 
+    {RightBandedBox={
+        name=enc0,
+        caption={Stage 0 (32ch)},
+        xlabel={{32, 32}},
+        zlabel=128,
+        fill=\ConvColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=36,
+        width={ 2.0 , 2.0 },
+        depth=36
+        }
+    };
+
+\draw [connection]  (input_vol-east)    -- node {\midarrow} (enc0-west);
+
+\pic[shift={(1.8, 0, 0)}] at (enc0-east) 
+    {RightBandedBox={
+        name=enc1,
+        caption={Stage 1 (64ch)},
+        xlabel={{64, 64}},
+        zlabel=64,
+        fill=\ConvColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=28,
+        width={ 2.5 , 2.5 },
+        depth=28
+        }
+    };
+
+\draw [connection]  (enc0-east)    -- node {\midarrow} (enc1-west);
+
+\pic[shift={(1.8, 0, 0)}] at (enc1-east) 
+    {RightBandedBox={
+        name=enc2,
+        caption={Stage 2 (128ch)},
+        xlabel={{128, 128}},
+        zlabel=32,
+        fill=\ConvColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=20,
+        width={ 3.0 , 3.0 },
+        depth=20
+        }
+    };
+
+\draw [connection]  (enc1-east)    -- node {\midarrow} (enc2-west);
+
+\pic[shift={(1.8, 0, 0)}] at (enc2-east) 
+    {RightBandedBox={
+        name=enc3,
+        caption={Stage 3 (256ch)},
+        xlabel={{256, 256}},
+        zlabel=16,
+        fill=\ConvColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=14,
+        width={ 3.5 , 3.5 },
+        depth=14
+        }
+    };
+
+\draw [connection]  (enc2-east)    -- node {\midarrow} (enc3-west);
+
+\pic[shift={(1.8, 0, 0)}] at (enc3-east) 
+    {RightBandedBox={
+        name=bottleneck,
+        caption={Bottleneck (320ch)},
+        xlabel={{320, 320}},
+        zlabel=8,
+        fill=\ConvColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=8,
+        width={ 4.0 , 4.0 },
+        depth=8
+        }
+    };
+
+\draw [connection]  (enc3-east)    -- node {\midarrow} (bottleneck-west);
+
+\pic[shift={(1.8, 0, 0)}] at (bottleneck-east) 
+    {Box={
+        name=up3,
+        caption={},
+        fill=\UnpoolColor,
+        opacity=0.85,
+        height=14,
+        width=1.2,
+        depth=14
+        }
+    };
+
+\draw [connection]  (bottleneck-east)    -- node {\midarrow} (up3-west);
+
+\pic[shift={(0, 0, 0)}] at (up3-east) 
+    {RightBandedBox={
+        name=dec3,
+        caption={Dec 3 (256ch)},
+        xlabel={{256, 256}},
+        zlabel=16,
+        fill=\ConvColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=14,
+        width={ 3.5 , 3.5 },
+        depth=14
+        }
+    };
+
+\path (dec3-south)  -- (dec3-north)  coordinate[pos=1.25] (enc3_dec3_top) ;
+\coordinate (enc3_top_dec3) at (enc3-northeast |- enc3_dec3_top) ;
+\draw [copyconnection]  (enc3-northeast)  
+-- node {\copymidarrow} (enc3_top_dec3)
+-- node {\copymidarrow} (enc3_dec3_top)
+-- node {\copymidarrow} (dec3-north);
+
+\pic[shift={(0, -2.5, 0)}] at (dec3-south) 
+    {Box={
+        name=ds3_head,
+        caption={DS Head 3 (16)},
+        xlabel={{5, }},
+        zlabel=16,
+        fill=\DsColor,
+        opacity=0.85,
+        height=9,
+        width=2.0,
+        depth=9
+        }
+    };
+\draw [dsconnection] (dec3-south) -- node {\dsmidarrow} (ds3_head-north);
+
+\pic[shift={(1.8, 0, 0)}] at (dec3-east) 
+    {Box={
+        name=up2,
+        caption={},
+        fill=\UnpoolColor,
+        opacity=0.85,
+        height=20,
+        width=1.2,
+        depth=20
+        }
+    };
+
+\draw [connection]  (dec3-east)    -- node {\midarrow} (up2-west);
+
+\pic[shift={(0, 0, 0)}] at (up2-east) 
+    {RightBandedBox={
+        name=dec2,
+        caption={Dec 2 (128ch)},
+        xlabel={{128, 128}},
+        zlabel=32,
+        fill=\ConvColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=20,
+        width={ 3.0 , 3.0 },
+        depth=20
+        }
+    };
+
+\path (dec2-south)  -- (dec2-north)  coordinate[pos=1.25] (enc2_dec2_top) ;
+\coordinate (enc2_top_dec2) at (enc2-northeast |- enc2_dec2_top) ;
+\draw [copyconnection]  (enc2-northeast)  
+-- node {\copymidarrow} (enc2_top_dec2)
+-- node {\copymidarrow} (enc2_dec2_top)
+-- node {\copymidarrow} (dec2-north);
+
+\pic[shift={(0, -3.2, 0)}] at (dec2-south) 
+    {Box={
+        name=ds2_head,
+        caption={DS Head 2 (32)},
+        xlabel={{5, }},
+        zlabel=32,
+        fill=\DsColor,
+        opacity=0.85,
+        height=12,
+        width=2.0,
+        depth=12
+        }
+    };
+\draw [dsconnection] (dec2-south) -- node {\dsmidarrow} (ds2_head-north);
+
+\pic[shift={(1.8, 0, 0)}] at (dec2-east) 
+    {Box={
+        name=up1,
+        caption={},
+        fill=\UnpoolColor,
+        opacity=0.85,
+        height=28,
+        width=1.2,
+        depth=28
+        }
+    };
+
+\draw [connection]  (dec2-east)    -- node {\midarrow} (up1-west);
+
+\pic[shift={(0, 0, 0)}] at (up1-east) 
+    {RightBandedBox={
+        name=dec1,
+        caption={Dec 1 (64ch)},
+        xlabel={{64, 64}},
+        zlabel=64,
+        fill=\ConvColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=28,
+        width={ 2.5 , 2.5 },
+        depth=28
+        }
+    };
+
+\path (dec1-south)  -- (dec1-north)  coordinate[pos=1.25] (enc1_dec1_top) ;
+\coordinate (enc1_top_dec1) at (enc1-northeast |- enc1_dec1_top) ;
+\draw [copyconnection]  (enc1-northeast)  
+-- node {\copymidarrow} (enc1_top_dec1)
+-- node {\copymidarrow} (enc1_dec1_top)
+-- node {\copymidarrow} (dec1-north);
+
+\pic[shift={(0, -3.8, 0)}] at (dec1-south) 
+    {Box={
+        name=ds1_head,
+        caption={DS Head 1 (64)},
+        xlabel={{5, }},
+        zlabel=64,
+        fill=\DsColor,
+        opacity=0.85,
+        height=15,
+        width=2.0,
+        depth=15
+        }
+    };
+\draw [dsconnection] (dec1-south) -- node {\dsmidarrow} (ds1_head-north);
+
+\pic[shift={(1.8, 0, 0)}] at (dec1-east) 
+    {Box={
+        name=up0,
+        caption={},
+        fill=\UnpoolColor,
+        opacity=0.85,
+        height=36,
+        width=1.2,
+        depth=36
+        }
+    };
+
+\draw [connection]  (dec1-east)    -- node {\midarrow} (up0-west);
+
+\pic[shift={(0, 0, 0)}] at (up0-east) 
+    {RightBandedBox={
+        name=dec0,
+        caption={Dec 0 (32ch)},
+        xlabel={{32, 32}},
+        zlabel=128,
+        fill=\ConvColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=36,
+        width={ 2.0 , 2.0 },
+        depth=36
+        }
+    };
+
+\path (dec0-south)  -- (dec0-north)  coordinate[pos=1.25] (enc0_dec0_top) ;
+\coordinate (enc0_top_dec0) at (enc0-northeast |- enc0_dec0_top) ;
+\draw [copyconnection]  (enc0-northeast)  
+-- node {\copymidarrow} (enc0_top_dec0)
+-- node {\copymidarrow} (enc0_dec0_top)
+-- node {\copymidarrow} (dec0-north);
+
+\pic[shift={(1.5, 0, 0)}] at (dec0-east) 
+    {Box={
+        name=output_head,
+        caption={Output Head (5ch)},
+        xlabel={{5, }},
+        zlabel=128,
+        fill=\SoftmaxColor,
+        opacity=0.85,
+        height=36,
+        width=2.0,
+        depth=36
+        }
+    };
+
+\draw [connection]  (dec0-east)    -- node {\midarrow} (output_head-west);
+
+\end{tikzpicture}
+\end{document}

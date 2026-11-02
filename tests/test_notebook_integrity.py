@@ -14,12 +14,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 NOTEBOOKS_DIR = REPO_ROOT / "notebooks" / "colab"
+LOW_LABEL_NOTEBOOKS_DIR = REPO_ROOT / "notebooks" / "low_label"
 
 
-def test_colab_notebooks_json_and_ast_integrity():
-    """Validates JSON structure and Python AST syntax of all Colab notebooks."""
-    notebook_files = sorted(NOTEBOOKS_DIR.glob("*.ipynb"))
-    assert len(notebook_files) >= 9, f"Expected at least 9 Colab notebooks, found {len(notebook_files)}"
+def _validate_notebooks_in_dir(directory: Path, min_count: int):
+    notebook_files = sorted(directory.glob("*.ipynb"))
+    assert len(notebook_files) >= min_count, f"Expected at least {min_count} notebooks in {directory}, found {len(notebook_files)}"
 
     for nb_path in notebook_files:
         with open(nb_path, "r", encoding="utf-8") as f:
@@ -55,6 +55,17 @@ def test_colab_notebooks_json_and_ast_integrity():
                         ) from e
 
 
+def test_colab_notebooks_json_and_ast_integrity():
+    """Validates JSON structure and Python AST syntax of all Colab downstream notebooks."""
+    _validate_notebooks_in_dir(NOTEBOOKS_DIR, min_count=9)
+
+
+def test_low_label_notebooks_json_and_ast_integrity():
+    """Validates JSON structure and Python AST syntax of all 8 low-label parallel notebooks."""
+    _validate_notebooks_in_dir(LOW_LABEL_NOTEBOOKS_DIR, min_count=8)
+
+
 if __name__ == "__main__":
     test_colab_notebooks_json_and_ast_integrity()
-    print("✓ All Colab notebooks passed JSON and Python AST integrity checks!")
+    test_low_label_notebooks_json_and_ast_integrity()
+    print("✓ All Colab and low-label notebooks passed JSON and Python AST integrity checks!")

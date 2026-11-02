@@ -78,7 +78,15 @@ def test_low_data_flags():
     assert a.decoder_type == "multiscale" and a.loss_type == "dice_bce" and a.tta is False
     assert a.deep_supervision is True
     assert a.min_steps == 0
-    sys.argv = ["x", "--decoder_type", "unetr_hybrid", "--loss_type", "tversky", "--tta", "--no_deep_supervision", "--min_steps", "500"]
+    assert a.epochs == 25
+    sys.argv = [
+        "x",
+        "--decoder_type", "unetr_hybrid",
+        "--loss_type", "tversky",
+        "--tta",
+        "--no_deep_supervision",
+        "--min_steps", "500",
+    ]
     a = m.parse_args()
     assert a.decoder_type == "unetr_hybrid" and a.loss_type == "tversky" and a.tta is True
     assert a.deep_supervision is False
@@ -267,6 +275,83 @@ def test_low_data_train_and_eval_dice_no_tta():
     )
     assert set(scores) == {"WT", "TC", "ET", "mean"}
     assert 0.0 <= scores["mean"] <= 1.0
+
+
+def test_supervised_trainer_flags_and_early_stopping(tmp_path, monkeypatch):
+    """Verifies that supervised_trainer correctly registers fractional / early stopping flags,
+    respects --ckpt_prefix override, and triggers early stopping when validation plateaus.
+    """
+    import argparse
+    import logging
+    from brats_jepa_3d.training.supervised_trainer import (
+        add_common_supervised_args,
+        run_supervised_training,
+    )
+
+    parser = argparse.ArgumentParser()
+    add_common_supervised_args(parser)
+    args = parser.parse_args([
+        "--fraction", "0.05",
+        "--min_steps", "250",
+        "--ckpt_prefix", "visreg_0_05",
+        "--patience", "2",
+        "--min_epochs", "2",
+        "--min_delta", "0.001",
+    ])
+    assert args.fraction == 0.05
+    assert args.min_steps == 250
+    assert args.ckpt_prefix == "visreg_0_05"
+    assert args.patience == 2
+    assert args.min_epochs == 2
+    assert args.min_delta == 0.001
+
+    device = torch.device("cpu")
+    model = BraTS3DUNet(
+        channels=(8, 16, 32, 64, 128), num_res_units=1, dropout=0.0, deep_supervision=False
+    )
+    args.smoke_test = False
+    args.epochs = 8
+    args.min_steps = 0
+    args.learning_rate = 1e-4
+    args.weight_decay = 1e-4
+    args.amp = False
+    args.loss_type = "dice_bce"
+    args.deep_supervision = False
+    args.save_freq = 0
+    args.resume = None
+
+    eval_calls = 0
+    simulated_scores = [0.60, 0.50, 0.45, 0.40]
+    import brats_jepa_3d.training.supervised_trainer as st
+
+    def mock_eval(*args, **kwargs):
+        nonlocal eval_calls
+        score = simulated_scores[min(eval_calls, len(simulated_scores) - 1)]
+        eval_calls += 1
+        return {"val_dice": score, "val_iou": score * 0.8}
+
+    monkeypatch.setattr(st, "evaluate_validation_split", mock_eval)
+
+    tracker = run_supervised_training(
+        model=model,
+        train_loader=_tiny_loader(),
+        val_loader=_tiny_loader(),
+        args=args,
+        device=device,
+        checkpoints_dir=tmp_path / "checkpoints",
+        logs_dir=tmp_path / "logs",
+        ckpt_prefix="test_model",
+        metrics_prefix="test_model",
+        logger=logging.getLogger("test"),
+    )
+    # Warmup is 8 // 5 = 1 -> effective_min_epochs = max(2, 2) = 2.
+    # Epoch 1: score=0.60 (best)
+    # Epoch 2: score=0.50 (patience 1)
+    # Epoch 3: score=0.45 (patience 2 >= 2 -> early stopping triggers!)
+    assert eval_calls == 3
+    # Verify ckpt_prefix override correctly named the checkpoint
+    assert (tmp_path / "checkpoints" / "visreg_0_05_best.pt").exists()
+    assert (tmp_path / "logs" / "visreg_0_05_metrics.json").exists()
 
 
 def test_ood_perturbation_tta():

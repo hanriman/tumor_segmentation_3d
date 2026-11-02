@@ -1,0 +1,389 @@
+
+\documentclass[border=15pt, multi, tikz]{standalone} 
+\usepackage{import}
+\subimport{/Users/hanriman/Documents/master/thesis/thesis_3d/tools/PlotNeuralNet/layers/}{init}
+\usetikzlibrary{positioning}
+\usetikzlibrary{3d}
+\usetikzlibrary{arrows.meta}
+\usetikzlibrary{decorations.pathreplacing}
+\usetikzlibrary{calc}
+
+% Authentic PlotNeuralNet Palette - Simple, Cohesive, Publication-Standard
+\def\ConvColor{rgb:yellow,5;red,2.5;white,5}           % Warm Cream/Ochre for Convolutions
+\def\ConvReluColor{rgb:yellow,5;red,5;white,5}         % Deeper Ochre for Conv+Norm+GELU band
+\def\PoolColor{rgb:red,1;black,0.3}                    % Dark Wine/Brick Red for Downsampling/Stem
+\def\UnpoolColor{rgb:blue,5;green,2.5;white,5}         % Soft Sky Blue for Transposed Convolutions
+\def\DcnvColor{rgb:blue,5;green,2.5;white,5}           % Soft Sky Blue alias
+\def\SoftmaxColor{rgb:magenta,5;black,7}               % Deep Plum/Purple for Output Heads
+\def\SumColor{rgb:blue,5;green,15}                     % Soft Sage/Teal for Fusion & Skips
+\def\ViTColor{rgb:yellow,6;red,2;white,3}              % Soft Amber for Vision Transformer Blocks
+\def\PredColor{rgb:red,4;yellow,4;white,3}             % Harmonized Coral/Sand for JEPA Predictor
+\def\ProjColor{rgb:green,4;blue,3;white,2}             % Harmonized Sage for Auxiliary Projector
+\def\DsColor{rgb:magenta,5;black,7}                    % Matching Plum for Deep Supervision Heads
+\def\StemColor{rgb:red,1;black,0.3}                    % Matching Wine Red for Native Stem
+\def\InputColor{rgb:cyan,1;white,9}                    % Very Pale Subtle Ice Blue for Input Volume
+\def\LossColor{rgb:red,4;black,2}                      % Subtle Crimson Red for Loss Terms
+\def\MaskColor{rgb:gray,4;black,4}                     % Dark Gray for Mask Tokens
+
+\newcommand{\copymidarrow}{\tikz \draw[-Stealth,line width=0.8mm,draw={rgb:blue,4;red,1;green,1;black,3}] (-0.3,0) -- ++(0.3,0);}
+\newcommand{\dsmidarrow}{\tikz \draw[-Stealth,line width=0.8mm,draw={rgb:magenta,5;black,7}] (-0.3,0) -- ++(0.3,0);}
+
+\begin{document}
+\begin{tikzpicture}
+\tikzstyle{connection}=[ultra thick,every node/.style={sloped,allow upside down},draw=\edgecolor,opacity=0.7]
+\tikzstyle{copyconnection}=[ultra thick,every node/.style={sloped,allow upside down},draw={rgb:blue,4;red,1;green,1;black,3},opacity=0.75]
+\tikzstyle{dsconnection}=[ultra thick,dashed,every node/.style={sloped,allow upside down},draw={rgb:magenta,5;black,7},opacity=0.85]
+
+\pic[shift={(0,0,0)}] at (0,0,0) 
+    {Box={
+        name=input_vol,
+        caption={Input MRI (4x128)},
+        xlabel={{4, }},
+        zlabel=128,
+        fill=\InputColor,
+        opacity=0.85,
+        height=36,
+        width=2.0,
+        depth=36
+        }
+    };
+
+\pic[shift={(2.0, 0, 0)}] at (input_vol-east) 
+    {Box={
+        name=patch_emb,
+        caption={PatchEmbed (8x8x8)},
+        xlabel={{384, }},
+        zlabel=16,
+        fill=\ConvColor,
+        opacity=0.85,
+        height=14,
+        width=8.0,
+        depth=14
+        }
+    };
+
+\draw [connection]  (input_vol-east)    -- node {\midarrow} (patch_emb-west);
+
+\pic[shift={(1.5, 0, 0)}] at (patch_emb-east) 
+    {RightBandedBox={
+        name=vit_l1,
+        caption={ViT L1},
+        xlabel={{384, }},
+        zlabel=16,
+        fill=\ViTColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=14,
+        width=8.0,
+        depth=14
+        }
+    };
+
+\draw [connection]  (patch_emb-east)    -- node {\midarrow} (vit_l1-west);
+
+\pic[shift={(1.0, 0, 0)}] at (vit_l1-east) 
+    {RightBandedBox={
+        name=vit_l2,
+        caption={ViT L2 (Tap)},
+        xlabel={{384, }},
+        zlabel=16,
+        fill=\ViTColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=14,
+        width=8.0,
+        depth=14
+        }
+    };
+
+\draw [connection]  (vit_l1-east)    -- node {\midarrow} (vit_l2-west);
+
+\pic[shift={(1.0, 0, 0)}] at (vit_l2-east) 
+    {RightBandedBox={
+        name=vit_l3,
+        caption={ViT L3},
+        xlabel={{384, }},
+        zlabel=16,
+        fill=\ViTColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=14,
+        width=8.0,
+        depth=14
+        }
+    };
+
+\draw [connection]  (vit_l2-east)    -- node {\midarrow} (vit_l3-west);
+
+\pic[shift={(1.0, 0, 0)}] at (vit_l3-east) 
+    {RightBandedBox={
+        name=vit_l4,
+        caption={ViT L4 (Tap)},
+        xlabel={{384, }},
+        zlabel=16,
+        fill=\ViTColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=14,
+        width=8.0,
+        depth=14
+        }
+    };
+
+\draw [connection]  (vit_l3-east)    -- node {\midarrow} (vit_l4-west);
+
+\pic[shift={(1.0, 0, 0)}] at (vit_l4-east) 
+    {RightBandedBox={
+        name=vit_l5,
+        caption={ViT L5},
+        xlabel={{384, }},
+        zlabel=16,
+        fill=\ViTColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=14,
+        width=8.0,
+        depth=14
+        }
+    };
+
+\draw [connection]  (vit_l4-east)    -- node {\midarrow} (vit_l5-west);
+
+\pic[shift={(1.0, 0, 0)}] at (vit_l5-east) 
+    {RightBandedBox={
+        name=vit_l6,
+        caption={ViT L6 (Tap)},
+        xlabel={{384, }},
+        zlabel=16,
+        fill=\ViTColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=14,
+        width=8.0,
+        depth=14
+        }
+    };
+
+\draw [connection]  (vit_l5-east)    -- node {\midarrow} (vit_l6-west);
+
+\pic[shift={(1.0, 0, 0)}] at (vit_l6-east) 
+    {RightBandedBox={
+        name=vit_l7,
+        caption={ViT L7},
+        xlabel={{384, }},
+        zlabel=16,
+        fill=\ViTColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=14,
+        width=8.0,
+        depth=14
+        }
+    };
+
+\draw [connection]  (vit_l6-east)    -- node {\midarrow} (vit_l7-west);
+
+\pic[shift={(1.0, 0, 0)}] at (vit_l7-east) 
+    {RightBandedBox={
+        name=vit_l8,
+        caption={ViT L8 (Bottleneck)},
+        xlabel={{384, }},
+        zlabel=16,
+        fill=\ViTColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=14,
+        width=8.0,
+        depth=14
+        }
+    };
+
+\draw [connection]  (vit_l7-east)    -- node {\midarrow} (vit_l8-west);
+
+\pic[shift={(0, -4.5, 0)}] at (input_vol-south) 
+    {Box={
+        name=stem_128,
+        caption={Stem 128 (16ch)},
+        xlabel={{16, }},
+        zlabel=128,
+        fill=\StemColor,
+        opacity=0.85,
+        height=24,
+        width=4.0,
+        depth=24
+        }
+    };
+
+\draw [connection]  (input_vol-east)    -- node {\midarrow} (stem_128-west);
+
+\pic[shift={(2.5, 0, 0)}] at (stem_128-east) 
+    {Box={
+        name=stem_64,
+        caption={Stem 64 (32ch)},
+        xlabel={{32, }},
+        zlabel=64,
+        fill=\StemColor,
+        opacity=0.85,
+        height=18,
+        width=4.0,
+        depth=18
+        }
+    };
+
+\draw [connection]  (stem_128-east)    -- node {\midarrow} (stem_64-west);
+
+\pic[shift={(2.0, 0, 0)}] at (vit_l8-east) 
+    {Box={
+        name=stage1_fuse,
+        caption={Stage 1 Fuse (192ch)},
+        xlabel={{192, }},
+        zlabel=16,
+        fill=\ConvColor,
+        opacity=0.85,
+        height=14,
+        width=6.0,
+        depth=14
+        }
+    };
+
+\draw [connection]  (vit_l8-east)    -- node {\midarrow} (stage1_fuse-west);
+
+\path (stage1_fuse-south)  -- (stage1_fuse-north)  coordinate[pos=1.25] (vit_l6_stage1_fuse_top) ;
+\coordinate (vit_l6_top_stage1_fuse) at (vit_l6-northeast |- vit_l6_stage1_fuse_top) ;
+\draw [copyconnection]  (vit_l6-northeast)  
+-- node {\copymidarrow} (vit_l6_top_stage1_fuse)
+-- node {\copymidarrow} (vit_l6_stage1_fuse_top)
+-- node {\copymidarrow} (stage1_fuse-north);
+
+\pic[shift={(1.8, 0, 0)}] at (stage1_fuse-east) 
+    {Box={
+        name=up2,
+        caption={},
+        fill=\UnpoolColor,
+        opacity=0.85,
+        height=20,
+        width=1.2,
+        depth=20
+        }
+    };
+
+\draw [connection]  (stage1_fuse-east)    -- node {\midarrow} (up2-west);
+
+\pic[shift={(0, 0, 0)}] at (up2-east) 
+    {RightBandedBox={
+        name=stage2_fuse,
+        caption={Stage 2 Fuse (96ch)},
+        xlabel={{96, 96}},
+        zlabel=32,
+        fill=\ConvColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=20,
+        width={ 2.5 , 2.5 },
+        depth=20
+        }
+    };
+
+\path (stage2_fuse-south)  -- (stage2_fuse-north)  coordinate[pos=1.35] (vit_l4_stage2_fuse_top) ;
+\coordinate (vit_l4_top_stage2_fuse) at (vit_l4-northeast |- vit_l4_stage2_fuse_top) ;
+\draw [copyconnection]  (vit_l4-northeast)  
+-- node {\copymidarrow} (vit_l4_top_stage2_fuse)
+-- node {\copymidarrow} (vit_l4_stage2_fuse_top)
+-- node {\copymidarrow} (stage2_fuse-north);
+
+\pic[shift={(1.8, 0, 0)}] at (stage2_fuse-east) 
+    {Box={
+        name=up3,
+        caption={},
+        fill=\UnpoolColor,
+        opacity=0.85,
+        height=28,
+        width=1.2,
+        depth=28
+        }
+    };
+
+\draw [connection]  (stage2_fuse-east)    -- node {\midarrow} (up3-west);
+
+\pic[shift={(0, 0, 0)}] at (up3-east) 
+    {RightBandedBox={
+        name=stage3_fuse,
+        caption={Stage 3 (+Stem 64)},
+        xlabel={{48, 48}},
+        zlabel=64,
+        fill=\ConvColor,
+        bandfill=\ConvReluColor,
+        opacity=0.85,
+        height=28,
+        width={ 2.0 , 2.0 },
+        depth=28
+        }
+    };
+
+\path (stage3_fuse-south)  -- (stage3_fuse-north)  coordinate[pos=1.45] (vit_l2_stage3_fuse_top) ;
+\coordinate (vit_l2_top_stage3_fuse) at (vit_l2-northeast |- vit_l2_stage3_fuse_top) ;
+\draw [copyconnection]  (vit_l2-northeast)  
+-- node {\copymidarrow} (vit_l2_top_stage3_fuse)
+-- node {\copymidarrow} (vit_l2_stage3_fuse_top)
+-- node {\copymidarrow} (stage3_fuse-north);
+
+\path (stage3_fuse-south)  -- (stage3_fuse-north)  coordinate[pos=1.6] (stem_64_stage3_fuse_top) ;
+\coordinate (stem_64_top_stage3_fuse) at (stem_64-northeast |- stem_64_stage3_fuse_top) ;
+\draw [copyconnection]  (stem_64-northeast)  
+-- node {\copymidarrow} (stem_64_top_stage3_fuse)
+-- node {\copymidarrow} (stem_64_stage3_fuse_top)
+-- node {\copymidarrow} (stage3_fuse-north);
+
+\pic[shift={(1.8, 0, 0)}] at (stage3_fuse-east) 
+    {Box={
+        name=up4,
+        caption={},
+        fill=\UnpoolColor,
+        opacity=0.85,
+        height=36,
+        width=1.2,
+        depth=36
+        }
+    };
+
+\draw [connection]  (stage3_fuse-east)    -- node {\midarrow} (up4-west);
+
+\pic[shift={(0, 0, 0)}] at (up4-east) 
+    {Box={
+        name=stage4_fuse,
+        caption={Stage 4 (+Stem 128)},
+        xlabel={{24, }},
+        zlabel=128,
+        fill=\ConvColor,
+        opacity=0.85,
+        height=36,
+        width=4.0,
+        depth=36
+        }
+    };
+
+\path (stage4_fuse-south)  -- (stage4_fuse-north)  coordinate[pos=1.75] (stem_128_stage4_fuse_top) ;
+\coordinate (stem_128_top_stage4_fuse) at (stem_128-northeast |- stem_128_stage4_fuse_top) ;
+\draw [copyconnection]  (stem_128-northeast)  
+-- node {\copymidarrow} (stem_128_top_stage4_fuse)
+-- node {\copymidarrow} (stem_128_stage4_fuse_top)
+-- node {\copymidarrow} (stage4_fuse-north);
+
+\pic[shift={(1.5, 0, 0)}] at (stage4_fuse-east) 
+    {Box={
+        name=final_head,
+        caption={Output Head (5ch)},
+        xlabel={{5, }},
+        zlabel=128,
+        fill=\SoftmaxColor,
+        opacity=0.85,
+        height=36,
+        width=2.0,
+        depth=36
+        }
+    };
+
+\draw [connection]  (stage4_fuse-east)    -- node {\midarrow} (final_head-west);
+
+\end{tikzpicture}
+\end{document}

@@ -67,6 +67,9 @@ def main():
     assert built is not None
     model, _ = built
 
+    ckpt_prefix = getattr(args, "ckpt_prefix", None) or "unet_3d"
+    metrics_prefix = getattr(args, "ckpt_prefix", None) or "unet_3d"
+
     run_supervised_training(
         model=model,
         train_loader=train_loader,
@@ -75,8 +78,8 @@ def main():
         device=device,
         checkpoints_dir=checkpoints_dir,
         logs_dir=logs_dir,
-        ckpt_prefix="unet_3d",
-        metrics_prefix="unet_3d",
+        ckpt_prefix=ckpt_prefix,
+        metrics_prefix=metrics_prefix,
         logger=logger,
         require_resume_exists=True,
     )

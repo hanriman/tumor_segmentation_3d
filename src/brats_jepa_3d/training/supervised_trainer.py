@@ -12,6 +12,7 @@ the AMP/GradScaler training & checkpointing loop shared across:
 import argparse
 import gc
 import logging
+import math
 from pathlib import Path
 
 import numpy as np
@@ -121,6 +122,42 @@ def add_common_supervised_args(parser: argparse.ArgumentParser) -> argparse.Argu
         default=5,
         help="Number of output segmentation classes (default: 5 for BraTS multi-region)",
     )
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=0,
+        help="Early stopping patience: epochs without validation Dice improvement before halting (default: 0, disabled)",
+    )
+    parser.add_argument(
+        "--min_delta",
+        type=float,
+        default=1e-4,
+        help="Minimum absolute improvement in validation Dice to reset patience counter (default: 1e-4)",
+    )
+    parser.add_argument(
+        "--min_epochs",
+        type=int,
+        default=5,
+        help="Minimum number of epochs before early stopping can trigger (default: 5)",
+    )
+    parser.add_argument(
+        "--fraction",
+        type=float,
+        default=1.0,
+        help="Fraction of training split to use (e.g. 0.01 for 1% labels; default: 1.0)",
+    )
+    parser.add_argument(
+        "--min_steps",
+        type=int,
+        default=0,
+        help="Minimum gradient update steps floor (default: 0)",
+    )
+    parser.add_argument(
+        "--ckpt_prefix",
+        type=str,
+        default=None,
+        help="Explicit prefix for saved checkpoint filenames (e.g. visreg_multiscale_0_01)",
+    )
     return parser
 
 
@@ -164,7 +201,13 @@ def build_train_val_loaders(
 
     resolved_data_dir = Path(args.data_dir).resolve() if getattr(args, "data_dir", None) else None
     try:
-        train_dataset = BraTS3DDataset(split="train", augmentations=aug_tf, data_dir=resolved_data_dir)
+        train_dataset = BraTS3DDataset(
+            split="train",
+            fraction=getattr(args, "fraction", 1.0),
+            seed=getattr(args, "seed", 42),
+            augmentations=aug_tf,
+            data_dir=resolved_data_dir,
+        )
         val_dataset = BraTS3DDataset(split="val", augmentations=None, data_dir=resolved_data_dir)
     except FileNotFoundError:
         if not args.smoke_test:
@@ -294,8 +337,18 @@ def run_supervised_training(
         lr=args.learning_rate,
         weight_decay=args.weight_decay,
     )
+    ckpt_prefix = getattr(args, "ckpt_prefix", None) or ckpt_prefix
+    metrics_prefix = getattr(args, "ckpt_prefix", None) or metrics_prefix
+
     epochs = 1 if args.smoke_test else args.epochs
-    scheduler = build_warmup_cosine_scheduler(optimizer, epochs=epochs, eta_min=1e-6)
+    min_steps = getattr(args, "min_steps", 0)
+    steps_per_epoch = len(train_loader)
+    if min_steps > 0 and steps_per_epoch > 0 and not args.smoke_test:
+        effective_epochs = max(epochs, math.ceil(min_steps / steps_per_epoch))
+    else:
+        effective_epochs = epochs
+
+    scheduler = build_warmup_cosine_scheduler(optimizer, epochs=effective_epochs, eta_min=1e-6)
     scaler = torch.amp.GradScaler(
         device="cuda" if device.type == "cuda" else "cpu",
         enabled=args.amp and device.type == "cuda",
@@ -304,6 +357,12 @@ def run_supervised_training(
     start_epoch = 1
     best_val_dice = -1.0
     tracker = MetricTracker()
+    patience = getattr(args, "patience", 0)
+    min_delta = getattr(args, "min_delta", 1e-4)
+    min_epochs = getattr(args, "min_epochs", 5)
+    warmup_epochs = max(1, min(5, effective_epochs // 5)) if effective_epochs > 1 else 0
+    effective_min_epochs = max(min_epochs, warmup_epochs + 1)
+    patience_counter = 0
 
     if getattr(args, "resume", None):
         resume_path = Path(args.resume)
@@ -336,12 +395,12 @@ def run_supervised_training(
                 f"Resumed successfully at epoch {start_epoch} with best_val_dice: {best_val_dice:.4f}"
             )
 
-    for epoch in range(start_epoch, epochs + 1):
+    for epoch in range(start_epoch, effective_epochs + 1):
         model.train()
         train_loss = 0.0
         num_batches = 0
 
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}")
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{effective_epochs}")
         for batch_idx, batch in enumerate(pbar):
             images = batch["image"].to(device)
             masks = batch["mask"].to(device)
@@ -377,7 +436,7 @@ def run_supervised_training(
         avg_train_loss = train_loss / max(1, num_batches)
         current_lr = scheduler.get_last_lr()[0]
         logger.info(
-            f"Epoch {epoch}/{epochs} - LR: {current_lr:.6f} | Train Loss: {avg_train_loss:.4f} | "
+            f"Epoch {epoch}/{effective_epochs} - LR: {current_lr:.6f} | Train Loss: {avg_train_loss:.4f} | "
             f"Val Dice: {val_metrics['val_dice']:.4f} | Val IoU: {val_metrics['val_iou']:.4f}"
         )
 
@@ -401,6 +460,11 @@ def run_supervised_training(
         }
 
         # 1. Best model checkpoint
+        if val_metrics["val_dice"] > (best_val_dice + min_delta):
+            patience_counter = 0
+        else:
+            patience_counter += 1
+
         if val_metrics["val_dice"] > best_val_dice or args.smoke_test:
             best_val_dice = val_metrics["val_dice"]
             state_dict_to_save["best_val_dice"] = best_val_dice
@@ -409,10 +473,19 @@ def run_supervised_training(
             torch.save(state_dict_to_save, best_ckpt_path)
             logger.info(f"New best model saved: {best_ckpt_path} (Val Dice: {best_val_dice:.4f})")
 
+        # Early stopping check (warmup-guarded)
+        if patience > 0 and epoch >= effective_min_epochs and patience_counter >= patience:
+            logger.info(
+                f"Early stopping triggered at epoch {epoch}: "
+                f"Val Dice did not improve for {patience_counter} consecutive epochs "
+                f"(Best Val Dice: {best_val_dice:.4f}). Halting training."
+            )
+            break
+
         # 2. Periodic or final epoch checkpoint (guarantees final epoch is preserved without duplicate latest.pt)
         save_freq = getattr(args, "save_freq", 0)
         is_periodic = save_freq > 0 and epoch % save_freq == 0 and not args.smoke_test
-        is_final_epoch = epoch == epochs or args.smoke_test
+        is_final_epoch = epoch == effective_epochs or args.smoke_test
         if is_periodic or is_final_epoch:
             periodic_ckpt_path = checkpoints_dir / f"{ckpt_prefix}_epoch_{epoch}.pt"
             periodic_ckpt_path.parent.mkdir(parents=True, exist_ok=True)

@@ -122,8 +122,9 @@ def main():
     model, _ = built
 
     ckpt_suffix = "_scratch" if args.from_scratch else ("_frozen" if args.freeze_encoder else "")
-    ckpt_prefix = f"{args.model_type}_{args.decoder_type}{ckpt_suffix}"
-    metrics_prefix = f"{args.model_type}_{args.decoder_type}{log_suffix}_downstream"
+    default_ckpt_prefix = f"{args.model_type}_{args.decoder_type}{ckpt_suffix}"
+    ckpt_prefix = getattr(args, "ckpt_prefix", None) or default_ckpt_prefix
+    metrics_prefix = getattr(args, "ckpt_prefix", None) or f"{args.model_type}_{args.decoder_type}{log_suffix}_downstream"
 
     run_supervised_training(
         model=model,

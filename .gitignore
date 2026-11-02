@@ -45,3 +45,6 @@ texput.log
 
 # Reference Literature Sources
 paper/references/
+
+# Third-party visualization tools
+tools/PlotNeuralNet/

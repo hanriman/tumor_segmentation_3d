@@ -25,6 +25,29 @@ Numbered sequentially for structured execution. Each notebook streams directly t
 | **`08_colab_frozen_visreg_multiscale_3d.ipynb`** | VisReg + Multi-Scale FPN Frozen Encoder Probe | $8^3$ | 4 | `thesis/downstream/frozen_visreg_multiscale/` | `frozen_visreg_multiscale_outputs.zip` |
 | **`09_colab_frozen_visreg_unetr_3d.ipynb`** | VisReg + Hybrid UNETR Frozen Encoder Probe | $8^3$ | 4 | `thesis/downstream/frozen_visreg_unetr/` | `frozen_visreg_unetr_outputs.zip` |
 
+---
+
+## 2. Low-Label Cell-by-Cell Early Stopping Suite (`notebooks/low_label/`)
+
+A dedicated suite of 8 parallel Colab notebooks tailored specifically for rapid label-efficiency benchmarking across fractions $\{1\%, 5\%, 10\%, 25\%, 50\%\}$ using a modular **cell-by-cell execution pipeline** with dynamic **warmup-guarded Early Stopping** (`patience=5`, `min_epochs=5`, `max_epochs=50`, `min_steps=250`, `save_freq=10`):
+
+- **Strict Monotonic Nested Sampling**: Every percentage strictly adds up cumulative patient volumes ($\mathcal{S}_{1\%} \subset \mathcal{S}_{5\%} \subset \mathcal{S}_{10\%} \subset \mathcal{S}_{25\%} \subset \mathcal{S}_{50\%}$) via deterministic quantile ranking (`seed=42`).
+- **Dedicated Train Cell**: Executes per percentage, saving periodic checkpoints every 10 epochs and the best model (`_best.pt`) directly to Google Drive.
+- **Dedicated Held-Out Evaluation Cell**: Immediately evaluates `_best.pt` on all 242 held-out test volumes, printing WT, TC, ET Dice, IoU, and HD95 live in the output.
+- **Table 2 Compilation & Plotting**: Aggregates all fractions into canonical Table 2 format and renders the efficiency curve (`low_data_curve.png`).
+- **1-Click Packaging**: Archives all checkpoints and logs to `<model>_low_data.zip` on Google Drive.
+
+| Low-Label Notebook | Benchmark Architecture | Decoder | Status | Checkpoint Dependency | Target Drive Folder |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`01_low_label_visreg_multiscale.ipynb`** | 3D VisReg JEPA | Multi-Scale FPN | Fine-Tuned | `visreg_jepa_3d_best.pt` | `thesis/low_label/visreg_multiscale/` |
+| **`02_low_label_visreg_unetr.ipynb`** | 3D VisReg JEPA | Hybrid UNETR | Fine-Tuned | `visreg_jepa_3d_best.pt` | `thesis/low_label/visreg_unetr/` |
+| **`03_low_label_nnunet.ipynb`** | 3D nnU-Net DynUNet | Deep Supervision | Supervised | None (Trains from init) | `thesis/low_label/nnunet/` |
+| **`04_low_label_unet.ipynb`** | 3D Residual U-Net | Residual Conv3D | Supervised | None (Trains from init) | `thesis/low_label/unet/` |
+| **`05_low_label_scratch_multiscale.ipynb`** | 3D ViT Baseline | Multi-Scale FPN | Scratch | None (Zero pre-training) | `thesis/low_label/scratch_multiscale/` |
+| **`06_low_label_scratch_unetr.ipynb`** | 3D ViT Baseline | Hybrid UNETR | Scratch | None (Zero pre-training) | `thesis/low_label/scratch_unetr/` |
+| **`07_low_label_frozen_visreg_multiscale.ipynb`** | 3D VisReg JEPA | Multi-Scale FPN | Frozen Probe | `visreg_jepa_3d_best.pt` | `thesis/low_label/frozen_visreg_multiscale/` |
+| **`08_low_label_frozen_visreg_unetr.ipynb`** | 3D VisReg JEPA | Hybrid UNETR | Frozen Probe | `visreg_jepa_3d_best.pt` | `thesis/low_label/frozen_visreg_unetr/` |
+
 > **Parallel Execution & Zero Compute Waste**: Because each Colab notebook writes exclusively to its own directory, you can launch multiple Colab instances simultaneously in parallel without any file collision. Notebooks `02`, `03`, `08`, and `09` automatically consume `visreg_jepa_3d_best.pt` directly from `thesis/pretrain model/`; pre-training (`01`) never needs to be re-run once the checkpoint exists. You only need to run the specific downstream notebooks you wish to evaluate.
 
 ---
