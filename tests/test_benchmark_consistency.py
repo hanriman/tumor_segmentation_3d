@@ -99,10 +99,13 @@ def test_docs03_matches_benchmark():
     assert DOCS_PATH.exists(), f"Docs file not found at {DOCS_PATH}"
     docs_content = DOCS_PATH.read_text(encoding="utf-8")
 
-    # Assert that old conflated numbers (6.88% scratch, 5.12% scratch, +25.21pp) are absent
+    # Assert that old conflated numbers (6.88% scratch, 5.12% scratch, +25.21pp, or stale v1 76.58%/79.50%) are absent
     assert "6.88% *(Collapse)*" not in docs_content, "Old 6.88% scratch score still present in docs/03"
     assert "5.12% *(Collapse)*" not in docs_content, "Old 5.12% scratch score still present in docs/03"
     assert "+25.21" not in docs_content, "Old +25.21pp delta claim still present in docs/03"
+    assert "76.58%" not in docs_content, "Stale v1 76.58% score still present in docs/03"
+    assert "79.50%" not in docs_content, "Stale v1 79.50% score still present in docs/03"
+    assert "72.31%" not in docs_content, "Stale v1 72.31% score still present in docs/03"
 
     # Assert correct canonical numbers are present
     assert "54.45%" in docs_content, "VisReg UNETR 5% score 54.45% missing from docs/03"
@@ -250,6 +253,10 @@ def test_paper_hyperparameters_consistent():
     assert r"\max(2, \lfloor 0.25 \times \text{vol} \rfloor)" in tex_content, "Paper §3.2 should report 0.25 tissue occupancy threshold"
     assert "merely $75$ total gradient updates" in tex_content, "Paper §5.2 should report 75 gradient updates at 1% (batch_size=4)"
     assert r"Scratch FPN: $\text{erank}=46.38$ [$12.1\%$]" in tex_content, "Paper should report Scratch FPN Effective Rank 46.38 (12.1%)"
+    assert "$M = 1024$" in tex_content, "Paper §3.2 should report M = 1024 SWD projections"
+    assert "$M = 256$" not in tex_content, "Paper should not report stale M = 256 SWD projections"
+    assert r"\lambda_{\text{shape}} = 4.0" in tex_content, "Paper §3.2 should report lambda_shape = 4.0 (swd_weight=4.0)"
+    assert "v2 composite region protocol with 4-fold TTA" in tex_content, "Table 1 caption should report 4-fold TTA"
 
 
 

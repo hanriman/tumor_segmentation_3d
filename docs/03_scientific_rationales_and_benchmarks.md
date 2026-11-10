@@ -76,16 +76,16 @@ Early in training, unconverged models (e.g., 3D UNet without deep supervision, v
 | **Primary Scientific Question** | *"Does self-supervised pre-training provide an optimal initialization that outperforms randomly initialized baselines?"* | *"How much spatial and anatomical structure is directly decodable strictly from frozen transformer latents?"* | *"Can frozen self-supervised latents synergize with lightweight trainable high-resolution convolutional stems?"* |
 | **Raw Image Bypass** | No (decodes hierarchical ViT features). | **No** (decodes strictly from frozen ViT features; zero image bypass). | **Yes** (trainable CNN stems operate at $128^3$ and $64^3$ directly on raw MRI). |
 | **Fairness vs. CNN Baselines** | **Fair & Symmetric**: Both 3D nnU-Net and JEPA allow full parameter capacity to adapt to tumor margins. | **Diagnostic**: Isolates frozen representation spatial decodability without encoder adaptation. | **Architectural Synergy**: Combines frozen global transformer context with local CNN edge priors. |
-| **Empirical Score (Mean Dice)** | **$76.58\%$** (FPN) / **$75.61\%$** (UNETR) | **$72.31\%$** | **$75.13\%$** |
+| **Empirical Score (Mean Dice)** | **$69.66\%$** (UNETR) / **$67.05\%$** (FPN) | **$63.18\%$** | **$69.34\%$** |
 
 ### 4.2 Research Protocol
 The primary benchmark adopts **full fine-tuning** to establish fair parity with fully supervised CNNs. Frozen probing is reserved as a mechanistic ablation to assess out-of-the-box spatial decodability and architectural synergy.
 
 ### 4.3 Empirical Probing & Latent Geometry Results
 Empirical evaluation on the held-out test split ($N=242$ volumes) demonstrates the quality of frozen representations:
-- **Pure Latent Probe (Frozen VisReg FPN)**: Achieves **$72.31\%$ Mean Dice** ($84.79\%$ WT, $71.97\%$ TC, $60.18\%$ ET). Because the FPN decoder possesses no raw-image bypass, this confirms that 3D VisReg JEPA discovers spatially decodable anatomical representations without encoder adaptation.
-- **Frozen Hybrid Probe (Frozen VisReg UNETR)**: Achieves **$75.13\%$ Mean Dice** ($85.72\%$ WT, $77.09\%$ TC, $62.59\%$ ET), within $0.48\text{pp}$ of full fine-tuning ($75.61\%$) and exceeding fully trained from-scratch ViT-UNETR ($74.80\%$). The trainable CNN stem restores sub-voxel edge gradients while leveraging frozen JEPA representations for tissue context.
-- **Latent Manifold Geometry & Tissue Token Filtering**: Analysis of tissue-filtered encoder representations confirms the absence of dimensional collapse ($S^2 \to 1.0$) across all evaluated ViT backbones: pre-trained frozen VisReg JEPA achieves an Effective Spectral Rank ($S^2$) of $45.08$ ($11.7\%$ of $D_{\text{enc}}=384$), fine-tuned VisReg FPN achieves $44.24$ ($11.5\%$), fine-tuned VisReg UNETR achieves $41.37$ ($10.8\%$), and supervised from-scratch controls achieve $46.20$ ($12.0\%$, FPN) and $27.51$ ($7.2\%$, UNETR). Filtering out background air tokens (which constitute $\approx 60\%$ of brain bounding boxes) isolates the intrinsic dimensionality of biological tissue representations from static coordinate grid embeddings.
+- **Pure Latent Probe (Frozen VisReg FPN)**: Achieves **$63.18\%$ Mean Dice** ($80.39\%$ WT, $54.84\%$ TC, $54.31\%$ ET). Because the FPN decoder possesses no raw-image bypass, this confirms that 3D VisReg JEPA discovers spatially decodable anatomical representations without encoder adaptation.
+- **Frozen Hybrid Probe (Frozen VisReg UNETR)**: Achieves **$69.34\%$ Mean Dice** ($83.29\%$ WT, $62.38\%$ TC, $62.35\%$ ET), within $0.32\text{pp}$ of full fine-tuning ($69.66\%$) and exceeding fully trained from-scratch ViT-UNETR ($68.19\%$, $+1.15\text{pp}$). The trainable CNN stem restores sub-voxel edge gradients while leveraging frozen JEPA representations for tissue context.
+- **Latent Manifold Geometry & Tissue Token Filtering**: Analysis of tissue-filtered encoder representations confirms the absence of dimensional collapse ($S^2 \to 1.0$) across pre-trained and fine-tuned ViT backbones: pre-trained frozen VisReg JEPA achieves an Effective Spectral Rank ($S^2$) of $67.71$ ($17.6\%$ of $D_{\text{enc}}=384$), fine-tuned VisReg FPN achieves $81.78$ ($21.3\%$), fine-tuned VisReg UNETR achieves $69.13$ ($18.0\%$), whereas supervised from-scratch controls achieve $46.38$ ($12.1\%$, FPN) and suffer dimensional collapse down to $30.95$ ($8.1\%$, UNETR). Filtering out background air tokens (which constitute $\approx 60\%$ of brain bounding boxes) isolates the intrinsic dimensionality of biological tissue representations from static coordinate grid embeddings.
 
 ---
 
@@ -128,24 +128,24 @@ $$\Delta_{\text{Arch}} = \text{Score}(\text{ViT-Scratch}) - \text{Score}(\text{S
 $$\Delta_{\text{JEPA}} = \text{Score}(\text{VisReg JEPA}) - \text{Score}(\text{ViT-Scratch})$$
 
 ### Empirical Decomposition:
-1. **Full-Data Regime ($100\%$ Labels / 1,144 Volumes)**:
-   - *UNETR Hybrid*: $\Delta_{\text{Arch}} = 74.80\% - 79.50\% = \mathbf{-4.70\text{pp}}$ (architectural inductive bias penalty vs. deeply supervised 3D nnU-Net); $\Delta_{\text{JEPA}} = 75.61\% - 74.80\% = \mathbf{+0.81\text{pp}}$.
-   - *MultiScale FPN*: $\Delta_{\text{Arch}} = 75.15\% - 79.50\% = \mathbf{-4.35\text{pp}}$; $\Delta_{\text{JEPA}} = 76.58\% - 75.15\% = \mathbf{+1.43\text{pp}}$.
+1. **Full-Data Regime ($100\%$ Labels / 1,144 Volumes, 60-Epoch Master Benchmark)**:
+   - *UNETR Hybrid*: $\Delta_{\text{Arch}} = 68.19\% - 70.86\% = \mathbf{-2.67\text{pp}}$ (architectural inductive bias penalty vs. deeply supervised 3D nnU-Net); $\Delta_{\text{JEPA}} = 69.66\% - 68.19\% = \mathbf{+1.47\text{pp}}$.
+   - *MultiScale FPN*: $\Delta_{\text{Arch}} = 66.13\% - 70.86\% = \mathbf{-4.73\text{pp}}$; $\Delta_{\text{JEPA}} = 67.05\% - 66.13\% = \mathbf{+0.92\text{pp}}$.
 2. **Moderate Scarcity Regime ($5\%$ Labels / 58 Volumes)**:
-   - *UNETR Hybrid*: $\Delta_{\text{Arch}} = 56.57\% - 59.86\% = \mathbf{-3.29\text{pp}}$ (vs. nnU-Net) or $\mathbf{+3.92\text{pp}}$ (vs. ResUNet $52.65\%$);
-     $\Delta_{\text{JEPA}} = 63.65\% - 56.57\% = \mathbf{+7.08\text{pp}}$.
-     **Net Effect**: $\Delta_{\text{Total}} = -3.29\text{pp} + 7.08\text{pp} = \mathbf{+3.79\text{pp}}$ over deeply supervised 3D nnU-Net, achieving top benchmark performance of $\mathbf{63.65\%}$.
-   - *MultiScale FPN*: $\Delta_{\text{Arch}} = 50.87\% - 59.86\% = \mathbf{-8.99\text{pp}}$;
-     $\Delta_{\text{JEPA}} = 61.45\% - 50.87\% = \mathbf{+10.58\text{pp}}$.
-     **Net Effect**: $\Delta_{\text{Total}} = -8.99\text{pp} + 10.58\text{pp} = \mathbf{+1.59\text{pp}}$ over deeply supervised 3D nnU-Net.
+   - *UNETR Hybrid*: $\Delta_{\text{Arch}} = 49.79\% - 47.06\% = \mathbf{+2.73\text{pp}}$ (vs. nnU-Net) or $\mathbf{+5.87\text{pp}}$ (vs. ResUNet $43.92\%$);
+     $\Delta_{\text{JEPA}} = 54.45\% - 49.79\% = \mathbf{+4.66\text{pp}}$.
+     **Net Effect**: $\Delta_{\text{Total}} = +2.73\text{pp} + 4.66\text{pp} = \mathbf{+7.39\text{pp}}$ over deeply supervised 3D nnU-Net, achieving top benchmark performance of $\mathbf{54.45\%}$.
+   - *MultiScale FPN*: $\Delta_{\text{Arch}} = 41.53\% - 47.06\% = \mathbf{-5.53\text{pp}}$;
+     $\Delta_{\text{JEPA}} = 51.67\% - 41.53\% = \mathbf{+10.14\text{pp}}$.
+     **Net Effect**: $\Delta_{\text{Total}} = -5.53\text{pp} + 10.14\text{pp} = \mathbf{+4.61\text{pp}}$ over deeply supervised 3D nnU-Net.
 3. **Moderate Scarcity Regime ($10\%$ Labels / 115 Volumes)**:
-   - *UNETR Hybrid*: $\Delta_{\text{Arch}} = 61.40\% - 65.03\% = \mathbf{-3.63\text{pp}}$;
-     $\Delta_{\text{JEPA}} = 66.16\% - 61.40\% = \mathbf{+4.76\text{pp}}$.
-     **Net Effect**: $\Delta_{\text{Total}} = -3.63\text{pp} + 4.76\text{pp} = \mathbf{+1.13\text{pp}}$ over deeply supervised 3D nnU-Net, securing #1 rank overall ($\mathbf{66.16\%}$).
+   - *UNETR Hybrid*: $\Delta_{\text{Arch}} = 52.60\% - 50.66\% = \mathbf{+1.94\text{pp}}$;
+     $\Delta_{\text{JEPA}} = 57.68\% - 52.60\% = \mathbf{+5.08\text{pp}}$.
+     **Net Effect**: $\Delta_{\text{Total}} = +1.94\text{pp} + 5.08\text{pp} = \mathbf{+7.02\text{pp}}$ over deeply supervised 3D nnU-Net, securing #1 rank overall ($\mathbf{57.68\%}$).
 4. **Extreme Scarcity Regime ($1\%$ Labels / 12 Volumes)**:
-   - *MultiScale FPN*: $\Delta_{\text{Arch}} = 16.70\% - 28.05\% = \mathbf{-11.35\text{pp}}$ (vs. deeply supervised nnU-Net) or $\mathbf{+10.84\text{pp}}$ (vs. ResUNet $5.86\%$);
-     $\Delta_{\text{JEPA}} = 22.45\% - 16.70\% = \mathbf{+5.75\text{pp}}$ (outperforming ResUNet by $\mathbf{+16.59\text{pp}}$).
-   - *UNETR Hybrid*: High-capacity convolutional skip projections require gradient guidance; without deep supervision, both scratch ($3.17\%$) and pre-trained ($2.91\%$) UNETR experience severe background convergence difficulty at 12 volumes.
+   - *Frozen UNETR Hybrid*: Achieves $\mathbf{34.32\%}$ mean Dice ($62.42\%$ WT), outperforming deeply supervised 3D nnU-Net ($20.69\%$, $46.34\%$ WT) by $\mathbf{+13.63\text{pp}}$ and 3D Residual UNet ($4.29\%$) by $\mathbf{+30.03\text{pp}}$, while fine-tuned VisReg UNETR ($32.69\%$) and Scratch UNETR ($32.70\%$) achieve comparable macro-average Dice driven by early convolutional stem convergence on Whole Tumor ($55.09\%\text{--}55.94\%$ WT).
+   - *MultiScale FPN*: $\Delta_{\text{Arch}} = 23.11\% - 20.69\% = \mathbf{+2.42\text{pp}}$ (vs. deeply supervised nnU-Net) or $\mathbf{+18.82\text{pp}}$ (vs. ResUNet $4.29\%$);
+     $\Delta_{\text{JEPA}} = 25.99\% - 23.11\% = \mathbf{+2.88\text{pp}}$ ($48.51\%$ WT vs. $39.43\%$ WT for Scratch FPN).
 
 ---
 
@@ -155,10 +155,10 @@ $$\Delta_{\text{JEPA}} = \text{Score}(\text{VisReg JEPA}) - \text{Score}(\text{V
 To benchmark out-of-distribution clinical robustness across scanner vendors and field strengths, models were subjected to biophysical corruptions without retraining:
 1. **3D Rician Scanner Noise ($\sigma = 0.08$)**: Simulates thermal MR magnitude reconstruction noise via quadrature RF coil channels:
    $$M = \sqrt{(X_+ + \eta_1)^2 + \eta_2^2}, \quad \eta_1, \eta_2 \sim \mathcal{N}(0, \sigma^2)$$
-   - *Result*: 3D nnU-Net maintains $77.99\%$ mean Dice, while 3D VisReg JEPA (FPN) achieves $74.93\%$ (a minor $-0.52\text{pp}$ drop vs. clean baseline $75.45\%$), confirming high noise resistance.
+   - *Result*: 3D nnU-Net maintains $69.25\%$ mean Dice (vs. $69.04\%$ clean baseline), VisReg UNETR achieves $68.35\%$ (a minor $-0.21\text{pp}$ drop vs. clean baseline $68.56\%$), and VisReg JEPA (FPN) maintains $66.40\%$ ($0.00\text{pp}$ drop), confirming high noise resistance.
 2. **$B_1$ Radiofrequency Bias Field Inhomogeneity (Strength $0.35$)**: Multiplies tissue voxels by a smooth 2nd-order 3D spatial polynomial:
    $$X_{\text{corrupt}} = X \cdot \left(1 + \text{strength} \cdot \sum_{i+j+k \le 2} c_{ijk} x^i y^j z^k\right)$$
-   - *Result*: 3D nnU-Net retains $78.25\%$, while VisReg JEPA (FPN) achieves $74.73\%$, proving robust tolerance to low-frequency RF coil drift.
+   - *Result*: 3D nnU-Net retains $68.62\%$, VisReg UNETR achieves $67.95\%$, and VisReg JEPA (FPN) achieves $66.47\%$, proving robust tolerance to low-frequency RF coil drift.
 
 ### 7.2 Missing Modality Triage & Modality Dropout Alignment
 When evaluating emergency incomplete MRI acquisitions (e.g., FLAIR-only or T1c-only), an important interaction arises between channel dropout normalization and architecture:

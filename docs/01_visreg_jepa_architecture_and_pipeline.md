@@ -98,15 +98,15 @@ When pre-training completes, the JEPA predictor is **discarded**. The pre-traine
    - Scale-adaptive hierarchical decoding:
      - On canonical $16^3$ token grids (patch size $8^3$): Stage 1 operates at native token resolution ($16^3 \to 16^3$), followed by 3 progressive $2\times$ upsampling stages ($16^3 \to 32^3 \to 64^3 \to 128^3$), preserving output dimensionality.
      - On lightweight $8^3$ token grids (patch size $16^3$): 4 progressive $2\times$ transposed 3D convolution stages with `GroupNorm` ($8^3 \to 16^3 \to 32^3 \to 64^3 \to 128^3$).
-   - Total model size: **~29.43M** parameters.
-   - **Probing Role**: In frozen evaluation (`freeze_encoder=True`), FPN operates solely on extracted ViT latents without raw-image bypass, serving as the **pure latent probe** ($72.31\%$ Dice).
+   - Total model size: **~24.81M** parameters.
+   - **Probing Role**: In frozen evaluation (`freeze_encoder=True`), FPN operates solely on extracted ViT latents without raw-image bypass, serving as the **pure latent probe** ($63.18\%$ Dice).
 
 2. **Hybrid 3D UNETR (`unetr_hybrid`) — Frozen Hybrid Probe**:
    - Dual-stream architecture: pre-trained ViT lateral representations fused with a lightweight native convolutional stem (`stem_128` at $128^3$, `stem_64` at $64^3$) operating directly on the raw 4-channel input volume.
    - High-frequency edge maps from the stem are concatenated into decoder stages 3 and 4 ($64^3$ and $128^3$).
    - Dynamically supports both $8^3$ and $16^3$ token grids, maintaining channel and spatial compatibility.
    - Total model size: **~29.52M** parameters.
-   - **Probing Role**: In frozen evaluation (`freeze_encoder=True`), UNETR combines frozen transformer latents with trainable high-resolution convolutional stems, serving as a **hybrid probe** ($75.13\%$ Dice) that demonstrates architectural complementarity.
+   - **Probing Role**: In frozen evaluation (`freeze_encoder=True`), UNETR combines frozen transformer latents with trainable high-resolution convolutional stems, serving as a **hybrid probe** ($69.34\%$ Dice) that demonstrates architectural complementarity.
 
 ---
 

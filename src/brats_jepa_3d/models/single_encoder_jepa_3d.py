@@ -19,11 +19,12 @@ class SingleEncoderJEPA3D(nn.Module):
        A single online encoder evaluates visible context patches with gradients, while
        evaluating the target representations on the full volume with stopped gradients and
        temporarily disabled dropout (`dropout_disabled`).
-    2. Direct Encoder-Space Statistical Regularization (Balestriero & LeCun, 2025, Eq. 9; Wu et al., 2026, Alg. 1):
-       Anti-collapse statistical regularization (VISReg or SigReg) is applied directly to the
-       tissue-filtered context encoder representations in R^{embed_dim} without an intermediate
-       nonlinear projector MLP, preventing shortcut solutions where the projector satisfies
-       Gaussianity while the encoder backbone collapses onto a low-rank subspace.
+    2. Auxiliary Projector / Encoder-Space Statistical Regularization (Balestriero & LeCun, 2025, Eq. 9; Wu et al., 2026, Alg. 1):
+       By default (`use_projector=True`), tissue-filtered context encoder representations in R^{embed_dim}
+       are mapped through a 2-layer Projector MLP (embed_dim -> projector_hidden_dim -> proj_dim, e.g. 384 -> 1024 -> 128)
+       before applying anti-collapse statistical regularization (VISReg or SigReg), isolating the primary
+       encoder representation space from isotropic geometric constraints before downstream transfer.
+       When `use_projector=False`, regularization is applied directly to the encoder representations in R^{embed_dim}.
     3. Multi-Target Optimized Predictor:
        Context projection and positional gather are executed once per forward pass via
        `predictor.forward_multi_targets`, avoiding redundant matrix multiplications across target cuboids.

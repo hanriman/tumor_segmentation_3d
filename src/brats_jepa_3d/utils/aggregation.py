@@ -321,6 +321,27 @@ def _latex_escape(val: Any) -> str:
     )
 
 
+def _select_summary_columns(df: pd.DataFrame, index_col: str) -> pd.DataFrame:
+    """Filters out per-region breakdown columns ([WT], [TC], [ET], and duplicate [mean] aliases) for concise LaTeX tables."""
+    region_suffixes = (" [WT]", " [TC]", " [ET]")
+    keep_cols = []
+    for c in df.columns:
+        if c == index_col:
+            keep_cols.append(c)
+            continue
+        if c.endswith(region_suffixes):
+            continue
+        if c.endswith(" [mean]"):
+            base_col = c[: -len(" [mean]")]
+            if base_col in df.columns or (
+                base_col == "3D ViT-FPN (From Scratch) [unetr_hybrid]"
+                and "3D ViT-UNETR (From Scratch)" in df.columns
+            ):
+                continue
+        keep_cols.append(c)
+    return df[keep_cols] if len(keep_cols) > 1 else df
+
+
 def export_latex_tables(
     master_df: pd.DataFrame | None = None,
     low_data_df: pd.DataFrame | None = None,
@@ -358,38 +379,42 @@ def export_latex_tables(
         sections.append("\\end{table}\n")
 
     if low_data_df is not None and not low_data_df.empty:
+        low_summary_df = _select_summary_columns(low_data_df, "Fraction")
         sections.append("% --- Table 2: Low-Data Label Efficiency Benchmark ---")
         sections.append("\\begin{table}[t]")
         sections.append("\\centering")
         sections.append("\\caption{\\textbf{Low-Data Volumetric Label Efficiency across Annotation Budgets (Test Dice \\%).}}")
         sections.append("\\label{tab:low_data}")
-        col_spec = "l" + "c" * (len(low_data_df.columns) - 1)
+        sections.append("\\resizebox{\\textwidth}{!}{%")
+        col_spec = "l" + "c" * (len(low_summary_df.columns) - 1)
         sections.append(f"\\begin{{tabular}}{{{col_spec}}}")
         sections.append("\\toprule")
-        header_cols = [f"\\textbf{{{_latex_escape(c)}}}" for c in low_data_df.columns]
+        header_cols = [f"\\textbf{{{_latex_escape(c)}}}" for c in low_summary_df.columns]
         sections.append(" & ".join(header_cols) + " \\\\")
         sections.append("\\midrule")
-        for _, row in low_data_df.iterrows():
+        for _, row in low_summary_df.iterrows():
             row_str = " & ".join(_latex_escape(val) for val in row.values) + " \\\\"
             sections.append(row_str)
         sections.append("\\bottomrule")
-        sections.append("\\end{tabular}")
+        sections.append("\\end{tabular}%")
+        sections.append("}")
         sections.append("\\end{table}\n")
 
     if ood_df is not None and not ood_df.empty:
+        ood_summary_df = _select_summary_columns(ood_df, "Regime")
         sections.append("% --- Table 3: Out-of-Distribution and Missing Modality Robustness ---")
         sections.append("\\begin{table}[t]")
         sections.append("\\centering")
         sections.append("\\caption{\\textbf{Out-of-Distribution Scanner Shift and Missing Modality Robustness (Test Dice \\%).}}")
         sections.append("\\label{tab:ood_robustness}")
         sections.append("\\resizebox{\\textwidth}{!}{%")
-        col_spec = "l" + "c" * (len(ood_df.columns) - 1)
+        col_spec = "l" + "c" * (len(ood_summary_df.columns) - 1)
         sections.append(f"\\begin{{tabular}}{{{col_spec}}}")
         sections.append("\\toprule")
-        header_cols = [f"\\textbf{{{_latex_escape(c)}}}" for c in ood_df.columns]
+        header_cols = [f"\\textbf{{{_latex_escape(c)}}}" for c in ood_summary_df.columns]
         sections.append(" & ".join(header_cols) + " \\\\")
         sections.append("\\midrule")
-        for _, row in ood_df.iterrows():
+        for _, row in ood_summary_df.iterrows():
             row_str = " & ".join(_latex_escape(val) for val in row.values) + " \\\\"
             sections.append(row_str)
         sections.append("\\bottomrule")

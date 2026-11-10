@@ -97,7 +97,7 @@ $$\text{Total Target Tokens (16³ Grid)} = 216 + 144 + 144 + 144 + 64 + 64 = \ma
 #### The Statistical Formulation
 VisReg and SigReg regularizers compute empirical covariance and Sliced-Wasserstein distances over token representations. Unlike 2D image models where token counts per batch are modest, full 3D volumetric token grids generate dense token populations in every mini-batch:
 - **Token Density**: At $B=8$ or $B=16$ with patch size $16^3$ ($512$ tokens per volume) or $8^3$ ($4,096$ tokens per volume), each mini-batch provides $N = B \times N_{\text{tokens}} = \mathbf{4,096\text{ to }65,536\text{ tokens}}$.
-- **Statistical Fidelity**: Computing regularizers directly across active mini-batch tokens avoids historical cross-batch queue staleness (where tokens from past optimization steps no longer reflect current encoder weights) while delivering high statistical power for Sliced-Wasserstein projections ($K=64$) and empirical covariance estimation.
+- **Statistical Fidelity**: Computing regularizers directly across active mini-batch tokens avoids historical cross-batch queue staleness (where tokens from past optimization steps no longer reflect current encoder weights) while delivering high statistical power for Sliced-Wasserstein projections ($M=1024$) and empirical covariance estimation.
 - **Autograd Purity**: 100% of tokens in the regularizer receive active, non-stale gradients backpropagated directly into the context encoder backbone.
 
 ```
@@ -116,14 +116,14 @@ Current Batch Tokens [B * N_tokens, D] (requires_grad=True)
 
 ---
 
-### 3.3 Upgrade C: Regularizer Warmup & Constant Full-Strength Schedule
+### 3.3 Upgrade C: Regularizer Warmup & Cosine Annealing Schedule
 
 #### Algorithmic Formulation
 Implemented in [`scripts/train_jepa_3d.py`](file:///Users/hanriman/Documents/master/thesis/thesis_3d/scripts/train_jepa_3d.py):
-$$\lambda_{\text{reg}}(t) = \begin{cases} \frac{t}{T_{\text{warmup}}}, & t < T_{\text{warmup}} \\ 1.0, & t \ge T_{\text{warmup}} \end{cases}$$
+$$\lambda_{\text{reg}}(t) = \begin{cases} 1.0, & t \le T_{\text{warmup}} \\ \lambda_{\text{min}} + \frac{1}{2}(1.0 - \lambda_{\text{min}})\left(1 + \cos\left(\frac{t - T_{\text{warmup}}}{T_{\text{max}} - T_{\text{warmup}}} \pi\right)\right), & t > T_{\text{warmup}} \end{cases}$$
 
-- **Linear Warmup ($t < 30$ epochs)**: Linearly ramps regularizer weight from $0 \to 1.0$ while early attention representations form.
-- **Constant Full-Strength Phase ($t \ge 30$ epochs, `reg_min_scale=1.0`)**: Following VISReg (Wu, Balestriero, & Levine, 2026) and LeJEPA (Balestriero & LeCun, 2025), $\lambda_{\text{reg}}$ remains at $1.0$ throughout training to prevent late-stage variance decay across all 384 encoder dimensions.
+- **Full-Strength Warmup ($t \le 30$ epochs, `reg_warmup_epochs=30`)**: Holds $\lambda_{\text{reg}} = 1.0$ while early attention representations form, preventing initial dimensional collapse.
+- **Cosine Annealing Relaxation ($t > 30$ epochs, `reg_min_scale=0.10`)**: Smoothly relaxes $\lambda_{\text{reg}}(t)$ from $1.0$ down to $\lambda_{\text{min}} = 0.10$ across epochs 31–200 so that target prediction loss ($\mathcal{L}_{\text{pred}}$) can organize semantic anatomical clusters while maintaining sufficient anti-collapse pressure.
 
 ---
 

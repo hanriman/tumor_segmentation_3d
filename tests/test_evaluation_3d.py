@@ -435,6 +435,7 @@ def mock_outputs_structure(tmp_path: Path):
 
     (metrics / "visreg_jepa_metrics.json").write_text('{"dice": 0.901}')
     (metrics / "master_3d_benchmark.csv").write_text("model,dice\nvisreg,0.901")
+    (metrics / "3d_visreg_jepa_unetr_per_case.csv").write_text("patient_id,Dice_Mean\nBraTS-0001,0.85")
     (metrics / "nnunet_metrics.json").write_text('{"dice": 0.885}')
 
     (logs / "train_visreg_jepa.log").write_text("Epoch 1... Epoch 50 done.")
@@ -469,6 +470,18 @@ def test_export_artifacts_model_prefix_filtering(tmp_path: Path, mock_outputs_st
         assert "checkpoints/visreg_jepa_best.pt" in names
         assert "metrics/visreg_jepa_metrics.json" in names
         assert "metrics/master_3d_benchmark.csv" in names
+        assert "metrics/3d_visreg_jepa_unetr_per_case.csv" in names
+
+    # Also verify that model_prefix="unetr_hybrid" still bundles *_per_case.csv
+    export_dir_unetr = tmp_path / "export_unetr_hybrid"
+    export_artifacts(
+        export_name="unetr_hybrid_outputs",
+        export_dir=export_dir_unetr,
+        model_prefix="unetr_hybrid",
+        source_dir=mock_outputs_structure,
+        verbose=False,
+    )
+    assert (export_dir_unetr / "metrics" / "3d_visreg_jepa_unetr_per_case.csv").exists()
 
 
 def test_export_artifacts_all_models(tmp_path: Path, mock_outputs_structure: Path):

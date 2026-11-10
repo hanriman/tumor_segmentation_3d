@@ -149,9 +149,9 @@ def export_artifacts(
                 if prefix_filter:
                     name_lower = item.name.lower()
                     matches_prefix = prefix_filter in name_lower
-                    # Allow general summary tables/logs to be bundled with any model export
+                    # Allow general summary tables/logs and per-case CSVs to be bundled with any model export
                     is_summary = sub in ("metrics", "logs") and any(
-                        s in name_lower for s in ["master", "summary", "benchmark", "report"]
+                        s in name_lower for s in ["master", "summary", "benchmark", "report", "per_case"]
                     )
                     include_file = matches_prefix or is_summary
 
