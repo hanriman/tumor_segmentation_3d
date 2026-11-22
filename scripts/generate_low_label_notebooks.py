@@ -4,7 +4,7 @@ scripts/generate_low_label_notebooks.py
 ------------------------------------
 Generates the 8 parallel, cell-by-cell Google Colab notebooks for low-label benchmarking:
 - Monotonic nested sampling (1%, 5%, 10%, 25%, 50%) adding up cumulative patient volumes.
-- Early stopping with patience=5, min_epochs=5, max_epochs=100.
+- Early stopping with patience=10, min_epochs=30, max_epochs=100.
 - Underscore naming convention (frac_0_01, <model>_0_01_best.pt, <model>_0_01_epoch_10.pt).
 - Dedicated Train Cell and Held-Out Test Eval Cell per percentage.
 - Aggregation into Table 2 format and curve plotting.
@@ -205,7 +205,7 @@ def build_notebook(m: dict) -> dict:
 
 This notebook evaluates label efficiency across **1%, 5%, 10%, 25%, and 50%** annotation budgets using a **modular cell-by-cell execution pipeline**:
 1. **Strict Monotonic Nested Sampling**: Every percentage strictly adds up cumulative patient scans ($\\mathcal{{S}}_{{1\\%}} \\subset \\mathcal{{S}}_{{5\\%}} \\subset \\mathcal{{S}}_{{10\\%}} \\subset \\mathcal{{S}}_{{25\\%}} \\subset \\mathcal{{S}}_{{50\\%}}$) via deterministic quantile ranking (`seed=42`).
-2. **Dedicated Train Cell**: Trains with Early Stopping (`patience=5`, `min_epochs=5`, `max_epochs=100`, `save_freq=10`), saving checkpoints every 10 epochs and the best model (`_best.pt`) to Google Drive.
+2. **Dedicated Train Cell**: Trains with Early Stopping (`patience=10`, `min_epochs=30`, `max_epochs=100`, `save_freq=10`), saving checkpoints every 10 epochs and the best model (`_best.pt`) to Google Drive.
 3. **Dedicated Held-Out Evaluation Cell**: Evaluates on all 242 held-out test volumes, printing WT, TC, ET Dice and HD95 live in the output.
 4. **Summary & Curve Plot**: Aggregates all fractions into master Table 2 format and plots the efficiency curve.
 5. **1-Click Package**: Archives all fraction outputs to Google Drive.
@@ -237,7 +237,7 @@ print(f'Google Drive mounted: {Path("/content/drive/MyDrive").exists()}')"""
     ))
 
     # Cell 2: Configuration
-    cells.append(make_md_cell("## 2. Standardized Configuration & Early Stopping Parameters\nDefines deterministic SEED=42 (guaranteeing nested cumulative subsets), patience=5, and Drive destinations."))
+    cells.append(make_md_cell("## 2. Standardized Configuration & Early Stopping Parameters\nDefines deterministic SEED=42 (guaranteeing nested cumulative subsets), patience=10, min_epochs=30, and Drive destinations."))
     cells.append(make_code_cell(
 f"""# =========================================================================
 # ⚙️ Standardized Low-Label Experiment Configuration
@@ -247,8 +247,8 @@ NUM_WORKERS = 4          # Parallel DataLoader workers
 BATCH_SIZE = {m['batch_size']}          # Volumetric downstream batch size
 PATCH_SIZE = 8           # 8³ voxel patch (4,096 tokens)
 MAX_EPOCHS = 100         # Maximum training epochs ceiling
-PATIENCE = 5             # Early stopping patience (epochs without validation improvement)
-MIN_EPOCHS = 5           # Burn-in epochs before early stopping can trigger
+PATIENCE = 10            # Early stopping patience (epochs without validation improvement)
+MIN_EPOCHS = 30          # Burn-in epochs before early stopping can trigger
 MIN_STEPS = 250          # Step floor to prevent undertraining on tiny fractions
 SAVE_FREQ = 10           # Periodic checkpoint cadence (saves _epoch_10.pt, _epoch_20.pt, etc.)
 
@@ -441,7 +441,7 @@ f"""## {sec_num}. Annotation Budget: {f_pct} ({n_vols} Patient Volumes)
 **Monotonic Subset**: {desc}
 
 ### {sec_num}.1 Train Cell ({f_pct})
-Trains with Early Stopping (`patience=5`, `min_epochs=5`, `max_epochs=100`, `save_freq=10`).
+Trains with Early Stopping (`patience=10`, `min_epochs=30`, `max_epochs=100`, `save_freq=10`).
 Periodic checkpoints are saved every 10 epochs, and the best model is saved to `{m['model_alias']}_{f_suffix}_best.pt`."""
         ))
 
