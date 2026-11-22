@@ -4,7 +4,7 @@ scripts/generate_low_label_notebooks.py
 ------------------------------------
 Generates the 8 parallel, cell-by-cell Google Colab notebooks for low-label benchmarking:
 - Monotonic nested sampling (1%, 5%, 10%, 25%, 50%) adding up cumulative patient volumes.
-- Early stopping with patience=5, min_epochs=5, max_epochs=50.
+- Early stopping with patience=5, min_epochs=5, max_epochs=100.
 - Underscore naming convention (frac_0_01, <model>_0_01_best.pt, <model>_0_01_epoch_10.pt).
 - Dedicated Train Cell and Held-Out Test Eval Cell per percentage.
 - Aggregation into Table 2 format and curve plotting.
@@ -77,7 +77,7 @@ MODELS = [
         "model_alias": "nnunet_3d",
         "target_drive_folder": "thesis/low_label/nnunet",
         "zip_name": "nnunet_low_data.zip",
-        "batch_size": 2,
+        "batch_size": 4,
         "needs_pretrain": False,
         "train_script": "scripts/train_nnunet_3d.py",
         "train_flags": '--deep_supervision',
@@ -205,7 +205,7 @@ def build_notebook(m: dict) -> dict:
 
 This notebook evaluates label efficiency across **1%, 5%, 10%, 25%, and 50%** annotation budgets using a **modular cell-by-cell execution pipeline**:
 1. **Strict Monotonic Nested Sampling**: Every percentage strictly adds up cumulative patient scans ($\\mathcal{{S}}_{{1\\%}} \\subset \\mathcal{{S}}_{{5\\%}} \\subset \\mathcal{{S}}_{{10\\%}} \\subset \\mathcal{{S}}_{{25\\%}} \\subset \\mathcal{{S}}_{{50\\%}}$) via deterministic quantile ranking (`seed=42`).
-2. **Dedicated Train Cell**: Trains with Early Stopping (`patience=5`, `min_epochs=5`, `max_epochs=50`, `save_freq=10`), saving checkpoints every 10 epochs and the best model (`_best.pt`) to Google Drive.
+2. **Dedicated Train Cell**: Trains with Early Stopping (`patience=5`, `min_epochs=5`, `max_epochs=100`, `save_freq=10`), saving checkpoints every 10 epochs and the best model (`_best.pt`) to Google Drive.
 3. **Dedicated Held-Out Evaluation Cell**: Evaluates on all 242 held-out test volumes, printing WT, TC, ET Dice and HD95 live in the output.
 4. **Summary & Curve Plot**: Aggregates all fractions into master Table 2 format and plots the efficiency curve.
 5. **1-Click Package**: Archives all fraction outputs to Google Drive.
@@ -246,7 +246,7 @@ SEED = 42                 # Deterministic seed guaranteeing monotonic nested sam
 NUM_WORKERS = 4          # Parallel DataLoader workers
 BATCH_SIZE = {m['batch_size']}          # Volumetric downstream batch size
 PATCH_SIZE = 8           # 8³ voxel patch (4,096 tokens)
-MAX_EPOCHS = 50          # Maximum training epochs ceiling
+MAX_EPOCHS = 100         # Maximum training epochs ceiling
 PATIENCE = 5             # Early stopping patience (epochs without validation improvement)
 MIN_EPOCHS = 5           # Burn-in epochs before early stopping can trigger
 MIN_STEPS = 250          # Step floor to prevent undertraining on tiny fractions
@@ -275,66 +275,123 @@ print(f'MONAI: {monai.__version__} | NiBabel: {nib.__version__}')"""
     ))
 
     # Cell 4: Codebase Setup
-    cells.append(make_md_cell("## 4. Codebase Setup & Editable Installation\nDiscovers repository and performs editable install."))
+    cells.append(make_md_cell("## 4. Codebase Setup & Editable Installation\nClones repository from GitHub (`https://github.com/hanriman/tumor_segmentation_3d.git`) and performs editable install."))
     cells.append(make_code_cell(
 """import os
 import shutil
 import sys
 from pathlib import Path
 
-code_candidates = [
-    Path('/content/thesis_3d'),
-    Path('/content/drive/MyDrive/thesis/thesis_3d'),
-    Path.cwd(),
-]
-repo_root = None
-for cand in code_candidates:
-    if (cand / 'src' / 'brats_jepa_3d').exists():
-        repo_root = cand
-        break
+REPO_URL = "https://github.com/hanriman/tumor_segmentation_3d.git"
+work_dir = Path("/content/tumor_segmentation_3d")
 
-if repo_root is None or not (repo_root / 'src' / 'brats_jepa_3d').exists():
-    drive_repo = Path('/content/drive/MyDrive/thesis/thesis_3d')
-    if drive_repo.exists():
-        repo_root = Path('/content/thesis_3d')
-        if not repo_root.exists():
-            shutil.copytree(drive_repo, repo_root)
-    else:
-        repo_root = Path('/content/thesis_3d')
+# Clean up incomplete clone if needed
+if work_dir.exists() and not (work_dir / "src" / "brats_jepa_3d").exists():
+    print("⚠️ Cleaning up incomplete repository clone...")
+    shutil.rmtree(work_dir)
 
-os.chdir(str(repo_root))
-print(f'Working Directory: {Path.cwd()}')
-!pip install -q -e ."""
+if not (work_dir / "src" / "brats_jepa_3d").exists():
+    print(f"Cloning codebase from: {REPO_URL} ...")
+    !git clone {REPO_URL} {work_dir}
+else:
+    print(f"Updating codebase to latest main from: {REPO_URL} ...")
+    !git -C {work_dir} pull origin main
+
+os.chdir(str(work_dir))
+%cd {work_dir}
+
+src_dir = work_dir / "src"
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
+
+!pip install -q -e .
+
+print(f"\\n✓ Working directory set to: {Path.cwd()}")
+!git log -1 --oneline 2>/dev/null || echo "(Git commit info unavailable)"
+
+!git -C {work_dir} checkout main
+!git -C {work_dir} pull --ff-only origin main
+assert (Path(work_dir) / "src/brats_jepa_3d/metrics/regions.py").exists(), \\
+    "Branch checkout failed: regions.py missing — aborting."
+print("On branch main:", end=" ")
+!git -C {work_dir} log -1 --oneline"""
     ))
 
     # Cell 5: Dataset Discovery
-    cells.append(make_md_cell("## 5. Dataset Ingestion & Discovery\nResolves preprocessed BraTS 3D volumes on fast local NVMe SSD or Google Drive."))
+    cells.append(make_md_cell("## 5. Dataset Ingestion & Discovery\nExtracts the preprocessed BraTS 3D dataset from Google Drive (`My Drive/thesis/data/`) into Colab fast local NVMe storage (`/content/data/`) and validates data integrity."))
     cells.append(make_code_cell(
 """import os
 from pathlib import Path
+import pandas as pd
+import torch
+from brats_jepa_3d.config import get_dataset_dir, get_metadata_path
+from brats_jepa_3d.data import BraTS3DDataset
 
-data_candidates = [
-    Path('/content/data/brats_gli_3d_v2'),
-    Path('/content/data'),
-    Path('/content/drive/MyDrive/thesis/data/brats_gli_3d_v2'),
-    Path('/content/drive/MyDrive/thesis/data'),
-    Path('data/processed/brats_gli_3d_v2'),
+# 1. Unpack dataset from Google Drive (fast local NVMe extraction)
+thesis_dir = Path("/content/drive/MyDrive/thesis")
+data_drive_dir = thesis_dir / "data"
+target_data_dir = Path("/content/data/brats_gli_3d_v2")
+
+if not (target_data_dir / "metadata.csv").exists() and not Path("/content/data/metadata.csv").exists():
+    zip_candidates = []
+    if data_drive_dir.exists():
+        zip_candidates = sorted(data_drive_dir.glob("*.zip"))
+    if not zip_candidates:
+        zip_candidates = sorted(Path("/content/drive/MyDrive").glob("*brats*.zip"))
+
+    if zip_candidates:
+        dataset_zip = zip_candidates[0]
+        print(f"✓ Found dataset archive on Google Drive: {dataset_zip}")
+        print("  Unpacking to /content/data/ (fast local NVMe SSD) ...")
+        !mkdir -p /content/data
+        !unzip -q "{dataset_zip}" -d /content/data/
+        print("✓ Dataset extracted successfully.")
+    elif data_drive_dir.exists() and any((data_drive_dir / sub / "metadata.csv").exists() for sub in ["brats_gli_3d_v2", "."]):
+        print(f"✓ Found pre-extracted dataset in {data_drive_dir}.")
+        source_folder = data_drive_dir / "brats_gli_3d_v2" if (data_drive_dir / "brats_gli_3d_v2").exists() else data_drive_dir
+        !mkdir -p /content/data
+        !cp -rs "{source_folder}" /content/data/brats_gli_3d_v2
+    else:
+        raise FileNotFoundError(
+            f"❌ No dataset .zip found in {data_drive_dir}!\\n"
+            f"Please upload your dataset .zip (containing 'brats_gli_3d_v2') into 'My Drive/thesis/data/'."
+        )
+
+# 2. Discover dataset directory (points to brats_gli_3d_v2)
+candidates = [
+    Path("/content/data/brats_gli_3d_v2"),
+    Path("/content/data"),
+    Path("/content/brats_gli_3d_v2"),
 ]
-data_dir = None
-for cand in data_candidates:
-    if cand.exists() and (cand / 'metadata.csv').exists():
-        data_dir = cand
-        break
-
+data_dir = next((c for c in candidates if (c / "metadata.csv").exists()), None)
 if data_dir is None:
-    drive_zip = Path('/content/drive/MyDrive/thesis/data/brats_gli_3d_v2.zip')
-    if drive_zip.exists():
-        print(f'Unpacking {drive_zip} to /content/data/ ...')
-        !unzip -q -n "{drive_zip}" -d /content/data/
-        data_dir = Path('/content/data/brats_gli_3d_v2')
+    matches = list(Path("/content/data").glob("**/metadata.csv"))
+    if matches:
+        data_dir = matches[0].parent
+    else:
+        raise FileNotFoundError("❌ metadata.csv not found after extraction in /content/data/!")
 
-print(f'Dataset directory resolved: {data_dir}')
-assert data_dir is not None and data_dir.exists(), 'Dataset not found!'"""
+meta_path = data_dir / "metadata.csv"
+os.environ["BRATS3D_DATA_DIR"] = str(data_dir)
+
+print(f"\\n=== DATASET DISCOVERY ===")
+print(f"Dataset Directory: {data_dir} (Exists: {data_dir.exists()})")
+print(f"Metadata CSV:      {meta_path} (Exists: {meta_path.exists()})")
+
+if meta_path.exists():
+    df = pd.read_csv(meta_path)
+    print(f"\\n✓ Loaded Metadata: {len(df)} total records across splits:")
+    print(df["split"].value_counts().to_string())
+    assert "has_et" in df.columns, "metadata.csv lacks has_et — attach v2 integer mask dataset."
+
+    ds = BraTS3DDataset(data_dir=data_dir, split="train")
+    sample = ds[0]
+    print("\\n✓ Sample Tensor Verification:")
+    print(f"  Image Shape: {sample['image'].shape} (dtype: {sample['image'].dtype})")
+    print(f"  Mask Shape:  {sample['mask'].shape} (dtype: {sample['mask'].dtype})")
+    print(f"  Tumor Voxels: {int((sample['mask'] > 0).sum()):,}")
+else:
+    raise FileNotFoundError(f"Metadata CSV not found at {meta_path}. Please check your dataset zip.")"""
     ))
 
     # Cell 6: Pretrain intake (if applicable)
@@ -384,7 +441,7 @@ f"""## {sec_num}. Annotation Budget: {f_pct} ({n_vols} Patient Volumes)
 **Monotonic Subset**: {desc}
 
 ### {sec_num}.1 Train Cell ({f_pct})
-Trains with Early Stopping (`patience=5`, `min_epochs=5`, `max_epochs=50`, `save_freq=10`).
+Trains with Early Stopping (`patience=5`, `min_epochs=5`, `max_epochs=100`, `save_freq=10`).
 Periodic checkpoints are saved every 10 epochs, and the best model is saved to `{m['model_alias']}_{f_suffix}_best.pt`."""
         ))
 
