@@ -220,6 +220,11 @@ import time
 from pathlib import Path
 import torch
 
+NOTEBOOK_START_TIME = time.time()
+NOTEBOOK_START_STR = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+FRACTION_TRAIN_TIMES = {}
+print(f'⏱️ Session Start Time: {NOTEBOOK_START_STR}')
+
 print('=' * 60)
 print('GPU Accelerator Status:')
 if torch.cuda.is_available():
@@ -447,9 +452,15 @@ Periodic checkpoints are saved every 10 epochs, and the best model is saved to `
 
         train_cmd = (
 f"""# Train Cell ({f_pct} labels, {n_vols} volumes)
+import datetime
+import time
+
 frac_dir = output_dir / 'frac_{f_suffix}'
 frac_dir.mkdir(parents=True, exist_ok=True)
+train_start_time = time.time()
+train_start_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 print(f'Training {f_pct} in: {{frac_dir}}')
+print(f'⏱️ [{f_pct} Train] Start Time: {{train_start_str}}')
 
 !python {m['train_script']} \\
     --data_dir "{{data_dir}}" \\
@@ -465,7 +476,19 @@ print(f'Training {f_pct} in: {{frac_dir}}')
     --batch_size {{BATCH_SIZE}} \\
     --num_workers {{NUM_WORKERS}} \\
     {m['train_flags']} \\
-    --amp"""
+    --amp
+
+train_end_time = time.time()
+train_end_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+train_elapsed_sec = train_end_time - train_start_time
+t_hours, t_rem = divmod(train_elapsed_sec, 3600)
+t_minutes, t_seconds = divmod(t_rem, 60)
+globals().setdefault('FRACTION_TRAIN_TIMES', {{}})['{f_pct}'] = train_elapsed_sec
+print('=' * 50)
+print(f'⏱️ [{f_pct} Train] Start Time:   {{train_start_str}}')
+print(f'⏱️ [{f_pct} Train] End Time:     {{train_end_str}}')
+print(f'⏱️ [{f_pct} Train] Elapsed Time: {{int(t_hours)}}h {{int(t_minutes)}}m {{t_seconds:.2f}}s ({{train_elapsed_sec:.2f}}s)')
+print('=' * 50)"""
         )
         cells.append(make_code_cell(train_cmd))
 
@@ -608,7 +631,9 @@ f"""## {sec_num}. 1-Click Package & Export to Google Drive
 Archives all fraction checkpoints, logs, and evaluation reports into a standalone zip file in Google Drive."""
     ))
     cells.append(make_code_cell(
-f"""import shutil
+f"""import datetime
+import shutil
+import time
 from pathlib import Path
 
 zip_path = Path('/content/drive/MyDrive/thesis/low_label') / ZIP_NAME
@@ -616,7 +641,28 @@ zip_path.parent.mkdir(parents=True, exist_ok=True)
 
 print(f'Creating archive {{zip_path}} from {{output_dir}} ...')
 shutil.make_archive(str(zip_path.with_suffix('')), 'zip', output_dir)
-print(f'✓ Export completed: {{zip_path}} ({{zip_path.stat().st_size / 1e6:.2f}} MB)')"""
+print(f'✓ Export completed: {{zip_path}} ({{zip_path.stat().st_size / 1e6:.2f}} MB)')
+
+NOTEBOOK_END_TIME = time.time()
+NOTEBOOK_END_STR = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+start_time = globals().get('NOTEBOOK_START_TIME', NOTEBOOK_END_TIME)
+total_elapsed_sec = NOTEBOOK_END_TIME - start_time
+hours, rem = divmod(total_elapsed_sec, 3600)
+minutes, seconds = divmod(rem, 60)
+
+frac_times = globals().get('FRACTION_TRAIN_TIMES', {{}})
+print('\\n' + '=' * 50)
+if frac_times:
+    print('⏱️ Per-Fraction Training Times:')
+    for pct, sec in frac_times.items():
+        fh, frem = divmod(sec, 3600)
+        fm, fs = divmod(frem, 60)
+        print(f'  - {{pct:>3}}: {{int(fh)}}h {{int(fm)}}m {{fs:.2f}}s ({{sec:.2f}}s)')
+    print('-' * 50)
+print(f"⏱️ Session Start Time:   {{globals().get('NOTEBOOK_START_STR', 'N/A')}}")
+print(f'⏱️ Session End Time:     {{NOTEBOOK_END_STR}}')
+print(f'⏱️ Total Execution Time: {{int(hours)}}h {{int(minutes)}}m {{seconds:.2f}}s ({{total_elapsed_sec:.2f}}s)')
+print('=' * 50)"""
     ))
 
     nb = {
